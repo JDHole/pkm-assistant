@@ -997,12 +997,45 @@ zachowuje dotychczasowy odczyt. Osobna tożsamość hosta kopii izoluje cache sk
 
 `ensureActiveSessionEpoch(path, isCurrent)` odczytuje istniejącą sesję pod kolejką
 `_enqueuePathWrite`, sprawdza katalog właściciela, metadane agenta i rewizję tożsamości.
-Brakująca lub niepoprawna epoka dostaje 32 znaki hex; zapis przechodzi `_writeSessionFile`
-i pełny odczyt kontrolny. Nie tworzy brakującej sesji. `isCurrent` pilnuje zakładki/okna;
-RAM dostaje epokę dopiero po trwałym zapisie i ponownym potwierdzeniu właściciela.
-Przywrócenie sesji samo nie migruje pliku; robi to `send_message` przed freezeTurnOwner.
-Testy F1 w `AgentMemory.test.ts`, `chat/turnOwner.test.ts` oraz scenariusz harnessu 74
-sprawdzają kolejkę z appendem, przełączenie zakładki i ponowny odczyt nową instancją.
+Brakująca lub niepoprawna epoka dostaje 32 znaki hex. Nie tworzy brakującej sesji.
+Przywrócenie sesji samo nie migruje pliku; robi to `send_message` przed `freezeTurnOwner`,
+gdy agent ma dostępne `delegate` lub `sub_agent`. Bez tych narzędzi zwykła rozmowa tylko
+dopisuje zdarzenia. Starszy host bez rejestru narzędzi zachowuje ostrożny wariant migracji.
+
+**Gotcha rundy 2: pełny zapis nad jedyną kopią historii jest niedozwolony, nawet z readback.**
+Cała operacja (odczyt aktualnego źródła, przygotowanie, zastąpienie i ewentualne odtworzenie)
+pozostaje wewnątrz tej samej kolejki co append/save/archive. Dla instancji korzystających
+z tego samego adaptera kolejka i stan pisarza pliku (`seq`, końcowy newline, licznik appendów)
+są wspólne przez WeakMap. Ciepły cache oznacza teraz zapis przez dowolną taką instancję;
+`_sessionSavedCounts` pozostaje per instancja, bo dotyczy jej okna wiadomości.
+
+Przed zastąpieniem powstają przy źródle `<sesja.md>.epoch-<32hex>.bak` (dokładne bajty
+oryginału, sprawdzone odczytem) i `.bak.prepared` (wersja z epoką przez `_writeSessionFile`,
+również sprawdzona odczytem). Sprawdzenie obejmuje cały plik i całe body, więc chroni także
+zdarzenia niewidoczne jako wiadomości oraz nieznane bloki. Backup jest świadomym wyjątkiem
+od maskowania przy zapisie: przechowuje już istniejące bajty 1:1, także BOM/CRLF; nie jest
+nowym transkryptem. Przygotowana wersja zachowuje dotychczasowe maskowanie sekretów.
+
+Zastąpienie wymaga `adapter.rename` (brak = jawna odmowa, bez nadpisania): źródło trafia
+do `.bak.original`, a dopiero po jego sprawdzeniu `.prepared` trafia pod ścieżkę sesji.
+Zmiana źródła przy przygotowaniu lub przy przeniesieniu powoduje ponowny odczyt i przygotowanie
+(maksymalnie trzy próby). Nie ma `write` nad żywym źródłem. Błąd zastąpienia odtwarza
+przeniesiony oryginał i sprawdza go odczytem; tura kończy się błędem wskazującym backup.
+Jeżeli adapter odmawia również odtworzenia, komunikat wskazuje oba pliki ratunkowe.
+Kopie zostają po sukcesie i błędzie; rozszerzenia `.bak`, `.prepared`, `.original` nie są
+sesjami `.md`. Ręczne odtworzenie: zachować aktualny plik i skopiować wskazany oryginał
+pod pierwotną ścieżkę sesji (najświeższe bajty są w `.original`, jeżeli istnieje).
+
+Równoczesne wywołania tej samej rewizji właściciela współdzielą Promise migracji.
+Każdy wołacz sprawdza własne `isCurrent`; odejście jednego nie anuluje drugiego ważnego
+wołacza. Epoka jest publikowana dopiero po potwierdzeniu pliku. Druga tura przyjmuje tę
+samą potwierdzoną epokę; zmiana rewizji, również A→B→A lub reset tej samej ścieżki,
+nadal odmawia. Nie wolno zastąpić tej kontroli samym porównaniem ścieżki.
+
+Testy: `../chat/chat/chat_streaming.epochMigration.test.ts` wywołuje produkcyjne
+`send_message` (uszkodzony zapis, równoległe dopiski, dwie zakładki, przełączenie właściciela,
+rollback, backup, brak delegacji); F1 w `AgentMemory.test.ts` i `chat/turnOwner.test.ts`
+oraz scenariusz harnessu 74 pozostają kontrolami kolejki, restore i piszącego suba.
 
 `RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
 administratora oraz w wynikach starego indeksu semantycznego; nie odczytuje jego

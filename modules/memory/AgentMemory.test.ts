@@ -90,6 +90,11 @@ function makeVault(initialFiles: Record<string, string> = {}, initialFolders: st
                 async remove(path: string) {
                     delete files[path];
                 },
+                async rename(path: string, target: string) {
+                    if (!Object.prototype.hasOwnProperty.call(files, path)) throw new Error(`missing: ${path}`);
+                    files[target] = files[path];
+                    delete files[path];
+                },
                 async list(folder: string) {
                     const prefix = `${folder}/`;
                     return {

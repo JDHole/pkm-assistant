@@ -1781,8 +1781,14 @@ a istniejący przepływ zgody i diff obsługuje rzeczywisty zapis.
 ### 2.4.7 — starsze sesje przed zamrożeniem tury
 
 `send_message` wywołuje `ensureTurnSessionEpoch` przed `freezeTurnOwner`. Starsza istniejąca
-sesja otrzymuje trwałą epokę przez kolejkę AgentMemory. Sprawdzane są agent, aktywna
-zakładka, ścieżka/epoka i okno rozmowy po każdym oczekiwaniu; przełączenie nie przypisuje
-migrowanej tożsamości nowej zakładce ani nie uruchamia jej modelu. Brak rzeczywistego
-właściciela nadal odmawia piszącemu subowi, bez zapisu live. Test F1 w `turnOwner.test.ts`
-oraz harness 74 używający produkcyjnego send_message i rzeczywistej pamięci po boocie.
+sesja otrzymuje trwałą epokę przez kolejkę AgentMemory tylko gdy rejestr udostępnia agentowi
+`delegate` lub `sub_agent` (starszy host bez rejestru zachowuje migrację). Zwykły czat bez
+delegacji nie przepisuje starego pliku. Nie zgadujemy zamiaru modelu z tekstu pytania:
+jeśli delegacja jest dostępna, epoka musi powstać przed zamrożeniem adresu tury.
+Sprawdzane są agent, instancja pamięci, aktywny obiekt i ID zakładki, ścieżka/epoka oraz
+okno rozmowy; przełączenie nie przypisuje migrowanej tożsamości nowej zakładce ani nie
+uruchamia jej modelu. Dwie zakładki współdzielą migrację i przyjmują tę samą epokę,
+ale zachowują osobne kontrole właściciela. Backup, staging i odtworzenie należą do
+AgentMemory (gotcha migracji w `../memory/CLAUDE.md`). Brak rzeczywistego właściciela nadal
+odmawia piszącemu subowi, bez zapisu live. Testy: `chat_streaming.epochMigration.test.ts`
+(produkcyjne send_message), F1 w `turnOwner.test.ts` i harness 74 (piszący sub po boocie).

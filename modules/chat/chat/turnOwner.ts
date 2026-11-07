@@ -21,6 +21,7 @@ import type { ChatTab } from './chatViewShape.js';
 import type { BrainNoteInput } from '../../memory/index.js';
 import type { RollingWindow } from './RollingWindow.js';
 import type { ChatModel } from '../../models/index.js';
+import type { ToolRegistry } from '../../tools/index.js';
 import type { AutonomyMode, TokenTracker, WorkPromptSettings } from '../../../core/index.js';
 
 /**
@@ -49,7 +50,7 @@ type OwnerTabLike = ChatTab;
  */
 /** Widok w zakresie, jaki czyta samo ZAMROŻENIE właściciela (bez providerów okna). */
 export interface FreezeViewLike {
-    plugin?: { agentManager?: OwnerManagerLike } | null;
+    plugin?: { agentManager?: OwnerManagerLike; toolRegistry?: Pick<ToolRegistry, 'filterByAgent'> } | null;
     chatTabs?: OwnerTabLike[];
     rollingWindow?: RollingWindow | null;
     tokenTracker?: TokenTracker | null;
@@ -308,11 +309,18 @@ export async function ensureTurnSessionEpoch(view: FreezeViewLike): Promise<bool
     const memory = agent?.name ? resolveOwnerMemory(manager, agent.name) : null;
     const path = memory?.activeSessionPath;
     if (!memory || !path || /^[0-9a-f]{32}$/.test(memory.sessionEpoch ?? '')) return true;
+    // Only turns capable of delegation need a durable draft owner. Do not rewrite
+    // legacy sessions for text/read-only chats with delegation disabled. Unknown
+    // older hosts retain the conservative migration path.
+    const tools = view.plugin?.toolRegistry?.filterByAgent(agent);
+    if (tools && !tools.some(tool => tool.name === 'delegate' || tool.name === 'sub_agent')) return true;
     const tab = view.chatTabs?.find(tab => tab.isActive);
     const window = view.rollingWindow;
-    const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch;
+    const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch, tabId = tab?.sessionId;
     const current = () => manager?.getActiveAgent?.() === agent && view.rollingWindow === window
-        && (!tab || tab.isActive && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch);
+        && resolveOwnerMemory(manager, agent?.name) === memory
+        && (!tab || view.chatTabs?.find(candidate => candidate.isActive) === tab
+            && tab.sessionId === tabId && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch);
     if (tabPath && tabPath !== path) return false;
     // Old read-only hosts can lack the migration API; writers still fail closed on missing origin.
     if (typeof memory.ensureActiveSessionEpoch !== 'function') return true;

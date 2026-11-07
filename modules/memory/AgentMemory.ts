@@ -155,6 +155,8 @@ export interface MemoryVaultAdapterLike {
     /** opcjonalne — atrapy testów bywają bez nich, kod to sprawdza (`stat?.`, `if (remove)`) */
     stat?(path: string): Promise<{ mtime?: number; size?: number } | null>;
     remove?(path: string): Promise<void>;
+    /** DataAdapter supports rename; migration refuses replacement without it. */
+    rename?(path: string, target: string): Promise<void>;
     /**
      * Dopisanie ogona pliku bez pełnego read+write. Obsidian ma tę metodę
      * na `DataAdapter` (ten sam kontrakt, którego już używa `core/utils/LogFileSink.ts`);
@@ -328,8 +330,22 @@ type SessionChanges = {
     expectedSession?: { path: string; epoch: string | null };
 };
 
+// Different views/AgentMemory instances on the same adapter must serialize the
+// same session file, including its migration, appends, autosave and archival.
+const vaultSessionWriters = new WeakMap<MemoryVaultAdapterLike, {
+    queues: Map<string, Promise<void>>;
+    sequences: Map<string, number>;
+    newlines: Map<string, boolean>;
+    appends: Map<string, number>;
+}>();
+
 export class AgentMemory {
     private _removalSavesInFlight = new Map<string, Promise<string>>();
+    private _epochMigrations = new Map<string, {
+        revision: number;
+        owners: Set<() => boolean>;
+        result: Promise<string>;
+    }>();
     // `declare` = sama deklaracja typu, zero emitu.
     declare vault: MemoryVaultLike;
     declare agentName: string;
@@ -347,7 +363,7 @@ export class AgentMemory {
      *    (restore — pierwsza/aktywna zakładka).
      * Żaden z nich nie sprawdza, czy plik pod tą ścieżką WCIĄŻ istnieje (np. bo w międzyczasie
      * `archiveActiveSession` go przeniósł i wyzerował pole u SIEBIE) — dlatego `startActiveSession`
-     * NIE MOŻE ufać samemu faktowi „pole niepuste", tylko ciepłemu cache pisarza tej instancji.
+     * NIE MOŻE ufać samemu faktowi „pole niepuste", tylko ciepłemu cache pisarza tego adaptera.
      */
     private _activeSessionPath: string | null;
     /** Epoka potwierdzona dla bieżącej ścieżki; fail-closed przy samym przypisaniu ścieżki. */
@@ -392,12 +408,17 @@ export class AgentMemory {
         // Promise.all + SubAgentRunner) append to the SAME parent session file. Without
         // a lock the read-modify-write races and one write silently overwrites the other
         // → memory lines disappear. Map<path, Promise> chains writes to each path.
-        this._writeQueues = new Map();
+        let writer = vaultSessionWriters.get(vault.adapter);
+        if (!writer) {
+            writer = { queues: new Map(), sequences: new Map(), newlines: new Map(), appends: new Map() };
+            vaultSessionWriters.set(vault.adapter, writer);
+        }
+        this._writeQueues = writer.queues;
 
         // Numeracja zdarzeń w pliku aktywnej sesji. Map<path, ostatni użyty seq>.
         // Pierwszy zapis do danej ścieżki (albo pierwszy PO restarcie Obsidiana) inicjalizuje
         // licznik skanem pliku (`maxSeq`), dalej idzie z pamięci — bez ponownego skanowania.
-        this._sessionSeqCache = new Map();
+        this._sessionSeqCache = writer.sequences;
 
         // Ile wiadomości z listy podanej przez `saveSession` już pokryliśmy w pliku.
         // Potrzebne, bo event-log jest tylko CZĘŚCIOWO wyrównany z okienkiem czatu: blok bez
@@ -411,10 +432,10 @@ export class AgentMemory {
         this._structureEnsured = false;
 
         // Stan „plik kończy się \n" per ścieżka — patrz deklaracja pola.
-        this._sessionEndsWithNewline = new Map();
+        this._sessionEndsWithNewline = writer.newlines;
 
         // Licznik do periodycznego exists() na ciepłym cache.
-        this._appendsSinceVerify = new Map();
+        this._appendsSinceVerify = writer.appends;
 
         // Paths
         this.paths = {
@@ -462,31 +483,116 @@ export class AgentMemory {
     async ensureActiveSessionEpoch(path: string, isCurrent: () => boolean): Promise<string> {
         const revision = this._sessionIdentityRevision;
         const expectedEpoch = this.sessionEpoch;
-        const current = () => this.activeSessionPath === path && this._sessionIdentityRevision === revision
-            && this.sessionEpoch === expectedEpoch && isCurrent();
+        const sameOwner = () => this.activeSessionPath === path && this._sessionIdentityRevision === revision;
         const root = `${this.paths.sessionsActive}/`;
         if (!path.startsWith(root) || !path.endsWith('.md') || path.slice(root.length).includes('/')
             || path.includes('\\') || path.split('/').some(part => part === '..' || part === '.'))
             throw new Error('Session epoch: target is outside the owning active sessions');
-        return this._enqueuePathWrite(path, async () => {
-            if (!current()) throw new Error('Session epoch: owner changed');
-            const content = await this.vault.adapter.read(path);
-            const metadata = this._parseFrontmatter(content);
-            if (!current() || metadata.agent && metadata.agent !== this.agentName)
-                throw new Error('Session epoch: owner changed');
-            if (expectedEpoch && metadata.epoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
-            let epoch = metadata.epoch;
-            if (typeof epoch !== 'string' || !/^[0-9a-f]{32}$/.test(epoch)) {
-                epoch = this._newSessionEpoch();
-                const updated = this._setFrontmatterField(content, 'epoch', epoch);
-                await this._writeSessionFile(path, updated);
-                if (await this.vault.adapter.read(path) !== maskSensitiveData(updated))
-                    throw new Error('Session epoch: write verification failed');
-            }
-            if (!current()) throw new Error('Session epoch: owner changed');
-            this.sessionEpoch = epoch;
+        if (!sameOwner() || !isCurrent()) throw new Error('Session epoch: owner changed');
+        let migration = this._epochMigrations.get(path);
+        if (!migration || migration.revision !== revision) {
+            const owners = new Set([isCurrent]);
+            const current = () => sameOwner() && this.sessionEpoch === expectedEpoch && [...owners].some(check => check());
+            const result = this._enqueuePathWrite(path, async () => {
+                const epoch = await this._migrateSessionEpoch(path, expectedEpoch, current);
+                if (!current()) throw new Error('Session epoch: owner changed');
+                this.sessionEpoch = epoch;
+                return epoch;
+            });
+            migration = { revision, owners, result };
+            this._epochMigrations.set(path, migration);
+        } else {
+            migration.owners.add(isCurrent);
+        }
+        try {
+            const epoch = await migration.result;
+            // A sibling may publish this SAME migration's epoch. A changed revision,
+            // tab or window is still a different owner, even at the same file path.
+            if (!sameOwner() || this.sessionEpoch !== epoch || !isCurrent()) throw new Error('Session epoch: owner changed');
             return epoch;
-        });
+        } finally {
+            migration.owners.delete(isCurrent);
+            if (this._epochMigrations.get(path) === migration && migration.owners.size === 0) this._epochMigrations.delete(path);
+        }
+    }
+
+    /** Caller holds the session's append/save/archive queue for the ENTIRE transaction.
+     * Backups are exact existing bytes (also on rollback), never a re-rendered transcript.
+     * Keep them after success/failure; .bak/.prepared are not session-list candidates. */
+    private async _migrateSessionEpoch(path: string, expectedEpoch: string | null, current: () => boolean): Promise<string> {
+        const adapter = this.vault.adapter;
+        // A synchronizer outside our queue can change the source while staging. Re-read
+        // and prepare from that version; bounded retries never overwrite a stale snapshot.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            if (!current()) throw new Error('Session epoch: owner changed');
+            const content = await adapter.read(path);
+            const metadata = this._parseFrontmatter(content);
+            if (!current() || metadata.agent && metadata.agent !== this.agentName) throw new Error('Session epoch: owner changed');
+            if (expectedEpoch && metadata.epoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
+            if (typeof metadata.epoch === 'string' && /^[0-9a-f]{32}$/.test(metadata.epoch)) return metadata.epoch;
+            if (!adapter.rename) throw new Error('Session epoch: adapter cannot safely replace a session (rename unavailable)');
+
+            const epoch = this._newSessionEpoch();
+            const backup = `${path}.epoch-${epoch}.bak`;
+            const prepared = `${backup}.prepared`;
+            const displaced = `${backup}.original`;
+            if (await probeFile(adapter, backup) !== 'missing' || await probeFile(adapter, prepared) !== 'missing'
+                || await probeFile(adapter, displaced) !== 'missing') {
+                throw new Error('Session epoch: recovery path already exists or is unreadable');
+            }
+            await adapter.write(backup, content);
+            if (await adapter.read(backup) !== content) throw new Error(`Session epoch: backup verification failed; source untouched: ${path}`);
+
+            const updated = maskSensitiveData(this._setFrontmatterField(content, 'epoch', epoch));
+            await this._writeSessionFile(prepared, updated);
+            const staged = await adapter.read(prepared);
+            // Full byte equality covers ALL event blocks, including unknown events which
+            // the transcript parser intentionally does not expose as messages.
+            const body = (text: string) => text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '');
+            if (staged !== updated || body(staged) !== body(maskSensitiveData(content))
+                || this._parseFrontmatter(staged).epoch !== epoch) {
+                throw new Error(`Session epoch: prepared history verification failed; source untouched; backup: ${backup}`);
+            }
+            const latest = await adapter.read(path);
+            if (!current()) throw new Error('Session epoch: owner changed');
+            if (latest !== content) continue;
+            // Preserve the actual source at the replacement boundary, too: a raw
+            // external writer need not participate in our queue. Never overwrite it
+            // with adapter.write, even after a successful preflight read.
+            try {
+                await adapter.rename(path, displaced);
+                if (await adapter.read(displaced) !== content) {
+                    await adapter.rename(displaced, path);
+                    continue;
+                }
+                if (!current()) throw new Error('Session epoch: owner changed');
+                await adapter.rename(prepared, path);
+                if (await adapter.read(path) !== staged) throw new Error('write verification failed');
+            } catch (error) {
+                // A failed rename may already have moved bytes. Prefer the displaced
+                // original (which may contain a last-moment external append) to the
+                // earlier snapshot. Restore without relying on the failing write().
+                try {
+                    const saved = await readIfExists(adapter, displaced);
+                    if (saved.state === 'unreadable') throw new Error(`original unreadable: ${displaced}`);
+                    if (saved.state === 'content') {
+                        await adapter.rename(displaced, path);
+                        if (await adapter.read(path) !== saved.content) throw new Error('restore verification failed');
+                    } else if (await adapter.read(path) !== content) {
+                        throw new Error('source differs from backup');
+                    }
+                } catch (restoreError) {
+                    throw new Error(`Session epoch: ${causeText(error)}; restore failed (${causeText(restoreError)}); recover ${path} from ${displaced} or backup: ${backup}`);
+                }
+                throw new Error(`Session epoch: ${causeText(error)}; original restored; backup: ${backup}`);
+            }
+            // Staging may have retried after an external append. Keep the shared
+            // append cursor consistent with the actual version we installed.
+            this._sessionSeqCache.set(path, maxSeq(staged));
+            this._sessionEndsWithNewline.set(path, staged.endsWith('\n'));
+            return epoch;
+        }
+        throw new Error('Session epoch: source kept changing; migration cancelled without replacing the session');
     }
 
     /**
@@ -752,7 +858,7 @@ export class AgentMemory {
 
     async startActiveSession(agentName: string = this.agentName): Promise<string> {
         // „Ufam ścieżce"
-        // znaczy „ta INSTANCJA ma CIEPŁY stan pisarza dla tej ścieżki" (`_sessionSeqCache`), NIE
+        // znaczy „adapter ma CIEPŁY stan pisarza dla tej ścieżki" (`_sessionSeqCache`), NIE
         // „ścieżka jest niepusta". `this.activeSessionPath` bywa wskrzeszony Z ZEWNĄTRZ (patrz
         // komentarz przy deklaracji pola `activeSessionPath` wyżej — chat_tabs.ts/chat_session.ts
         // podstawiają go wprost przy przełączeniu zakładki i restore) długo po tym, jak
@@ -763,11 +869,11 @@ export class AgentMemory {
         // odtworzony scenariusz).
         if (this.activeSessionPath) {
             if (this._sessionSeqCache.has(this.activeSessionPath)) {
-                // Ciepły cache = TA instancja dopisywała do tego pliku i wie, że żyje —
+                // Ciepły cache = pisarz tego adaptera dopisywał do pliku i wie, że żyje —
                 // zero I/O.
                 return this.activeSessionPath;
             }
-            // Zimny cache (pierwsze użycie tej ścieżki przez TĘ instancję — może być świeżo
+            // Zimny cache (pierwsze użycie tej ścieżki przez pisarza adaptera — może być świeżo
             // stworzona, może być wskrzeszona z zewnątrz) — jeden tani `probeFile` zamiast
             // zgadywania. Płaci się raz na ścieżkę, nie na każde zdarzenie.
             if ((await probeFile(this.vault.adapter, this.activeSessionPath)) !== 'missing') {
