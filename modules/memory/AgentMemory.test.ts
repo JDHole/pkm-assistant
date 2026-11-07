@@ -2431,6 +2431,8 @@ test('saveSession zachowuje terminalne pytanie i dorobek wyniku z tła', async t
 test('F1 legacy epoch is durable, queued with appends, and survives reload', async t => {
     const f = makeVault();
     const memory = new AgentMemory(f.vault, 'Lead');
+    // Migration needs native append to create without clobbering a raced target.
+    memory.vault.adapter.append = async (path, data) => { f.files[path] = (f.files[path] ?? '') + data; };
     const path = `${memory.paths.sessionsActive}/legacy.md`;
     f.files[path] = '---\ntype: active_session\nagent: Lead\n---\n\nHistoria\n';
     memory.setActiveSessionIdentity(path, null);

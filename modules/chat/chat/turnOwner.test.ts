@@ -506,6 +506,8 @@ test('F1 tab guard prevents legacy epoch publication after switching tabs during
     const memory = new AgentMemory({ adapter: { exists: async p => files.has(p), mkdir: async () => {}, list: async () => ({ files: [] }),
         read: async p => { if (!files.has(p)) throw new Error('ENOENT'); return files.get(p)!; },
         rename: async (p, target) => { files.set(target, files.get(p)!); files.delete(p); },
+        append: async (p, value) => { files.set(p, (files.get(p) ?? '') + value); },
+        remove: async p => { files.delete(p); },
         write: async (p, value) => { files.set(p, value); tab.isActive = false; } } }, 'A');
     memory.setActiveSessionIdentity(path, null);
     const agent = { name: 'A' };

@@ -1,4 +1,8 @@
 import test from 'ava';
+import type { ExecutionContext } from 'ava';
+import fs from 'node:fs';
+import os from 'node:os';
+import nodePath from 'node:path';
 import { send_message } from './chat_streaming.js';
 import { RollingWindow } from './RollingWindow.js';
 import streamingManager from './StreamingManager.js';
@@ -16,7 +20,8 @@ function fixture() {
     const adapter = {
         async read(path: string) { if (!files.has(path)) throw new Error('ENOENT'); return files.get(path)!; },
         async write(path: string, data: string) { writes.push({ path, data }); files.set(path, data); },
-        async append(path: string, data: string) { files.set(path, await adapter.read(path) + data); },
+        async append(path: string, data: string) { files.set(path, (files.get(path) ?? '') + data); },
+        async remove(path: string) { files.delete(path); },
         async rename(path: string, target: string) { files.set(target, await adapter.read(path)); files.delete(path); },
         async exists(path: string) { return files.has(path); },
         async list() { return { files: [...files.keys()] }; },
@@ -137,21 +142,21 @@ test.serial('R2 d: a real owner switch during preparation refuses the turn and l
 test.serial('R2: failed replacement restores the exact source and retains a usable backup', async t => {
     const f = fixture(), chat = f.chat('rollback');
     t.teardown(chat.close);
-    const rename = f.adapter.rename;
+    const append = f.adapter.append;
     let original = '';
-    f.adapter.rename = async (path, target) => {
-        if (path.endsWith('.prepared')) {
+    f.adapter.append = async (path, data) => {
+        if (path === f.path && data.includes('\nepoch:')) {
             original = [...f.files].find(([name]) => name.endsWith('.bak'))![1];
-            await rename(path, target);
-            f.files.set(target, '---\nepoch: ' + 'a'.repeat(32) + '\n---\n');
-            throw new Error('rename failed after replacing bytes');
+            await append(path, data);
+            f.files.set(path, '---\nepoch: ' + 'a'.repeat(32) + '\n---\n');
+            throw new Error('append failed after installing partial bytes');
         }
-        return rename(path, target);
+        return append(path, data);
     };
     await chat.send();
     t.is(await f.adapter.read(f.path), original);
     t.true(original.startsWith(history));
-    t.true(f.errors[0].includes('original restored; backup:'));
+    t.true(f.errors[0].includes('original restored;'));
     t.is(f.files.get(f.errors[0].split('backup: ')[1]), original);
     t.deepEqual(f.requests, []);
     t.is(f.memory.sessionEpoch, null);
@@ -239,4 +244,133 @@ test.serial('R2: changing the initiating tab does not cancel its valid sibling w
     t.is(a.tab.sessionEpoch, null);
     t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, b.tab.sessionEpoch);
     t.regex(b.tab.sessionEpoch!, /^[0-9a-f]{32}$/);
+});
+
+
+// Real files and the production send_message, like the reviewer's r3-fs-probes.ts.
+function diskFixture(t: ExecutionContext) {
+    const f = fixture();
+    const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'pkm-epoch-r3-'));
+    const abs = (path: string) => nodePath.join(root, path);
+    fs.mkdirSync(nodePath.dirname(abs(f.path)), { recursive: true });
+    fs.writeFileSync(abs(f.path), history);
+    t.teardown(() => fs.rmSync(root, { recursive: true, force: true }));
+    f.adapter.read = async path => fs.readFileSync(abs(path), 'utf8');
+    f.adapter.write = async (path, data) => { fs.writeFileSync(abs(path), data); };
+    f.adapter.append = async (path, data) => { fs.appendFileSync(abs(path), data); };
+    f.adapter.rename = async (path, target) => { fs.renameSync(abs(path), abs(target)); };
+    f.adapter.remove = async path => { fs.unlinkSync(abs(path)); };
+    f.adapter.exists = async path => fs.existsSync(abs(path));
+    f.adapter.list = async () => ({ files: fs.readdirSync(abs(f.memory.paths.sessionsActive)).map(name => `${f.memory.paths.sessionsActive}/${name}`) });
+    const copies = async () => Promise.all((await f.adapter.list()).files
+        .filter(path => path.startsWith(f.path)).map(async path => ({ path, data: await f.adapter.read(path) })));
+    return { ...f, abs, copies };
+}
+
+for (const timing of ['after-displacement', 'inside-install'] as const) {
+    test.serial(`R3 filesystem: send_message preserves a recreated session (${timing})`, async t => {
+        const f = diskFixture(t), chat = f.chat(`gap-${timing}`);
+        t.teardown(chat.close);
+        const marker = `\n## User\n\nEXTERNAL recreated ${timing}\n`;
+        const rename = f.adapter.rename, append = f.adapter.append;
+        let injected = false, original = '';
+        const inject = () => { fs.appendFileSync(f.abs(f.path), marker); injected = true; };
+        f.adapter.rename = async (path, target) => {
+            if (path === f.path && target.endsWith('.original')) original = await f.adapter.read(path);
+            if (timing === 'inside-install' && path.endsWith('.prepared')) inject();
+            await rename(path, target);
+            if (timing === 'after-displacement' && path === f.path && target.endsWith('.original')) inject();
+        };
+        f.adapter.append = async (path, data) => {
+            if (timing === 'inside-install' && path === f.path && data.includes('\nepoch:') && !injected) inject();
+            await append(path, data);
+        };
+        await chat.send();
+        t.true(injected);
+        const copies = await f.copies();
+        t.true(copies.some(copy => copy.data.includes(marker)), 'independent bytes must remain on disk');
+        t.true(copies.some(copy => copy.data === original), 'exact displaced original must remain on disk');
+        t.is(f.errors.length, 1);
+        t.deepEqual(f.requests, []);
+        t.true(copies.filter(copy => copy.data.includes(marker) || copy.data === original)
+            .every(copy => f.errors[0].includes(copy.path)), 'error names both recoverable versions');
+    });
+}
+
+for (const mode of ['append', 'rewrite'] as const) {
+    test.serial(`R3 filesystem: send_message preserves an independent ${mode} before readback`, async t => {
+        const f = diskFixture(t), chat = f.chat(`readback-${mode}`);
+        t.teardown(chat.close);
+        const marker = '\n## User\n\nEXTERNAL readback\n';
+        const read = f.adapter.read, rename = f.adapter.rename, append = f.adapter.append;
+        let installed = false, injected = false, original = '';
+        f.adapter.rename = async (path, target) => {
+            if (path === f.path && target.endsWith('.original')) original = await read(path);
+            await rename(path, target);
+            if (path.endsWith('.prepared')) installed = true;
+        };
+        f.adapter.append = async (path, data) => {
+            await append(path, data);
+            if (path === f.path && data.includes('\nepoch:')) installed = true;
+        };
+        f.adapter.read = async path => {
+            if (path === f.path && installed && !injected) {
+                injected = true;
+                if (mode === 'append') fs.appendFileSync(f.abs(path), marker);
+                else fs.writeFileSync(f.abs(path), marker);
+            }
+            return read(path);
+        };
+        await chat.send();
+        t.true(injected);
+        const copies = await f.copies();
+        t.true(copies.some(copy => copy.data.includes(marker)), 'readback must not discard the observed external bytes');
+        if (mode === 'append') {
+            t.true((await read(f.path)).includes(marker));
+            t.deepEqual(f.requests, ['readback-append']);
+            t.deepEqual(f.errors, []);
+        } else {
+            t.is(await read(f.path), original);
+            t.deepEqual(f.requests, []);
+            t.is(f.errors.length, 1);
+            const rescue = copies.find(copy => copy.path !== f.path && copy.data === marker);
+            t.truthy(rescue);
+            t.true(f.errors[0].includes(rescue!.path));
+        }
+    });
+}
+
+test.serial('R3 filesystem: five failed send_message turns retain a constant number of files', async t => {
+    const f = diskFixture(t), write = f.adapter.write;
+    f.adapter.write = (path, data) => write(path, path.endsWith('.prepared') ? data.slice(0, data.indexOf('\n---\n') + 5) : data);
+    const counts: number[] = [];
+    for (let i = 0; i < 5; i++) {
+        const chat = f.chat(`failure-${i}`); t.teardown(chat.close);
+        await chat.send();
+        counts.push((await f.copies()).length);
+    }
+    t.deepEqual(counts, [3, 3, 3, 3, 3]);
+    t.is(f.errors.length, 5);
+    t.deepEqual(f.requests, []);
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(message => message.content),
+        ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie failure-0', 'Pytanie failure-1', 'Pytanie failure-2', 'Pytanie failure-3', 'Pytanie failure-4']);
+});
+
+test.serial('R3 filesystem: successful migration leaves only the session and one exact original copy', async t => {
+    const f = diskFixture(t), chat = f.chat('success');
+    t.teardown(chat.close);
+    const rename = f.adapter.rename;
+    let original = '';
+    f.adapter.rename = async (path, target) => {
+        if (path === f.path) original = await f.adapter.read(path);
+        await rename(path, target);
+    };
+    await chat.send();
+    const copies = await f.copies();
+    t.deepEqual(f.requests, ['success']);
+    t.deepEqual(f.errors, []);
+    t.is(copies.length, 2);
+    t.deepEqual(copies.filter(copy => copy.path !== f.path).map(copy => copy.data), [original]);
+    t.false(copies.some(copy => copy.path.endsWith('.prepared')));
+    t.true((await f.adapter.read(f.path)).includes('\nepoch:'));
 });

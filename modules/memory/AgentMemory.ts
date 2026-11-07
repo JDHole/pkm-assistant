@@ -517,12 +517,16 @@ export class AgentMemory {
     }
 
     /** Caller holds the session's append/save/archive queue for the ENTIRE transaction.
-     * Backups are exact existing bytes (also on rollback), never a re-rendered transcript.
-     * Keep them after success/failure; .bak/.prepared are not session-list candidates. */
+     * Backups contain exact source bytes. Only verified, redundant artifacts are removed. */
     private async _migrateSessionEpoch(path: string, expectedEpoch: string | null, current: () => boolean): Promise<string> {
         const adapter = this.vault.adapter;
-        // A synchronizer outside our queue can change the source while staging. Re-read
-        // and prepare from that version; bounded retries never overwrite a stale snapshot.
+        let epoch = '', backup = '', prepared = '', displaced = '', rescue = '', backedUp = '';
+        const removeOwned = async (file: string, expected: string) => {
+            if (await adapter.read(file) !== expected) throw new Error(`Session epoch: changed artifact retained: ${file}`);
+            await adapter.remove!(file);
+        };
+        // A synchronizer outside our queue can change the source while staging.
+        // Retries share one backup and epoch; uncertain artifacts require manual recovery.
         for (let attempt = 0; attempt < 3; attempt++) {
             if (!current()) throw new Error('Session epoch: owner changed');
             const content = await adapter.read(path);
@@ -531,23 +535,37 @@ export class AgentMemory {
             if (expectedEpoch && metadata.epoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
             if (typeof metadata.epoch === 'string' && /^[0-9a-f]{32}$/.test(metadata.epoch)) return metadata.epoch;
             if (!adapter.rename) throw new Error('Session epoch: adapter cannot safely replace a session (rename unavailable)');
+            // rename/write can overwrite a target recreated AFTER an existence check.
+            // Native append never replaces those bytes; its readback detects that race.
+            if (!adapter.append || !adapter.remove) throw new Error('Session epoch: adapter cannot safely migrate a session (append/remove unavailable)');
 
-            const epoch = this._newSessionEpoch();
-            const backup = `${path}.epoch-${epoch}.bak`;
-            const prepared = `${backup}.prepared`;
-            const displaced = `${backup}.original`;
-            if (await probeFile(adapter, backup) !== 'missing' || await probeFile(adapter, prepared) !== 'missing'
-                || await probeFile(adapter, displaced) !== 'missing') {
-                throw new Error('Session epoch: recovery path already exists or is unreadable');
+            if (!epoch) {
+                const listed = await adapter.list(this.paths.sessionsActive);
+                if (!listed?.files) throw new Error('Session epoch: recovery files cannot be listed; source untouched');
+                const pending = listed.files.filter(file =>
+                    file.startsWith(`${path}.epoch-`) && /^[0-9a-f]{32}\.bak(?:\..+)?$/.test(file.slice(`${path}.epoch-`.length)));
+                if (pending.length) {
+                    // This also survives a restart: do not allocate another epoch, overwrite
+                    // an unverified prepared file, or delete any previous recovery bytes.
+                    throw new Error(`Session epoch: unfinished migration; preserve ${path}; inspect existing recovery files before retry: ${pending.join(', ')}`);
+                }
+                epoch = this._newSessionEpoch();
+                backup = `${path}.epoch-${epoch}.bak`;
+                prepared = `${backup}.prepared`;
+                displaced = `${backup}.original`;
+                rescue = `${backup}.rescue`;
+                for (const file of [backup, prepared, displaced, rescue]) {
+                    if (await probeFile(adapter, file) !== 'missing') throw new Error(`Session epoch: recovery path already exists or is unreadable: ${file}`);
+                }
+                await adapter.write(backup, content);
+                if (await adapter.read(backup) !== content) throw new Error(`Session epoch: backup verification failed; source untouched: ${path}`);
+                backedUp = content;
             }
-            await adapter.write(backup, content);
-            if (await adapter.read(backup) !== content) throw new Error(`Session epoch: backup verification failed; source untouched: ${path}`);
 
             const updated = maskSensitiveData(this._setFrontmatterField(content, 'epoch', epoch));
+            if (await probeFile(adapter, prepared) !== 'missing') throw new Error(`Session epoch: prepared path occupied: ${prepared}`);
             await this._writeSessionFile(prepared, updated);
             const staged = await adapter.read(prepared);
-            // Full byte equality covers ALL event blocks, including unknown events which
-            // the transcript parser intentionally does not expose as messages.
             const body = (text: string) => text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '');
             if (staged !== updated || body(staged) !== body(maskSensitiveData(content))
                 || this._parseFrontmatter(staged).epoch !== epoch) {
@@ -555,44 +573,69 @@ export class AgentMemory {
             }
             const latest = await adapter.read(path);
             if (!current()) throw new Error('Session epoch: owner changed');
-            if (latest !== content) continue;
-            // Preserve the actual source at the replacement boundary, too: a raw
-            // external writer need not participate in our queue. Never overwrite it
-            // with adapter.write, even after a successful preflight read.
+            if (latest !== content) {
+                await removeOwned(prepared, staged);
+                continue;
+            }
+            let installing = false;
+            let installed = '';
+            if (await probeFile(adapter, displaced) !== 'missing') throw new Error(`Session epoch: original path occupied: ${displaced}`);
             try {
                 await adapter.rename(path, displaced);
-                if (await adapter.read(displaced) !== content) {
-                    await adapter.rename(displaced, path);
+                const saved = await adapter.read(displaced);
+                if (await probeFile(adapter, path) !== 'missing') throw new Error('session path recreated; installation cancelled');
+                if (saved !== content) {
+                    // Keep a last-moment append in the source, then prepare from it again.
+                    await adapter.append(path, saved);
+                    if (await adapter.read(path) !== saved) throw new Error('source changed during retry restoration');
+                    await removeOwned(displaced, saved);
+                    await removeOwned(prepared, staged);
                     continue;
                 }
                 if (!current()) throw new Error('Session epoch: owner changed');
-                await adapter.rename(prepared, path);
-                if (await adapter.read(path) !== staged) throw new Error('write verification failed');
+                installing = true;
+                await adapter.append(path, staged);
+                installed = await adapter.read(path);
+                // A concurrent suffix is valid history, not a reason to roll it back.
+                if (!installed.startsWith(staged)) throw new Error('write verification failed');
             } catch (error) {
-                // A failed rename may already have moved bytes. Prefer the displaced
-                // original (which may contain a last-moment external append) to the
-                // earlier snapshot. Restore without relying on the failing write().
                 try {
                     const saved = await readIfExists(adapter, displaced);
                     if (saved.state === 'unreadable') throw new Error(`original unreadable: ${displaced}`);
                     if (saved.state === 'content') {
-                        await adapter.rename(displaced, path);
-                        if (await adapter.read(path) !== saved.content) throw new Error('restore verification failed');
+                        const live = await readIfExists(adapter, path);
+                        if (live.state === 'unreadable') throw new Error(`current session unreadable: ${path}`);
+                        if (live.state === 'content') {
+                            if (!installing) throw new Error('recreated session retained without replacement');
+                            // Preserve the actual divergent file BEFORE restoring anything.
+                            // An unreadable/unverified rescue forbids restoration.
+                            if (await probeFile(adapter, rescue) !== 'missing') throw new Error(`rescue path occupied: ${rescue}`);
+                            await adapter.rename(path, rescue);
+                            if (await adapter.read(rescue) !== live.content) throw new Error(`rescue verification failed: ${rescue}`);
+                        }
+                        if (await probeFile(adapter, path) !== 'missing') throw new Error('session recreated during recovery');
+                        await adapter.append(path, saved.content);
+                        if (!(await adapter.read(path)).startsWith(saved.content)) throw new Error('restore verification failed');
                     } else if (await adapter.read(path) !== content) {
                         throw new Error('source differs from backup');
                     }
                 } catch (restoreError) {
-                    throw new Error(`Session epoch: ${causeText(error)}; restore failed (${causeText(restoreError)}); recover ${path} from ${displaced} or backup: ${backup}`);
+                    throw new Error(`Session epoch: ${causeText(error)}; restore failed (${causeText(restoreError)}); preserve session: ${path}; original: ${displaced}; rescue: ${rescue}; prepared: ${prepared}; backup: ${backup}`);
+                } finally {
+                    this._forgetSessionWriterState(path);
                 }
-                throw new Error(`Session epoch: ${causeText(error)}; original restored; backup: ${backup}`);
+                throw new Error(`Session epoch: ${causeText(error)}; original restored; original: ${displaced}; rescue: ${rescue}; backup: ${backup}`);
             }
-            // Staging may have retried after an external append. Keep the shared
-            // append cursor consistent with the actual version we installed.
-            this._sessionSeqCache.set(path, maxSeq(staged));
-            this._sessionEndsWithNewline.set(path, staged.endsWith('\n'));
+            // The displaced original is the one retained exact copy, including any
+            // append incorporated by a retry. Never clean artifacts with unknown bytes.
+            if (await adapter.read(displaced) !== content) throw new Error(`Session epoch: original changed; recovery files retained: ${displaced}, ${backup}, ${prepared}`);
+            await removeOwned(prepared, staged);
+            await removeOwned(backup, backedUp);
+            this._sessionSeqCache.set(path, maxSeq(installed));
+            this._sessionEndsWithNewline.set(path, installed.endsWith('\n'));
             return epoch;
         }
-        throw new Error('Session epoch: source kept changing; migration cancelled without replacing the session');
+        throw new Error(`Session epoch: source kept changing; migration cancelled; source: ${path}; backup: ${backup}`);
     }
 
     /**

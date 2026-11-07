@@ -1016,15 +1016,41 @@ zdarzenia niewidoczne jako wiadomości oraz nieznane bloki. Backup jest świadom
 od maskowania przy zapisie: przechowuje już istniejące bajty 1:1, także BOM/CRLF; nie jest
 nowym transkryptem. Przygotowana wersja zachowuje dotychczasowe maskowanie sekretów.
 
-Zastąpienie wymaga `adapter.rename` (brak = jawna odmowa, bez nadpisania): źródło trafia
-do `.bak.original`, a dopiero po jego sprawdzeniu `.prepared` trafia pod ścieżkę sesji.
-Zmiana źródła przy przygotowaniu lub przy przeniesieniu powoduje ponowny odczyt i przygotowanie
-(maksymalnie trzy próby). Nie ma `write` nad żywym źródłem. Błąd zastąpienia odtwarza
-przeniesiony oryginał i sprawdza go odczytem; tura kończy się błędem wskazującym backup.
-Jeżeli adapter odmawia również odtworzenia, komunikat wskazuje oba pliki ratunkowe.
-Kopie zostają po sukcesie i błędzie; rozszerzenia `.bak`, `.prepared`, `.original` nie są
-sesjami `.md`. Ręczne odtworzenie: zachować aktualny plik i skopiować wskazany oryginał
-pod pierwotną ścieżkę sesji (najświeższe bajty są w `.original`, jeżeli istnieje).
+**Gotcha rundy 3: `rename` nad ścieżką sesji może skasować plik odtworzony przez innego pisarza.**
+Migracja wymaga `adapter.rename`, natywnego `append` i `remove`; brak którejkolwiek metody
+kończy ją błędem przed utworzeniem kopii. Źródło trafia do `.bak.original`, następnie kod
+sprawdza jego bajty i brak ścieżki sesji. Instalacja używa natywnego `append` do zwolnionej
+ścieżki, więc również odtworzenie pliku wewnątrz tej operacji nie nadpisze cudzych bajtów.
+Nie wolno zastąpić tego przez `write` ani fallback read+write. Adapter, który nie potrafi
+utworzyć brakującego pliku przez `append`, zgłosi błąd; oryginał pozostaje w kopii.
+Zmiana źródła podczas przygotowania lub przenoszenia pozwala na maksymalnie trzy próby
+w ramach tej samej epoki i jednej kopii `.bak`.
+
+Readback równy przygotowanej wersji lub zaczynający się od jej pełnych bajtów oznacza sukces:
+dopisek niezależnego pisarza zostaje w sesji, a cache `seq`/newline pochodzi z readbacku.
+Inna rozbieżność jest najpierw przenoszona do `.bak.rescue` i sprawdzana odczytem; dopiero
+potem oryginał można odtworzyć natywnym `append` do potwierdzonej pustej ścieżki.
+Błąd weryfikacji ratunku lub ponowne pojawienie się ścieżki przerywa odtworzenie.
+Jeśli ścieżka wróciła już przed instalacją, pozostaje nietknięta obok odsuniętego oryginału.
+Błąd wskazuje ścieżkę sesji i pliki odzyskiwania; żadna z tych wersji nie jest zastępowana.
+
+**Los kopii:** po udanej migracji pozostaje sesja i dokładnie jedna sprawdzona kopia
+oryginału `.bak.original`. Własne `.bak.prepared` i redundantne `.bak` są usuwane dopiero
+po ponownym porównaniu bajtów z tym, co migracja zapisała. Zmieniony artefakt zostaje i
+powoduje błąd. Po nieudanej migracji niezweryfikowane pliki pozostają pod dotychczasowymi
+nazwami. Dopóki sesja wymaga migracji, kolejne tury (również po restarcie) wykrywają je na dysku,
+wskazują je w błędzie i odmawiają nowej migracji zamiast generować następną epokę i mnożyć kopie. Oznacza to,
+że trwałe uszkodzenie `.prepared` wymaga ręcznej interwencji, a nie kolejnego pełnego zapisu.
+Plików z cudzą lub niepewną treścią nie wolno automatycznie usuwać ani ponownie używać do zapisu.
+
+**Ręczne odzyskanie/ponowienie:** zatrzymać piszące zakładki i synchronizację, skopiować
+sesję oraz wszystkie wskazane `.bak*` poza katalog sesji, porównać treść i scalić brakujące
+wpisy do sesji. `.original` zawiera źródło z chwili odsunięcia, `.bak` wcześniejszy snapshot,
+`.rescue` rozbieżną wersję po instalacji; `.prepared` może być niekompletne. Dopiero po
+sprawdzeniu odzyskanej historii przenieść pozostałości nieudanej migracji z `active/` i
+ponowić turę. Po sukcesie `.original` można zachować jako backup lub ręcznie usunąć po
+sprawdzeniu sesji. Starsze kopie nie są automatycznie czyszczone. Rozszerzenia `.bak*` nie
+są sesjami `.md`, ale zwykła synchronizacja plikowa może je nadal kopiować.
 
 Równoczesne wywołania tej samej rewizji właściciela współdzielą Promise migracji.
 Każdy wołacz sprawdza własne `isCurrent`; odejście jednego nie anuluje drugiego ważnego
@@ -1034,7 +1060,8 @@ nadal odmawia. Nie wolno zastąpić tej kontroli samym porównaniem ścieżki.
 
 Testy: `../chat/chat/chat_streaming.epochMigration.test.ts` wywołuje produkcyjne
 `send_message` (uszkodzony zapis, równoległe dopiski, dwie zakładki, przełączenie właściciela,
-rollback, backup, brak delegacji); F1 w `AgentMemory.test.ts` i `chat/turnOwner.test.ts`
+rollback, backup, brak delegacji oraz próby R3 na rzeczywistych plikach: odtworzenie ścieżki,
+dopisek/podmiana przy readbacku, pięć nieudanych tur i jedna kopia po sukcesie); F1 w `AgentMemory.test.ts` i `chat/turnOwner.test.ts`
 oraz scenariusz harnessu 74 pozostają kontrolami kolejki, restore i piszącego suba.
 
 `RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
