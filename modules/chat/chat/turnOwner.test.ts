@@ -466,7 +466,7 @@ const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, impo
 
 test('send_message zamraża właściciela PRZED getActiveSystemPromptWithMemory', t => {
     const src = readSource('./chat_streaming.ts');
-    const freeze = src.indexOf('freezeTurnOwner(this)');
+    const freeze = src.indexOf('const owner = freezeTurnOwner(this)');
     const prompt = src.indexOf('getActiveSystemPromptWithMemory(');
     t.true(freeze > 0, 'brak zamrożenia właściciela w send_message');
     t.true(prompt > 0);
@@ -490,7 +490,7 @@ function stripComments(src: string): string {
 
 test('po zamrożeniu send_message nie czyta już globalnych luster widoku', t => {
     const src = readSource('./chat_streaming.ts');
-    const from = src.indexOf('freezeTurnOwner(this)');
+    const from = src.indexOf('const owner = freezeTurnOwner(this)');
     t.true(from > 0, 'brak zamrożenia właściciela w send_message');
     const body = stripComments(src.slice(from, src.indexOf('export function handle_chunk')));
     t.false(/getActiveAgent\(/.test(body), 'getActiveAgent() po zamrożeniu = odczyt globalnego lustra zamiast zamrożonego właściciela');

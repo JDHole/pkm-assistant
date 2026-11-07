@@ -1018,8 +1018,13 @@ Readback musi zachować odczytany prefiks i zawierać poprawną epokę; dodatkow
 akceptowane. Cache pisarza jest odświeżany z readbacku przed kontrolą właściciela.
 RAM otrzymuje wynik resolvera, więc wcześniejszy poprawny wpis innego pisarza wygrywa
 z własnym kandydatem. Błąd nie publikuje epoki; następna próba ponownie czyta plik,
-bez zapamiętywania kandydata. W P3 awaria ensure nadal zatrzymuje model; odblokowanie
-rozmowy i odmowa piszącemu subowi z przyczyną należą do P4.
+bez zapamiętywania kandydata. `SessionEpochPersistenceError` odróżnia awarie I/O i
+weryfikacji od zmiany właściciela. `SessionEpochFailure`, klasa, parser `unknown` oraz
+`sessionEpochFailureReason` są eksportowane przez index.ts. Diagnostyka
+`getSessionEpochFailure(path)` jest ograniczona ścieżką i rewizją; sukces ją usuwa.
+`sessionIdentityRevision` jest tylko do odczytu i pozwala wykryć reset tej samej ścieżki.
+Wspólna próba emituje jeden warning Loggera; przyczyna jest normalizowana i maskowana.
+P4 pozwala kontynuować rozmowę bez epoki; kopia suba nadal wymaga potwierdzenia.
 
 Migracja, append/save/archive dzielą kolejkę i cache adaptera; `_sessionSavedCounts`
 pozostaje per instancja. Wywołania jednej rewizji współdzielą Promise i zbiór właścicieli;

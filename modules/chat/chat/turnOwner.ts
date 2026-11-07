@@ -15,7 +15,8 @@
 import { resolveWorkPrompt } from '../../../core/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { defaultCompressionPrompt } from './compressionPrompt.js';
-import type { AgentMemory } from '../../memory/index.js';
+import { SessionEpochPersistenceError } from '../../memory/index.js';
+import type { AgentMemory, SessionEpochFailure } from '../../memory/index.js';
 import type { Agent } from '../../agents/index.js';
 import type { ChatTab } from './chatViewShape.js';
 import type { BrainNoteInput } from '../../memory/index.js';
@@ -259,6 +260,7 @@ export interface FrozenTurnOwner {
     sessionPath: string;
     /** Epoka potwierdzona synchronicznie dla tej ścieżki. */
     sessionEpoch: string | null;
+    sessionEpochFailure?: Readonly<SessionEpochFailure>;
     /** Zakładka, z której wyszła tura (adres zwrotny delegacji w tle). */
     tab: OwnerTabLike | null;
     /** Autonomia tej zakładki — polityka „czy pytać" dla egzekutora narzędzi. */
@@ -295,13 +297,15 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
         memory,
         sessionPath: memory?.activeSessionPath || '',
         sessionEpoch: memory?.sessionEpoch ?? null,
+        ...(!memory?.sessionEpoch && memory?.getSessionEpochFailure?.(memory.activeSessionPath || '')
+            ? { sessionEpochFailure: Object.freeze({ ...memory.getSessionEpochFailure(memory.activeSessionPath || '')! }) } : {}),
         tab,
         autonomy: view?.currentAutonomy,
         artifactId: view?.currentArtifactId ?? null,
     };
 }
 
-/** Legacy migration is complete BEFORE freezeTurnOwner. Every await keeps the
+/** Legacy epoch establishment is attempted BEFORE freezeTurnOwner. Every await keeps the
  * original tab/window/agent guard, so another tab cannot inherit this send. */
 export async function ensureTurnSessionEpoch(view: FreezeViewLike): Promise<boolean> {
     const manager = view.plugin?.agentManager;
@@ -317,14 +321,21 @@ export async function ensureTurnSessionEpoch(view: FreezeViewLike): Promise<bool
     const tab = view.chatTabs?.find(tab => tab.isActive);
     const window = view.rollingWindow;
     const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch, tabId = tab?.sessionId;
+    const revision = memory.sessionIdentityRevision;
     const current = () => manager?.getActiveAgent?.() === agent && view.rollingWindow === window
         && resolveOwnerMemory(manager, agent?.name) === memory
+        && memory.activeSessionPath === path && memory.sessionIdentityRevision === revision
         && (!tab || view.chatTabs?.find(candidate => candidate.isActive) === tab
             && tab.sessionId === tabId && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch);
     if (tabPath && tabPath !== path) return false;
     // Old read-only hosts can lack the migration API; writers still fail closed on missing origin.
     if (typeof memory.ensureActiveSessionEpoch !== 'function') return true;
-    const epoch = await memory.ensureActiveSessionEpoch(path, current);
+    let epoch: string;
+    try { epoch = await memory.ensureActiveSessionEpoch(path, current); }
+    catch (error: unknown) {
+        if (!(error instanceof SessionEpochPersistenceError)) throw error;
+        return current();
+    }
     if (!current()) return false;
     if (tab) { tab.sessionPath = path; tab.sessionEpoch = epoch; }
     return true;

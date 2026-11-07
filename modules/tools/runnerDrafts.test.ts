@@ -1,3 +1,6 @@
+import { AgentMemory, SessionEpochPersistenceError } from '../memory/index.js';
+import { freezeTurnOwner } from '../chat/chat/turnOwner.js';
+import { getLocale, setLocale } from '../../core/i18n/index.js';
 import { buildSubTaskResultDelivery } from '../chat/chat/subTaskResultDelivery.js';
 import { initializeVaultDrafts, createDraftReviewHost } from './index.js';
 import test from 'ava';
@@ -593,4 +596,63 @@ test.serial('P5 unavailable draft runtime denies writers but preserves ordinary 
     const next = await f.requests.next(); t.is(lastTool(next).content, 'Baza'); next.done('Read Baza');
     const result = await read;
     t.deepEqual([result.result, result.toolsUsed], ['Read Baza', ['read']]);
+});
+
+
+for (const locale of ['pl', 'en']) test.serial(`P4 frozen failure reason survives tab changes; read-only and writer (${locale})`, async t => {
+    const f = await runtime(t), previousLocale = getLocale();
+    t.teardown(() => setLocale(previousLocale));
+    const adapter = { ...f.app.vault.adapter, append: async (_path: string, _data: string): Promise<void> => { throw new Error('EACCES A'); } };
+    const memory = new AgentMemory({ adapter }, 'Tester');
+    const path = `${memory.paths.sessionsActive}/legacy.md`, other = `${memory.paths.sessionsActive}/other.md`;
+    const history = '---\nagent: Tester\n---\n\n## User\n\nHistoria\n';
+    await adapter.write(path, history); await adapter.write(other, history);
+    memory.setActiveSessionIdentity(path, null);
+    await t.throwsAsync(memory.ensureActiveSessionEpoch(path, () => true), { instanceOf: SessionEpochPersistenceError });
+    const view = { plugin: { agentManager: { getActiveAgent: () => f.agent, getAgentMemory: () => memory } } };
+    const frozen = freezeTurnOwner(view as never);
+    const failedOrigin = { agentName: frozen.agentName, sessionPath: frozen.sessionPath, sessionEpochFailure: frozen.sessionEpochFailure };
+    memory.setActiveSessionIdentity(other, null);
+    adapter.append = async () => { throw new Error('EACCES B'); };
+    await t.throwsAsync(memory.ensureActiveSessionEpoch(other, () => true), { instanceOf: SessionEpochPersistenceError });
+    t.deepEqual(freezeTurnOwner(view as never).sessionEpochFailure, { kind: 'append-failed', detail: 'EACCES B' });
+    t.is(memory.getSessionEpochFailure(path), null);
+    setLocale(locale); // Resolve language at refusal, after freezing A.
+    const expected = locale === 'pl'
+        ? 'Błąd sub-agenta child: Nie można przygotować kopii roboczej: nie udało się potwierdzić tożsamości tej rozmowy. Powód: Nie udało się dopisać identyfikatora rozmowy: EACCES A. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.'
+        : 'Sub-agent child error: Cannot prepare a draft: this conversation’s identity could not be confirmed. Reason: Could not append the conversation identifier: EACCES A. You can continue chatting and run read-only tasks.';
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    const delegate = createDelegateTool(f.app, { drafts: f.drafts });
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
+    f.agent.permissions.guidance_mode = true;
+    const refused = await delegate.execute({ task: 'Write', aspect: 'child', background: false, _invocationDelegationDepth: 1,
+        _invocationOrigin: failedOrigin, _invocationAgentName: 'Tester' }, f.app, f.plugin as never);
+    t.like(refused, { success: false, error: expected, tools_used: [] });
+    const malformed = await delegate.execute({ task: 'Write', aspect: 'child', background: false, _invocationDelegationDepth: 1,
+        _invocationOrigin: { ...failedOrigin, sessionEpochFailure: { kind: 'append-failed', detail: 42 } },
+        _invocationAgentName: 'Tester' }, f.app, f.plugin as never);
+    t.like(malformed, { success: false, error: locale === 'pl'
+        ? 'Błąd sub-agenta child: Nie można przygotować kopii roboczej: brakuje potwierdzonego właściciela rozmowy.'
+        : 'Sub-agent child error: Cannot prepare a draft: the conversation has no confirmed owner.' });
+    const reading = f.run(['read'], { origin: failedOrigin });
+    (await f.requests.next()).call('read', { path: 'a.md' });
+    const read = await f.requests.next();
+    t.deepEqual(lastTool(read), { success: true, path: 'a.md', content: 'Baza' }); read.done('Read Baza');
+    t.is((await reading).result, 'Read Baza');
+    t.deepEqual(f.store.list(), []);
+    t.is(await adapter.read(path), history);
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+    memory.setActiveSessionIdentity(path, null);
+    t.is(memory.getSessionEpochFailure(path), null);
+    adapter.append = async (target, data) => adapter.write(target, await adapter.read(target) + data);
+    const epoch = await memory.ensureActiveSessionEpoch(path, () => true);
+    t.is((await new AgentMemory({ adapter }, 'Tester').loadActiveSession(path)).metadata.epoch, epoch);
+    const retry = freezeTurnOwner(view as never);
+    t.is(retry.sessionEpochFailure, undefined);
+    const writing = f.run(['write'], { origin: { agentName: retry.agentName, sessionPath: retry.sessionPath, sessionEpoch: retry.sessionEpoch! } });
+    (await f.requests.next()).call('write', { path: 'a.md', content: 'Retry draft' });
+    const written = await f.requests.next(); t.like(lastTool(written), { success: true }); written.done('Prepared');
+    t.is(await f.ownView(await writing).read('a.md'), 'Retry draft');
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+    t.deepEqual(failedOrigin.sessionEpochFailure, { kind: 'append-failed', detail: 'EACCES A' });
 });

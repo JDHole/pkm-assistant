@@ -941,3 +941,7 @@ Listing kopii przenosi `status:'ambiguous-input'` i `sources` z zamrożonych war
 zarówno przez Vault API, jak przez adapter administratora. Filtr uprawnień nadal działa
 na tych samych logicznych ścieżkach. Test A/B → C w `runnerDrafts.test.ts` czyta wynik
 publicznego list i read, a nie wewnętrzny model widoku.
+
+P4 migracji epoki: DelegateTool przenosi opcjonalne `sessionEpochFailure` z zaufanego
+origin przez parser schematu memory (`unknown`, maskowanie, zamrożona kopia).
+Niepoprawne dane są pomijane; przy potwierdzonej epoce diagnostyka nie jest przenoszona.

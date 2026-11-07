@@ -1,3 +1,4 @@
+import type { SessionEpochFailure } from '../memory/index.js';
 import { summarizeDraft } from '../vault-drafts/index.js';
 import type { DraftStore, DraftRef, DraftSummary, DraftManifest } from '../vault-drafts/index.js';
 /**
@@ -99,6 +100,7 @@ export interface SubTaskOrigin {
     agentName: string;
     sessionPath?: string;
     sessionEpoch?: string;
+    sessionEpochFailure?: Readonly<SessionEpochFailure>;
     tabKey?: string;
 }
 

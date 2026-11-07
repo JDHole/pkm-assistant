@@ -1,3 +1,4 @@
+import type { SubTaskOrigin } from '../../sub-agents/index.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import fs from 'node:fs';
@@ -33,6 +34,7 @@ function fixture() {
     memory.setActiveSessionIdentity(path, null);
     const requests: string[] = [], errors: string[] = [];
     const payloads = new Map<string, unknown>(), answers = new Map<string, string>();
+    const origins = new Map<string, SubTaskOrigin>();
     function chat(id: string, delegation = true) {
         const rw = new RollingWindow();
         const agent = { name: 'Lead' };
@@ -55,12 +57,12 @@ function fixture() {
             } }),
             _chatResolveTools: () => [], _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {},
             _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {}, _isTurnActiveTab: () => false,
-            _finalizeTurn(_turn: unknown, result: { finalText: string }) { answers.set(id, result.finalText); }, handle_error(error: unknown) { errors.push(String(error)); },
+            _finalizeTurn(turn: { origin: SubTaskOrigin }, result: { finalText: string }) { answers.set(id, result.finalText); origins.set(id, turn.origin); }, handle_error(error: unknown) { errors.push(String(error)); },
         };
         return { view, tab, send: () => send_message.call(view as never, { injectedText: `Pytanie ${id}`, meta: { origin: 'human' } }),
             close: () => streamingManager.stopStream(`${id}::${id}`) };
     }
-    return { files, appends, adapter, memory, path, requests, payloads, answers, errors, chat };
+    return { files, appends, adapter, memory, path, requests, payloads, answers, origins, errors, chat };
 }
 
 // Replacements: R2 unverified backup → read failure; failed replacement → append failure;
@@ -93,8 +95,9 @@ for (const failure of ['read', 'append', 'unconfirmed-append'] as const) {
         t.is(await read(f.path), original);
         t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
             ['Historyczne pytanie', 'Historyczna odpowiedź', `Pytanie ${failure}`]);
-        t.is(f.errors.length, 1);
-        t.deepEqual(f.requests, []); // P4 changes failed ensure to allow the model.
+        t.deepEqual(f.errors, []);
+        t.deepEqual(f.requests, [failure]);
+        t.is(f.answers.get(failure), `Odpowiedź ${failure}`);
         t.deepEqual([f.memory.sessionEpoch, chat.tab.sessionEpoch], [null, null]);
     });
 }
@@ -323,9 +326,9 @@ for (const mode of ['append', 'read-failure'] as const) {
         } else {
             t.deepEqual(parsed.messages.map(m => m.content), expected);
             t.deepEqual([f.memory.sessionEpoch, chat.tab.sessionEpoch], [null, null]);
-            t.deepEqual(f.requests, []);
-            t.is(f.errors.length, 1);
-            t.true(f.errors[0].includes('EACCES epoch readback'));
+            t.deepEqual(f.requests, ['readback-read-failure']);
+            t.is(f.answers.get('readback-read-failure'), 'Odpowiedź readback-read-failure');
+            t.deepEqual(f.errors, []);
         }
     });
 }
@@ -347,14 +350,15 @@ test.serial('P2 filesystem: five failed epoch reads preserve history and the nex
         t.is(f.memory.sessionEpoch, null);
     }
     t.is(failures, 5);
-    t.deepEqual(f.errors, Array<string>(5).fill('Error: EACCES epoch read'));
-    t.deepEqual(f.requests, []);
+    t.deepEqual(f.errors, []);
+    t.deepEqual([...f.answers], [0, 1, 2, 3, 4].map(i => [`failure-${i}`, `Odpowiedź failure-${i}`]));
+    t.deepEqual(f.requests, ['failure-0', 'failure-1', 'failure-2', 'failure-3', 'failure-4']);
     t.true((await read(f.path)).startsWith(history));
     t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(message => message.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie failure-0', 'Pytanie failure-1', 'Pytanie failure-2', 'Pytanie failure-3', 'Pytanie failure-4']);
     const retry = f.chat('retry'); t.teardown(retry.close);
     await retry.send();
-    t.deepEqual(f.requests, ['retry']);
+    t.deepEqual(f.requests, ['failure-0', 'failure-1', 'failure-2', 'failure-3', 'failure-4', 'retry']);
     t.regex(retry.tab.sessionEpoch!, /^[0-9a-f]{32}$/);
     t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, retry.tab.sessionEpoch);
 });
@@ -380,3 +384,34 @@ test.serial('P2 filesystem: successful migration preserves history and a fresh r
     t.deepEqual(parsed.messages.map(m => m.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie success']);
 });
+
+
+test.serial('P4: read-only legacy session reaches the model with an unsaved question in RAM', async t => {
+    const f = fixture(), chat = f.chat('read-only');
+    t.teardown(chat.close);
+    f.adapter.append = async () => { throw new Error('EACCES session'); };
+    await chat.send();
+    t.deepEqual(f.payloads.get('read-only'), [{ role: 'system', content: 'system' }, { role: 'user', content: 'Pytanie read-only' }]);
+    t.is(f.answers.get('read-only'), 'Odpowiedź read-only');
+    t.deepEqual(f.origins.get('read-only')?.sessionEpochFailure, { kind: 'append-failed', detail: 'EACCES session' });
+    t.deepEqual(f.errors, []);
+    t.is(await f.adapter.read(f.path), history);
+    t.deepEqual([f.memory.sessionEpoch, chat.tab.sessionEpoch], [null, null]);
+    t.deepEqual(f.memory.getSessionEpochFailure(f.path), { kind: 'append-failed', detail: 'EACCES session' });
+});
+
+for (const kind of ['confirmed', 'owner-switch', 'window-error'] as const) {
+    test.serial(`P4: question persistence catch does not swallow ${kind}`, async t => {
+        const f = fixture(), chat = f.chat(kind);
+        t.teardown(chat.close);
+        if (kind === 'confirmed') f.memory.setActiveSessionIdentity(f.path, 'a'.repeat(32));
+        if (kind === 'window-error') chat.view.append_message = async () => { throw new Error('window failed'); };
+        f.adapter.append = async () => {
+            if (kind === 'owner-switch') f.memory.setActiveSessionIdentity(f.path, null);
+            throw new Error('EACCES question');
+        };
+        await t.throwsAsync(chat.send(), { message: kind === 'window-error' ? 'window failed' : 'EACCES question' });
+        t.is(await f.adapter.read(f.path), history);
+        t.deepEqual(f.requests, []);
+    });
+}

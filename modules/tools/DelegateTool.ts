@@ -1,3 +1,4 @@
+import { parseSessionEpochFailure } from '../memory/index.js';
 import type { SubRunDrafts } from '../sub-agents/index.js';
 import type { DraftRef } from '../vault-drafts/index.js';
 import { redactParentConversationSnapshot } from '../sub-agents/index.js';
@@ -636,6 +637,8 @@ function _resolveOrigin(args: DelegateToolArgs): SubTaskOrigin | undefined {
     const origin: SubTaskOrigin = { agentName: raw.agentName };
     if (typeof raw.sessionPath === 'string') origin.sessionPath = raw.sessionPath;
     if (typeof raw.sessionEpoch === 'string') origin.sessionEpoch = raw.sessionEpoch;
+    const failure = parseSessionEpochFailure(raw.sessionEpochFailure);
+    if (!origin.sessionEpoch && failure) origin.sessionEpochFailure = failure;
     if (typeof raw.tabKey === 'string') origin.tabKey = raw.tabKey;
     return origin;
 }

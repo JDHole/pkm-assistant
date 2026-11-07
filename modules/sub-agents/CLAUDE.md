@@ -1062,3 +1062,12 @@ Composition root przekazuje identyczny SubRunDrafts (lub unavailable) do obu fab
 `delegate` oraz `sub_agent`. Druga przekazuje DI do swojego wewnętrznego delegate,
 więc kontynuacja widzi poprzednią kopię i tworzy nową. Harness 75 weryfikuje składanie
 po pełnym boocie: read daje A, write C pozostaje w kopii, a vault nadal ma Baza.
+
+### 2.4.7 P4 migracji — odmowa kopii z przyczyną
+
+`SubTaskOrigin.sessionEpochFailure` niesie zamrożoną diagnostykę memory przy braku
+epoki. Nie jest częścią klucza ownera ani manifestu. `SubRunDrafts.open` przepuszcza
+odczyt bez warstw, a kopii odmawia z przyczyną w aktualnym języku UI (PL/EN).
+Bez przyczyny używa odmowy ogólnej; brak fallbacku zapisu live. Warstwy poprzedników
+nadal wymagają pełnego właściciela. Testy P4 w `../tools/runnerDrafts.test.ts`
+sprawdzają realny odczyt, odmowę przez delegate, izolację A/B i kopię po ponowieniu.

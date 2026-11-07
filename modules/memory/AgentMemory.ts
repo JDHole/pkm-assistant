@@ -47,6 +47,8 @@ import { makeMemoryNoteFilename, isValidNoteType, getSafeAgentName } from './Mem
 import { findFreeCollisionPath } from './collisionSuffix.js';
 import { t } from '../../core/i18n/index.js';
 import { getTokenCount, maskSensitiveData, probeFile, readIfExists } from '../../core/index.js';
+import { SessionEpochPersistenceError, persistSessionEpoch } from './sessionEpochFailure.js';
+import type { SessionEpochFailure } from './sessionEpochFailure.js';
 import { log } from '../../core/utils/Logger.js';
 
 /**
@@ -344,6 +346,13 @@ type ObservedWriterInput =
     | { kind: 'cached' };
 
 export class AgentMemory {
+    private _epochFailure?: { path: string; revision: number; failure: Readonly<SessionEpochFailure> };
+    get sessionIdentityRevision(): number { return this._sessionIdentityRevision; }
+    getSessionEpochFailure(path: string): Readonly<SessionEpochFailure> | null {
+        const last = this._epochFailure;
+        return !this.sessionEpoch && path === this.activeSessionPath && last?.path === path
+            && last.revision === this._sessionIdentityRevision ? last.failure : null;
+    }
     private _removalSavesInFlight = new Map<string, Promise<string>>();
     private _epochMigrations = new Map<string, {
         revision: number;
@@ -498,10 +507,21 @@ export class AgentMemory {
             const owners = new Set([isCurrent]);
             const current = () => sameOwner() && this.sessionEpoch === expectedEpoch && [...owners].some(check => check());
             const result = this._enqueuePathWrite(path, async () => {
-                const epoch = await this._establishSessionEpochUnderLock(path, expectedEpoch, current);
-                if (!current()) throw new Error('Session epoch: owner changed');
-                this.sessionEpoch = epoch;
-                return epoch;
+                try {
+                    const epoch = await this._establishSessionEpochUnderLock(path, expectedEpoch, current);
+                    if (!current()) throw new Error('Session epoch: owner changed');
+                    this.sessionEpoch = epoch;
+                    this._epochFailure = undefined;
+                    return epoch;
+                } catch (error: unknown) {
+                    if (!current()) throw new Error('Session epoch: owner changed');
+                    if (error instanceof SessionEpochPersistenceError) {
+                        this._epochFailure = { path, revision, failure: error.failure };
+                        log.warn('AgentMemory', 'session epoch unavailable', { agent: this.agentName, path,
+                            stage: error.failure.kind, reason: 'detail' in error.failure ? error.failure.detail : '' });
+                    }
+                    throw error;
+                }
             });
             migration = { revision, owners, result };
             this._epochMigrations.set(path, migration);
@@ -524,18 +544,20 @@ export class AgentMemory {
     private async _establishSessionEpochUnderLock(path: string, expectedEpoch: string | null, current: () => boolean): Promise<string> {
         try {
             if (!current()) throw new Error('Session epoch: owner changed');
-            const content = await this.vault.adapter.read(path);
+            const content = await persistSessionEpoch('read-failed', () => this.vault.adapter.read(path));
             const metadata = this._parseFrontmatter(content);
             if (!current() || metadata.agent && metadata.agent !== this.agentName) throw new Error('Session epoch: owner changed');
             const existingEpoch = resolveSessionEpoch(content);
             if (expectedEpoch && existingEpoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
             this._refreshSessionWriterState(path, content);
             if (existingEpoch) return existingEpoch;
-            await this._appendEventUnderLock(path, { type: 'session_epoch', epoch: this._newSessionEpoch() }, { kind: 'observed', content });
-            const readback = await this.vault.adapter.read(path);
+            if (typeof this.vault.adapter.append !== 'function') throw new SessionEpochPersistenceError({ kind: 'append-unavailable' });
+            await persistSessionEpoch('append-failed', () => this._appendEventUnderLock(path,
+                { type: 'session_epoch', epoch: this._newSessionEpoch() }, { kind: 'observed', content }));
+            const readback = await persistSessionEpoch('readback-failed', () => this.vault.adapter.read(path));
             this._refreshSessionWriterState(path, readback);
             const epoch = resolveSessionEpoch(readback);
-            if (!readback.startsWith(content) || !epoch) throw new Error('Session epoch: write verification failed');
+            if (!readback.startsWith(content) || !epoch) throw new SessionEpochPersistenceError({ kind: 'verification-failed' });
             if (!current()) throw new Error('Session epoch: owner changed');
             return epoch;
         } catch (error) {

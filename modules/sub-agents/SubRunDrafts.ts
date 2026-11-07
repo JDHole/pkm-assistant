@@ -2,6 +2,8 @@ import { DraftError, DraftView, summarizeDraft } from '../vault-drafts/index.js'
 import type { DraftStore, DraftPersistence, DraftViewIO, DraftId, DraftRef, DraftPhase, DraftIdentity, FrozenDraftView } from '../vault-drafts/index.js';
 import type { VaultExecution } from '../tools/index.js';
 import type { SubTaskOrigin } from './SubTaskRegistry.js';
+import { sessionEpochFailureReason } from '../memory/index.js';
+import { t } from '../../core/i18n/index.js';
 
 type SealReason = Extract<DraftPhase, { kind: 'sealed' }>['reason'];
 type ClosedRun = { owner: DraftIdentity['owner']; layers: readonly FrozenDraftView[]; release: () => void };
@@ -38,7 +40,9 @@ export class SubRunDrafts {
         if (!input.writable && !layers.length) return undefined;
         const origin = input.origin;
         if (!origin?.agentName || !origin.sessionPath || !origin.sessionEpoch)
-            throw new DraftError('mutation-denied', 'Draft execution requires a complete owner');
+            throw new DraftError('mutation-denied', !origin?.sessionEpoch && origin?.sessionEpochFailure
+                ? t('subagent.draft.epoch_unavailable', { reason: sessionEpochFailureReason(origin.sessionEpochFailure) })
+                : t('subagent.draft.owner_missing'));
         const owner = { agentName: origin.agentName, sessionPath: origin.sessionPath, sessionEpoch: origin.sessionEpoch };
         for (const parent of parents) if (parent.owner.agentName !== owner.agentName || parent.owner.sessionPath !== owner.sessionPath || parent.owner.sessionEpoch !== owner.sessionEpoch)
             throw new DraftError('mutation-denied', 'Foreign predecessor draft');

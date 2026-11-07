@@ -1780,11 +1780,11 @@ a istniejący przepływ zgody i diff obsługuje rzeczywisty zapis.
 
 ### 2.4.7 — starsze sesje przed zamrożeniem tury
 
-`send_message` wywołuje `ensureTurnSessionEpoch` przed `freezeTurnOwner`. Starsza istniejąca
+`send_message` wywołuje `ensureTurnSessionEpoch` przed docelowym zamrożeniem ownera tury. Starsza istniejąca
 sesja otrzymuje trwałą epokę przez kolejkę AgentMemory tylko gdy rejestr udostępnia agentowi
 `delegate` lub `sub_agent` (starszy host bez rejestru zachowuje migrację). Zwykły czat bez
 delegacji nie przepisuje starego pliku. Nie zgadujemy zamiaru modelu z tekstu pytania:
-jeśli delegacja jest dostępna, epoka musi powstać przed zamrożeniem adresu tury.
+jeśli delegacja jest dostępna, próba ustanowienia epoki poprzedza zamrożenie adresu tury.
 Sprawdzane są agent, instancja pamięci, aktywny obiekt i ID zakładki, ścieżka/epoka oraz
 okno rozmowy; przełączenie nie przypisuje migrowanej tożsamości nowej zakładce ani nie
 uruchamia jej modelu. Dwie zakładki współdzielą migrację i przyjmują tę samą epokę,
@@ -1792,3 +1792,12 @@ ale zachowują osobne kontrole właściciela. AgentMemory dopisuje epokę natywn
 i potwierdza ją readbackiem (kontrakt P3 w `../memory/CLAUDE.md`). Brak rzeczywistego właściciela nadal
 odmawia piszącemu subowi, bez zapisu live. Testy: `chat_streaming.epochMigration.test.ts`
 (produkcyjne send_message), F1 w `turnOwner.test.ts` i harness 74 (piszący sub po boocie).
+
+P4 migracji: tylko `SessionEpochPersistenceError` pozwala kontynuować bez epoki,
+po ponownej kontroli właściciela i rewizji. FrozenTurnOwner kopiuje zamaskowaną
+przyczynę; turnOrigin przekazuje ją tylko przy braku epoki. Osobny wąski catch
+zapisu pytania legacy sprawdza niezmienionego właściciela i obecność wiadomości
+w jego oknie. Logger ostrzega o niezapisanym pytaniu; model korzysta z RAM.
+Błąd append_message, zapis nowej/potwierdzonej sesji i zmiana właściciela nie są
+połykane. Testy P4 w chat_streaming.epochMigration.test.ts sprawdzają odpowiedź
+modelu, origin, dokładne bajty historii oraz granice catcha.

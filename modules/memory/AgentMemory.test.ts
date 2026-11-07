@@ -1,3 +1,5 @@
+import { SessionEpochPersistenceError, parseSessionEpochFailure } from './sessionEpochFailure.js';
+import { log } from '../../core/utils/Logger.js';
 import test from 'ava';
 import { AgentMemory, parseBrainLog } from './AgentMemory.js';
 import { StateManager } from './StateManager.js';
@@ -2549,7 +2551,7 @@ for (const outcome of ['success', 'append-error', 'readback-error', 'owner-switc
         if (outcome === 'success') t.is(await result, '0123456789abcdef0123456789abcdef');
         else await t.throwsAsync(result, { message: {
             'append-error': 'EACCES append', 'readback-error': 'EACCES readback',
-            'owner-switch': 'Session epoch: owner changed', 'no-append': 'Session epoch: native append unavailable',
+            'owner-switch': 'Session epoch: owner changed', 'no-append': 'Session epoch: append-unavailable',
         }[outcome] });
         const appended = outcome !== 'append-error' && outcome !== 'no-append';
         t.deepEqual(f.files, { ...before, [path]: original + (appended ? block : '') });
@@ -2597,3 +2599,27 @@ for (const phase of ['readback', 'readback-error', 'existing-epoch'] as const) {
         ]);
     });
 }
+
+
+test.serial('P4 shared epoch failure masks diagnostics once and clears them on successful retry', async t => {
+    const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+    const path = `${memory.paths.sessionsActive}/legacy.md`, history = '---\nagent: Lead\n---\nHistoria';
+    f.files[path] = history;
+    memory.setActiveSessionIdentity(path, null);
+    const warnings: unknown[][] = [], warn = log.warn;
+    log.warn = (...args) => { warnings.push(args); };
+    t.teardown(() => { log.warn = warn; });
+    memory.vault.adapter.append = async () => { throw new Error('EACCES Authorization: Bearer SECRETVALUE123456'); };
+    await Promise.all([1, 2].map(() => t.throwsAsync(memory.ensureActiveSessionEpoch(path, () => true), { instanceOf: SessionEpochPersistenceError })));
+    t.deepEqual(memory.getSessionEpochFailure(path), { kind: 'append-failed', detail: 'EACCES Authorization: Bearer SECR***3456' });
+    t.deepEqual(warnings, [['AgentMemory', 'session epoch unavailable', { agent: 'Lead', path, stage: 'append-failed', reason: 'EACCES Authorization: Bearer SECR***3456' }]]);
+    t.is(f.files[path], history);
+    t.is(memory.sessionEpoch, null);
+    for (const invalid of [undefined, null, [], { kind: 'read-failed' }, { kind: 'read-failed', detail: undefined }, { kind: 'other' }])
+        t.is(parseSessionEpochFailure(invalid), null);
+    memory.vault.adapter.append = async (target, data) => { f.files[target] += data; };
+    const epoch = await memory.ensureActiveSessionEpoch(path, () => true);
+    t.regex(epoch, /^[0-9a-f]{32}$/);
+    t.is((await new AgentMemory(f.vault, 'Lead').loadActiveSession(path)).metadata.epoch, epoch);
+    t.is(memory.getSessionEpochFailure(path), null);
+});

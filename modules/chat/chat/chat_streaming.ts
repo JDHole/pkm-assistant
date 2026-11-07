@@ -475,6 +475,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             return;
         }
     }
+    const questionOwner = freezeTurnOwner(this);
+    const questionRevision = questionOwner.memory?.sessionIdentityRevision;
+    const questionTabId = questionOwner.tab?.sessionId;
     let savedUserContent;
     const turnAbort = createTurnAbort();
     const questionTabKey = questionDelivery ? _tabKey(questionDelivery.tab) : '';
@@ -533,7 +536,18 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             return;
         }
     } else {
-        await this.appendToActiveSession?.(userEvent);
+        try { await this.appendToActiveSession?.(userEvent); }
+        catch (error: unknown) {
+            const current = freezeTurnOwner(this);
+            if (!questionOwner.sessionPath || questionOwner.sessionEpoch
+                || current.memory !== questionOwner.memory || current.agent !== questionOwner.agent
+                || current.sessionPath !== questionOwner.sessionPath || current.sessionEpoch
+                || current.memory?.sessionIdentityRevision !== questionRevision
+                || current.tab !== questionOwner.tab || current.tab?.sessionId !== questionTabId
+                || current.rollingWindow !== sendWindow
+                || !sendWindow?.messages.some(message => sessionMessageId(message) === userMessageId)) throw error;
+            log.warn('Chat', 'Legacy question was not persisted', { path: questionOwner.sessionPath, reason: safeErrorText(error) });
+        }
     }
 
     if (!questionDelivery) {
@@ -798,6 +812,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             ...(turnSessionPath ? { sessionPath: turnSessionPath } : {}),
             // Nieznana epoka = brak pola (jak w `SubTaskOrigin`), nigdy `null`.
             ...(turnSessionEpoch ? { sessionEpoch: turnSessionEpoch } : {}),
+            ...(!turnSessionEpoch && owner.sessionEpochFailure ? { sessionEpochFailure: owner.sessionEpochFailure } : {}),
             ...(ownerTabKey ? { tabKey: ownerTabKey } : {}),
         };
 
