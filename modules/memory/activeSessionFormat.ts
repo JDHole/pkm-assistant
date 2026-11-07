@@ -54,7 +54,14 @@ import { sessionMessageId, bindSessionMessageId } from './sessionMessageIdentity
  * wersji, a czytnik musi rozumieć je NA ZAWSZE: **v2/v3 czytają v1 i legacy
  * identycznie jak dotąd.** Stała jest jawną kotwicą kontraktu w kodzie.
  */
-export const ACTIVE_SESSION_FORMAT_VERSION = 3;
+// v4: session_epoch carries identity metadata, never a model message.
+export const ACTIVE_SESSION_FORMAT_VERSION = 4;
+
+export type SessionEpoch = string & { readonly __sessionEpoch: unique symbol };
+
+export function parseSessionEpoch(value: unknown): SessionEpoch | null {
+    return typeof value === 'string' && value.length === 32 && /^[0-9a-f]{32}$/.test(value) ? value as SessionEpoch : null;
+}
 
 /**
  * Rola wiadomości uznawana przez format sesji za granicę bloku (`## Rola`).
@@ -71,6 +78,7 @@ export type SessionRole = 'system' | 'user' | 'assistant' | 'tool';
  * Nazwa pola bloku event-logu (format A). Kolejność zapisu trzyma `EVENT_FIELDS`.
  */
 export type EventFieldName =
+    | 'epoch'
     | 'message_id'
     | 'removed_messages'
     | 'removed_ranges'
@@ -179,6 +187,7 @@ export const KNOWN_ROLES = new Set<string>(['system', 'user', 'assistant', 'tool
  * aby dodana nazwa metadanych nie ucinała nieescapowanej wiadomości legacy.
  */
 export const EVENT_FIELDS: EventFieldName[] = [
+    'epoch',
     'message_id',
     'removed_messages',
     'removed_ranges',
@@ -201,7 +210,7 @@ export const EVENT_FIELDS: EventFieldName[] = [
 
 /** Alternatywa regexowa ze znanych etykiet - składana RAZ. */
 const FIELD_LABELS_ALT = EVENT_FIELDS.join('|');
-const HEADER_FIELDS = new Set(['message_id', 'removed_messages', 'removed_ranges', 'parent_conversation_text']);
+const HEADER_FIELDS = new Set(['epoch', 'message_id', 'removed_messages', 'removed_ranges', 'parent_conversation_text']);
 const BODY_LABELS_ALT = EVENT_FIELDS.filter(field => !HEADER_FIELDS.has(field)).join('|');
 
 /**
@@ -340,6 +349,41 @@ export function maxSeq(text: string | null | undefined): number {
     return max;
 }
 
+function normalizeSessionText(text: string): string {
+    return text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
+
+/** Shared physical block boundaries for identity resolution and message parsing. */
+function* sessionBlocks(text: string): Generator<{ rawHeader: string; rawBody: string }> {
+    const body = normalizeSessionText(text).replace(/^---\n[\s\S]*?\n---\n*/, '');
+    for (const part of body.split(/(?:^|\n)## /).slice(1)) {
+        if (!part.trim()) continue;
+        const splitIndex = part.indexOf('\n');
+        yield {
+            rawHeader: splitIndex === -1 ? part : part.slice(0, splitIndex),
+            rawBody: splitIndex === -1 ? '' : part.slice(splitIndex + 1),
+        };
+    }
+}
+
+function isSessionEpochEvent(header: string): boolean {
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\s[—-]\s/.test(header.trim())
+        && eventTypeFromHeader(header) === 'session_epoch';
+}
+
+/** Valid frontmatter wins; otherwise the first valid event in file order wins. */
+export function resolveSessionEpoch(content: string): SessionEpoch | null {
+    const frontmatterEpoch = parseSessionEpoch(parseFrontmatter(normalizeSessionText(content)).epoch);
+    if (frontmatterEpoch) return frontmatterEpoch;
+    for (const { rawHeader, rawBody } of sessionBlocks(content)) {
+        if (!isSessionEpochEvent(rawHeader)) continue;
+        const epoch = parseSessionEpoch(extractEventField(rawBody, 'epoch'));
+        const seq = seqFromEvent(rawBody);
+        if (epoch && seq !== null && Number.isSafeInteger(seq) && seq > 0) return epoch;
+    }
+    return null;
+}
+
 /**
  * Czyta plik aktywnej sesji JEDNYM przebiegiem, klasyfikując KAŻDY blok `## ...` osobno.
  *
@@ -381,12 +425,8 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
     };
     if (!text) return result;
 
-    // Normalizacja końców linii RAZ - dalej cały parser pracuje wyłącznie na `\n`.
-    let body = text.replace(/\r\n/g, '\n');
-    result.metadata = parseFrontmatter(body);
-    body = body.replace(/^---\n[\s\S]*?\n---\n*/, '');
-
-    const parts = body.split(/(?:^|\n)## /);
+    result.metadata = parseFrontmatter(normalizeSessionText(text));
+    result.metadata.epoch = resolveSessionEpoch(text);
     // Ostatnia wiadomość była transkryptowa? (decyduje, czy doklejka idzie przez unescape)
     let lastWasTranscript = false;
     let ordinal = 0;
@@ -398,13 +438,9 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
         if (!deleted.has(id)) result.messages.push(message);
     };
 
-    // parts[0] to treść PRZED pierwszym `## ` (nagłówek H1 pliku sesji) - nigdy nie jest blokiem.
-    for (let i = 1; i < parts.length; i++) {
-        const part = parts[i];
-        if (!part.trim()) continue;
-        const splitIndex = part.indexOf('\n');
-        const rawHeader = splitIndex === -1 ? part : part.slice(0, splitIndex);
-        const rawBody = splitIndex === -1 ? '' : part.slice(splitIndex + 1);
+    for (const { rawHeader, rawBody } of sessionBlocks(text)) {
+        // Identity control records never become messages, even with corrupt fields.
+        if (isSessionEpochEvent(rawHeader)) continue;
 
         // (a) transkrypt
         const role = rawHeader.trim().toLowerCase();
@@ -704,8 +740,7 @@ export function parseFrontmatter(content: string): SessionFrontmatter {
         }
     }
     delete result._lastKey;
-    const epoch = result.epoch;
-    result.epoch = typeof epoch === 'string' && /^[0-9a-f]{32}$/.test(epoch) ? epoch : null;
+    result.epoch = parseSessionEpoch(result.epoch);
     return result;
 }
 

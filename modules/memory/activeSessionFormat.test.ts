@@ -6,10 +6,87 @@ import {
     unescapeEventFieldLabels,
     formatSessionEvent,
     parseActiveSession,
+    parseFrontmatter,
+    parseSessionEpoch,
+    resolveSessionEpoch,
     maxSeq,
 } from './activeSessionFormat.js';
 import { formatToMarkdown, parseSessionFile } from './sessionParser.js';
 import { sanitizeToolTranscript } from '../agent-loop/index.js';
+import { sessionMessageId } from './sessionMessageIdentity.js';
+
+const EPOCH_A = '0123456789abcdef0123456789abcdef';
+const EPOCH_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const EPOCH_EVENT = '## 2026-11-07T12:00:00.000Z — session epoch\n\n**epoch:**\n\n0123456789abcdef0123456789abcdef\n\n**seq:**\n\n7\n\n';
+
+test('session epoch format writes literal metadata fields', t => {
+    t.is(formatSessionEvent('session_epoch', { epoch: EPOCH_A, seq: 7 }, '2026-11-07T12:00:00.000Z'),
+        '## 2026-11-07T12:00:00.000Z — session epoch\n\n**epoch:**\n\n0123456789abcdef0123456789abcdef\n\n**seq:**\n\n7\n\n');
+    t.is(maxSeq(EPOCH_EVENT), 7);
+});
+
+test('epoch precedence is frontmatter then first valid event', t => {
+    const second = EPOCH_EVENT.replace(EPOCH_A, EPOCH_B).replace('12:00', '11:00').replace('\n7\n', '\n1\n');
+    const cases: [string, string | null][] = [
+        [`---\nepoch: ${EPOCH_B}\n---\n${EPOCH_EVENT}`, EPOCH_B],
+        [`---\nepoch: invalid\n---\n${EPOCH_EVENT}`, EPOCH_A],
+        [EPOCH_EVENT + second, EPOCH_A],
+        [second + EPOCH_EVENT, EPOCH_B],
+        [EPOCH_EVENT.replace(EPOCH_A, 'invalid') + second, EPOCH_B],
+        ['## User\n\nPytanie\n', null],
+        [`---\nepoch:\n  - ${EPOCH_B}\n---\n${EPOCH_EVENT}`, EPOCH_A],
+    ];
+    for (const [text, expected] of cases) {
+        for (const source of [text, '\uFEFF' + text.replace(/\n/g, '\r\n')]) {
+            t.is<string | null, string | null>(resolveSessionEpoch(source), expected);
+            t.is(parseActiveSession(source).metadata.epoch, expected);
+        }
+    }
+    t.is(parseFrontmatter(`---\nagent: Jaskier\n---\n${EPOCH_EVENT}`).epoch, null);
+});
+
+test('invalid epoch values never become identity', t => {
+    t.is<string | null, string>(parseSessionEpoch(EPOCH_A), '0123456789abcdef0123456789abcdef');
+    for (const value of [null, undefined, 123, true, [EPOCH_A], { epoch: EPOCH_A },
+        EPOCH_A.toUpperCase(), EPOCH_A.slice(1), EPOCH_A + 'a', EPOCH_A + '\n', 'g'.repeat(32), EPOCH_A + ' extra']) {
+        t.is(parseSessionEpoch(value), null);
+    }
+    const badEpochs = [EPOCH_A.toUpperCase(), EPOCH_A.slice(1), EPOCH_A + 'a', 'g'.repeat(32),
+        `["${EPOCH_A}"]`, `{"epoch":"${EPOCH_A}"}`, EPOCH_A + '\nextra'];
+    const invalid = badEpochs.map(value => EPOCH_EVENT.replace(EPOCH_A, value));
+    for (const seq of ['', '0', '-1', '1.5', '1e2', '9007199254740992', '7 extra']) {
+        invalid.push(EPOCH_EVENT.replace('\n7\n', `\n${seq}\n`));
+    }
+    invalid.push(EPOCH_EVENT.slice(0, EPOCH_EVENT.indexOf('**seq:**')),
+        EPOCH_EVENT.replace('**epoch:**', '**content:**'),
+        EPOCH_EVENT.replace('**epoch:**', '**content:**\n\nLiteral\n\n**epoch:**'),
+        EPOCH_EVENT.replace('2026-11-07T12:00:00.000Z — ', ''));
+    for (const text of invalid) {
+        t.is(resolveSessionEpoch(text), null);
+        t.is<string | null, string>(resolveSessionEpoch(text + EPOCH_EVENT), '0123456789abcdef0123456789abcdef');
+    }
+});
+
+test('epoch metadata never changes message content or IDs', t => {
+    const corrupt = EPOCH_EVENT.replace(EPOCH_A, 'invalid').replace('**seq:**\n\n7\n\n', '')
+        + '**role:**\n\nassistant\n\n**content:**\n\nNot a message\n\n';
+    const source = '## User\n\nPytanie\n\n' + corrupt + EPOCH_EVENT
+        + '## 2026-11-07T12:01:00.000Z — agent message\n\n**content:**\n\nOdpowiedź\n\n**epoch:**\n\nliteral\n\n**seq:**\n\n8\n\n'
+        + '## Assistant\n\nUsunięta\n\n'
+        + '## 2026-11-07T12:02:00.000Z — messages removed\n\n**removed_messages:**\n\n["legacy:3"]\n\n'
+        + '## 2026-11-07T12:03:00.000Z — subagent call\n\n**result:**\n\nWynik\n\n**question:**\n\n{"text":"Dalej?","resolution":{"kind":"no-answer"}}\n\n'
+        + EPOCH_EVENT.replace(EPOCH_A, EPOCH_B)
+        + '## 2026-11-07T12:04:00.000Z — sub task history\n\n**sub_task_history:**\n\n{"version":1}\n\n';
+    const parsed = parseActiveSession(source);
+    t.deepEqual(parsed.messages, [
+        { role: 'user', content: 'Pytanie', seq: null },
+        { role: 'assistant', content: 'Odpowiedź\n\n**epoch:**\n\nliteral', seq: 8 },
+        { role: 'assistant', content: 'Wynik', seq: null, question: { text: 'Dalej?', resolution: { kind: 'no-answer' } } },
+    ]);
+    t.deepEqual(parsed.messages.map(sessionMessageId), ['legacy:1', 'legacy:2', 'legacy:4']);
+    t.deepEqual(parsed.subTaskHistory, [{ version: 1 }]);
+    t.is(parsed.metadata.epoch, '0123456789abcdef0123456789abcdef');
+});
 
 /**
  * TEST KONTRAKTOWY pliku `sessions/active/*.md`.

@@ -6,6 +6,47 @@ import { parseSessionFile } from './sessionParser.js';
 import { t as tr, setLocale } from '../../core/i18n/index.js';
 import { SubAgentRunner } from '../sub-agents/index.js';
 
+test('frozen append and save accept event epoch and reject another owner', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const path = `${memory.paths.sessionsActive}/legacy.md`;
+    const otherPath = `${memory.paths.sessionsActive}/other.md`;
+    const epoch = '0123456789abcdef0123456789abcdef';
+    const otherEpoch = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const original = '---\nagent: Jaskier\n---\n\n## User\n\nHistoria\n\n'
+        + '## 2026-11-07T12:00:00.000Z — session epoch\n\n**epoch:**\n\n0123456789abcdef0123456789abcdef\n\n**seq:**\n\n7\n\n';
+    files[path] = original;
+    files[otherPath] = '## User\n\nInna rozmowa\n';
+    memory.setActiveSessionIdentity(otherPath, otherEpoch);
+    const event = { type: 'agent_message', content: 'Dopisek', timestamp: '2026-11-07T12:01:00.000Z' };
+    for (const expectedEpoch of [otherEpoch, null]) {
+        await t.throwsAsync(memory.appendSessionEvent(path, event, expectedEpoch),
+            { message: 'appendSessionEvent: frozen session epoch mismatch' });
+        await t.throwsAsync(memory.saveSession([{ role: 'user', content: 'Obcy zapis' }], {},
+            { expectedSession: { path, epoch: expectedEpoch } }),
+        { message: 'saveSession: frozen session missing or epoch mismatch' });
+        t.is(files[path], original);
+    }
+    t.is(await memory.appendSessionEvent(path, event, epoch), path);
+    t.is(files[path], original + '## 2026-11-07T12:01:00.000Z — agent message\n\n**content:**\n\nDopisek\n\n**seq:**\n\n8\n\n');
+    t.is(await memory.saveSession([
+        { role: 'user', content: 'Historia' }, { role: 'assistant', content: 'Dopisek' },
+        { role: 'user', content: 'Ogon zapisu' },
+    ], {}, { expectedSession: { path, epoch } }), path);
+    const fresh = new AgentMemory(vault, 'Jaskier');
+    const parsed = await fresh.loadActiveSession(path);
+    t.deepEqual(parsed.messages, [
+        { role: 'user', content: 'Historia', seq: null },
+        { role: 'assistant', content: 'Dopisek', seq: 8 },
+        { role: 'user', content: 'Ogon zapisu', seq: 9 },
+    ]);
+    t.is(parsed.metadata.epoch, '0123456789abcdef0123456789abcdef');
+    t.is(parsed.metadata.messageCount, '3');
+    t.is(memory.activeSessionPath, otherPath);
+    t.is(memory.sessionEpoch, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    t.is(files[otherPath], '## User\n\nInna rozmowa\n');
+});
+
 test('spóźniony wynik suba nie zmienia nowej sesji pod tą samą ścieżką', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');

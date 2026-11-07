@@ -343,17 +343,17 @@ Kontrakt pliku żyje w JEDNYM miejscu, `activeSessionFormat.ts`: `ACTIVE_SESSION
 `escapeActiveText`/`unescapeActiveText`, `formatSessionEvent` (pisarz, event-log),
 `parseActiveSession` (czytnik formatu event-log + transkryptu + plików MIESZANYCH - w
 produkcji plik po pierwszym autozapisie bywał mieszanką obu), `KNOWN_ROLES`, `EVENT_FIELDS`,
-`parseFrontmatter`. `sessionParser.ts` re-eksportuje `KNOWN_ROLES` i importuje
+`parseFrontmatter`, `parseSessionEpoch` i `resolveSessionEpoch`. `sessionParser.ts` re-eksportuje `KNOWN_ROLES` i importuje
 escape/unescape stąd - jedno źródło pary regexów, kierunek `sessionParser -> activeSessionFormat`,
 bez cyklu.
 
 Nowy plik `sessions/active/` zapisuje `epoch` jako 32 znaki hex z 16 losowych bajtów
-`crypto.getRandomValues`. `parseFrontmatter` i `parseActiveSession` zwracają ją jako
-tekst po dokładnej walidacji; brakująca lub nieprawidłowa wartość daje `null`. Odczyt starych
-plików bez `epoch` nie dopisuje pola ani nie migruje treści. `AgentMemory.sessionEpoch` jest
+`crypto.getRandomValues`. `parseFrontmatter` czyta tylko frontmatter; `parseActiveSession`
+używa resolvera opisanego niżej (format v4). Brak poprawnej epoki daje `null`. Odczyt
+starych plików nie dopisuje pola ani nie migruje treści. `AgentMemory.sessionEpoch` jest
 zsynchronizowane z `activeSessionPath`; bezpośrednia zmiana ścieżki zeruje epokę, a
 `setActiveSessionIdentity(path, epoch)` wiąże ścieżkę z wartością potwierdzoną z pliku.
-`appendSessionEvent` wewnątrz kolejki zapisu odczytuje nagłówek pliku i porównuje go z przekazaną oczekiwaną epoką; niezgodność przerywa zapis.
+`appendSessionEvent` wewnątrz kolejki zapisu odczytuje efektywną epokę resolverem i porównuje ją z przekazaną oczekiwaną epoką; niezgodność przerywa zapis.
 Tworzenie przez `startActiveSession`, samonaprawa i osobna droga `saveSession` zapisują epokę.
 Jeśli `saveSession` czeka na odczyt lub zapis, późniejsza zmiana tożsamości pamięci
 blokuje przypisanie epoki zapisywanego pliku do innej sesji, także przy ponownym użyciu
@@ -993,76 +993,37 @@ na keyword, a semantic korzysta z bazowego vaulta i nie widzi kopii. `scope: mem
 zachowuje dotychczasowy odczyt. Osobna tożsamość hosta kopii izoluje cache skanów.
 
 
-### 2.4.7 — trwała epoka starszej sesji przed turą
+### 2.4.7 P1 — czytnik epoki i dotychczasowy migrator
 
-`ensureActiveSessionEpoch(path, isCurrent)` odczytuje istniejącą sesję pod kolejką
-`_enqueuePathWrite`, sprawdza katalog właściciela, metadane agenta i rewizję tożsamości.
-Brakująca lub niepoprawna epoka dostaje 32 znaki hex. Nie tworzy brakującej sesji.
-Przywrócenie sesji samo nie migruje pliku; robi to `send_message` przed `freezeTurnOwner`,
-gdy agent ma dostępne `delegate` lub `sub_agent`. Bez tych narzędzi zwykła rozmowa tylko
-dopisuje zdarzenia. Starszy host bez rejestru narzędzi zachowuje ostrożny wariant migracji.
+Format v4 dodaje `session_epoch`: nagłówek ISO z tytułem `session epoch`, pole `epoch`
+w prefiksie metadanych i dodatni bezpieczny całkowity `seq`. `parseSessionEpoch(unknown)`
+waliduje dokładnie 32 małe znaki hex do branded `SessionEpoch`.
+`resolveSessionEpoch` wybiera poprawny frontmatter, a przy jego braku pierwszy poprawny
+event w fizycznej kolejności pliku (bez sortowania po czasie ani `seq`). Odczyt normalizuje
+BOM/CRLF w roboczym tekście. `epoch` nie jest delimiterem treści legacy.
+Rozpoznany blok epoki, także uszkodzony lub z polami wiadomości, nigdy nie staje się
+wiadomością i nie zmienia ID `legacy:N`, pytań ani historii subów.
+Resolver zasila parser, kontrole oczekiwanej epoki append/save i odczyt po tworzeniu
+w `saveSession`. Nowe sesje nadal zapisują epokę we frontmatter.
+Testy: `activeSessionFormat.test.ts` (format, pierwszeństwo, walidacja, treść i ID)
+i `AgentMemory.test.ts` (`frozen append and save accept event epoch and reject another owner`).
 
-**Gotcha rundy 2: pełny zapis nad jedyną kopią historii jest niedozwolony, nawet z readback.**
-Cała operacja (odczyt aktualnego źródła, przygotowanie, zastąpienie i ewentualne odtworzenie)
-pozostaje wewnątrz tej samej kolejki co append/save/archive. Dla instancji korzystających
-z tego samego adaptera kolejka i stan pisarza pliku (`seq`, końcowy newline, licznik appendów)
-są wspólne przez WeakMap. Ciepły cache oznacza teraz zapis przez dowolną taką instancję;
-`_sessionSavedCounts` pozostaje per instancja, bo dotyczy jej okna wiadomości.
+P1 nie przełącza pisarza migracji. `ensureActiveSessionEpoch(path, isCurrent)` nadal
+uruchamia `_migrateSessionEpoch`: sprawdza katalog, agenta i rewizję właściciela, tworzy
+`.bak`/`.prepared`, odsuwa źródło do `.original`, instaluje przygotowaną wersję i odczytuje
+wynik; rozbieżności mogą trafić do `.rescue`. Wymaga rename/append/remove, wykrywa
+pozostałości nieudanej migracji, a awaria nadal zatrzymuje turę przed modelem.
+Mechanizm ma znane wyścigi sprzątania/rescue i odświeżania cache; jego usunięcie należy do P3.
+Nie traktować obsługi eventu przez czytnik jako gwarancji zgodności starego migratora
+z sesją mającą wyłącznie epokę eventową: migrator nadal odczytuje frontmatter.
 
-Przed zastąpieniem powstają przy źródle `<sesja.md>.epoch-<32hex>.bak` (dokładne bajty
-oryginału, sprawdzone odczytem) i `.bak.prepared` (wersja z epoką przez `_writeSessionFile`,
-również sprawdzona odczytem). Sprawdzenie obejmuje cały plik i całe body, więc chroni także
-zdarzenia niewidoczne jako wiadomości oraz nieznane bloki. Backup jest świadomym wyjątkiem
-od maskowania przy zapisie: przechowuje już istniejące bajty 1:1, także BOM/CRLF; nie jest
-nowym transkryptem. Przygotowana wersja zachowuje dotychczasowe maskowanie sekretów.
-
-**Gotcha rundy 3: `rename` nad ścieżką sesji może skasować plik odtworzony przez innego pisarza.**
-Migracja wymaga `adapter.rename`, natywnego `append` i `remove`; brak którejkolwiek metody
-kończy ją błędem przed utworzeniem kopii. Źródło trafia do `.bak.original`, następnie kod
-sprawdza jego bajty i brak ścieżki sesji. Instalacja używa natywnego `append` do zwolnionej
-ścieżki, więc również odtworzenie pliku wewnątrz tej operacji nie nadpisze cudzych bajtów.
-Nie wolno zastąpić tego przez `write` ani fallback read+write. Adapter, który nie potrafi
-utworzyć brakującego pliku przez `append`, zgłosi błąd; oryginał pozostaje w kopii.
-Zmiana źródła podczas przygotowania lub przenoszenia pozwala na maksymalnie trzy próby
-w ramach tej samej epoki i jednej kopii `.bak`.
-
-Readback równy przygotowanej wersji lub zaczynający się od jej pełnych bajtów oznacza sukces:
-dopisek niezależnego pisarza zostaje w sesji, a cache `seq`/newline pochodzi z readbacku.
-Inna rozbieżność jest najpierw przenoszona do `.bak.rescue` i sprawdzana odczytem; dopiero
-potem oryginał można odtworzyć natywnym `append` do potwierdzonej pustej ścieżki.
-Błąd weryfikacji ratunku lub ponowne pojawienie się ścieżki przerywa odtworzenie.
-Jeśli ścieżka wróciła już przed instalacją, pozostaje nietknięta obok odsuniętego oryginału.
-Błąd wskazuje ścieżkę sesji i pliki odzyskiwania; żadna z tych wersji nie jest zastępowana.
-
-**Los kopii:** po udanej migracji pozostaje sesja i dokładnie jedna sprawdzona kopia
-oryginału `.bak.original`. Własne `.bak.prepared` i redundantne `.bak` są usuwane dopiero
-po ponownym porównaniu bajtów z tym, co migracja zapisała. Zmieniony artefakt zostaje i
-powoduje błąd. Po nieudanej migracji niezweryfikowane pliki pozostają pod dotychczasowymi
-nazwami. Dopóki sesja wymaga migracji, kolejne tury (również po restarcie) wykrywają je na dysku,
-wskazują je w błędzie i odmawiają nowej migracji zamiast generować następną epokę i mnożyć kopie. Oznacza to,
-że trwałe uszkodzenie `.prepared` wymaga ręcznej interwencji, a nie kolejnego pełnego zapisu.
-Plików z cudzą lub niepewną treścią nie wolno automatycznie usuwać ani ponownie używać do zapisu.
-
-**Ręczne odzyskanie/ponowienie:** zatrzymać piszące zakładki i synchronizację, skopiować
-sesję oraz wszystkie wskazane `.bak*` poza katalog sesji, porównać treść i scalić brakujące
-wpisy do sesji. `.original` zawiera źródło z chwili odsunięcia, `.bak` wcześniejszy snapshot,
-`.rescue` rozbieżną wersję po instalacji; `.prepared` może być niekompletne. Dopiero po
-sprawdzeniu odzyskanej historii przenieść pozostałości nieudanej migracji z `active/` i
-ponowić turę. Po sukcesie `.original` można zachować jako backup lub ręcznie usunąć po
-sprawdzeniu sesji. Starsze kopie nie są automatycznie czyszczone. Rozszerzenia `.bak*` nie
-są sesjami `.md`, ale zwykła synchronizacja plikowa może je nadal kopiować.
-
-Równoczesne wywołania tej samej rewizji właściciela współdzielą Promise migracji.
-Każdy wołacz sprawdza własne `isCurrent`; odejście jednego nie anuluje drugiego ważnego
-wołacza. Epoka jest publikowana dopiero po potwierdzeniu pliku. Druga tura przyjmuje tę
-samą potwierdzoną epokę; zmiana rewizji, również A→B→A lub reset tej samej ścieżki,
-nadal odmawia. Nie wolno zastąpić tej kontroli samym porównaniem ścieżki.
-
-Testy: `../chat/chat/chat_streaming.epochMigration.test.ts` wywołuje produkcyjne
-`send_message` (uszkodzony zapis, równoległe dopiski, dwie zakładki, przełączenie właściciela,
-rollback, backup, brak delegacji oraz próby R3 na rzeczywistych plikach: odtworzenie ścieżki,
-dopisek/podmiana przy readbacku, pięć nieudanych tur i jedna kopia po sukcesie); F1 w `AgentMemory.test.ts` i `chat/turnOwner.test.ts`
-oraz scenariusz harnessu 74 pozostają kontrolami kolejki, restore i piszącego suba.
+Migracja, append/save/archive dzielą kolejkę i cache adaptera; `_sessionSavedCounts`
+pozostaje per instancja. Wywołania jednej rewizji współdzielą Promise i zbiór właścicieli;
+odejście jednego nie anuluje ważnego drugiego. Publikacja RAM wymaga potwierdzenia pliku
+i aktualności właściciela, także po A→B→A. Restore samo nie migruje; send robi to przed
+zamrożeniem ownera, jeśli dostępna jest delegacja (starszy host bez rejestru też próbuje).
+Dotychczasowe testy migratora zostają w `chat_streaming.epochMigration.test.ts`,
+F1 w `AgentMemory.test.ts` i `turnOwner.test.ts`; ich przebudowa należy do P2.
 
 `RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
 administratora oraz w wynikach starego indeksu semantycznego; nie odczytuje jego

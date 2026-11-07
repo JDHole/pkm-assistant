@@ -21,6 +21,7 @@ import {
     formatSessionEvent,
     parseActiveSession,
     parseFrontmatter,
+    resolveSessionEpoch,
     maxSeq,
     KNOWN_ROLES,
 } from './activeSessionFormat.js';
@@ -1112,7 +1113,7 @@ epoch: ${epoch}
             // Frozen receipts always read first, including warm cache and native append.
             const probe = await readIfExists(this.vault.adapter, path);
             if (probe.state !== 'content') throw new Error('appendSessionEvent: frozen session missing or unreadable');
-            if (expectedEpoch !== undefined && (this._parseFrontmatter(probe.content).epoch ?? null) !== expectedEpoch) {
+            if (expectedEpoch !== undefined && resolveSessionEpoch(probe.content) !== expectedEpoch) {
                 log.warn('AgentMemory', 'appendSessionEvent: frozen session epoch mismatch');
                 throw new Error('appendSessionEvent: frozen session epoch mismatch');
             }
@@ -1518,11 +1519,12 @@ epoch: ${epoch}
                 throw new Error(`saveSession: nie mogę odczytać istniejącego pliku sesji — nie nadpisuję: ${path} (${causeText(probe.cause)})`);
             }
             const existing = probe.state === 'content' ? probe.content : '';
-            if (changes.expectedSession && (!existing || (parseFrontmatter(existing).epoch ?? null) !== changes.expectedSession.epoch)) {
+            const parsed = parseActiveSession(existing);
+            if (changes.expectedSession && (!existing || parsed.metadata.epoch !== changes.expectedSession.epoch)) {
                 throw new Error('saveSession: frozen session missing or epoch mismatch');
             }
 
-            const parsedMessages = parseActiveSession(existing).messages;
+            const parsedMessages = parsed.messages;
             const knownIds = new Set(parsedMessages.map(sessionMessageId));
             const known = parsedMessages.filter(msg => !removed.has(sessionMessageId(msg))).length;
             // Baza ogona: większa z „ile widać w pliku" i „ile już dopisaliśmy w tym biegu"
@@ -1588,7 +1590,7 @@ epoch: ${epoch}
         if (isNewFile) {
             if (this.activeSessionPath === path && this._sessionIdentityRevision === identityRevision && !this.sessionEpoch) {
                 const content = await this.vault.adapter.read(path);
-                const epoch = this._parseFrontmatter(content).epoch;
+                const epoch = resolveSessionEpoch(content);
                 if (this.activeSessionPath === path && this._sessionIdentityRevision === identityRevision) {
                     this.sessionEpoch = typeof epoch === 'string' ? epoch : null;
                 }
