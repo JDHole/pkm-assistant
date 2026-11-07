@@ -15,12 +15,13 @@ export type BaseSnapshot = Readonly<
 export type ProposedValue = Readonly<
     | { kind: 'text' | 'binary'; blob: BlobId; hash: ContentHash; bytes: number }
     | { kind: 'folder' } | { kind: 'deleted'; disposition: 'trash' | 'permanent' }>;
+export type RecoveryBlob = Readonly<{ blob: BlobId; hash: ContentHash; bytes: number }>;
 export type ReviewState = Readonly<
     | { kind: 'pending' }
     | { kind: 'conflict'; reason: 'base-changed' | 'dependency-changed' | 'ambiguous-input'; actual: FileVersion }
-    | { kind: 'applying'; attemptId: string; approvedRevision: Revision }
-    | { kind: 'accepted'; attemptId: string; applied: FileVersion }
-    | { kind: 'rejected' } | { kind: 'recovery-required'; attemptId: string }>;
+    | { kind: 'applying'; attemptId: string; approvedRevision: Revision; recoveryBlob?: RecoveryBlob }
+    | { kind: 'accepted'; attemptId: string; applied: FileVersion; recoveryBlob?: RecoveryBlob }
+    | { kind: 'rejected' } | { kind: 'recovery-required'; attemptId: string; recoveryBlob?: RecoveryBlob }>;
 export type DraftPhase = Readonly<
     | { kind: 'open' }
     | { kind: 'sealed'; reason: 'finished' | 'stopped' | 'timeout' | 'failed' | 'restart' }>;

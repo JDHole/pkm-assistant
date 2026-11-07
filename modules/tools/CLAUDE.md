@@ -847,7 +847,9 @@ root wstrzykuje to DI po odtworzeniu magazynu (P5).
 MCP przygotowuje host po rozwiązaniu aliasu i osi narzędziowej. Extractor i wykonanie
 otrzymują TEN SAM lokalny plugin; błąd extractora overlayu nie przechodzi do fallbacku.
 Uprawnienia nadal oceniają kanoniczny logiczny cel. Dla propozycji writerów pomijamy
-zgodę/diff zapisu live; przyjmowanie w P4 musi ponownie ocenić uprawnienia i zgodę.
+zgodę/diff skutku plikowego; przyjmowanie musi ponownie ocenić uprawnienia i zgodę.
+`generate_image` zachowuje odrębną zgodę na wywołanie dostawcy zgodnie z autonomią.
+Lokalne `add_text_to_image` odracza zgodę plikową; operacje poza kopią zachowują swoje bramki.
 Sukces writera ma `vault_effect: {kind:'draft', draftId}`. Pamięć, todo i poczta
 zachowują oryginalny host oraz dotychczasową politykę zgód.
 
@@ -892,8 +894,10 @@ późne approve. Wszystkie inne narzędzia pozostają na poprzedniej gałęzi MC
 
 Host review ma wyłącznie jawne metody I/O. Tekst nadpisuje przez process z kontrolą
 świeżej treści w callbacku, nowe pliki przez create/createBinary; binaria przez
-modifyBinary (ukryte: adapter.writeBinary), usunięcia przez trash/delete z zachowaniem
-dyspozycji. `adapter.process` w obecnych deklaracjach API obsługuje ukryty tekst;
+modifyBinary (ukryte: adapter.writeBinary), usunięcia ZAWSZE przez kosz, również gdy
+propozycja żądała permanent. Przed destrukcyjną operacją host woła checkpoint, który
+utrwala bieżące bajty jako recoveryBlob w manifeście decyzji; zdarzenia hosta i ponowny
+odczyt wykrywają obserwowalne wyścigi. Niezgodność daje recovery-required ze wskazaniem bloba. `adapter.process` w obecnych deklaracjach API obsługuje ukryty tekst;
 nie zmienia to starego WriteTool ani jego fallbacków opisanych wyżej.
 Granica optymistyczna binariów/usunięć i metadanych ukrytych plików jest szczegółowo
 opisana w `modules/vault-drafts/CLAUDE.md`. Adapter magazynu dostarcza P5.
@@ -917,6 +921,23 @@ w Notice i logu, bez wznawiania modeli.
 Testy aktywacji: `vaultDraftRuntime.test.ts` i przypadki P5 `runnerDrafts.test.ts`.
 
 Gdy inicjalizacja magazynu zawiedzie, composition root przekazuje rozłączny stan
-`{kind:'unavailable'}` do delegacji. Writer suba odmawia przed modelem, zwykły sub
+`{kind:'unavailable'}` zarówno do `createDelegateTool`, jak i `createSubAgentTool`. Writer suba odmawia przed modelem, zwykły sub
 odczytowy i pozostałe narzędzia głównego agenta nadal są dostępne. Historyczne
-wywołania bez DI zachowują stary kontrakt; produkcja nigdy nie używa go jako fallbacku.
+wywołania testowe bez DI zachowują stary kontrakt. Produkcyjne `delegate` oraz wewnętrzny
+`delegate` tworzony przez `sub_agent` dostają ten sam runtime albo unavailable; kontroluje
+to scenariusz harnessu 75 po pełnym boocie pluginu.
+
+
+### 2.4.7 — poprawki recenzji 1
+
+`vault_path_validator`, PermissionSystem i AccessGuard bezwarunkowo odmawiają wejścia
+w `.pkm-assistant/subagent-drafts/`, również z admin_access/allowProtected.
+Listing adapterowy i Vault API filtrują ten namespace przed zwrotem; walker nie wchodzi
+do niego. Dedykowany runtime przeglądu korzysta z własnego portu, poza narzędziami treści.
+Testy `AdminVaultTools.test.ts` obejmują list/read/write/delete/create_folder administratora
+oraz publiczne MCP i ponowny odczyt nietkniętego manifestu.
+
+Listing kopii przenosi `status:'ambiguous-input'` i `sources` z zamrożonych warstw,
+zarówno przez Vault API, jak przez adapter administratora. Filtr uprawnień nadal działa
+na tych samych logicznych ścieżkach. Test A/B → C w `runnerDrafts.test.ts` czyta wynik
+publicznego list i read, a nie wewnętrzny model widoku.

@@ -1,3 +1,6 @@
+import { MCPClient } from './MCPClient.js';
+import { ToolRegistry } from './ToolRegistry.js';
+import { PermissionSystem } from '../../core/index.js';
 import test from 'ava';
 import { createCreateFolderTool } from './CreateFolderTool.js';
 import { createDeleteTool } from './DeleteTool.js';
@@ -141,4 +144,42 @@ test('B06 write: administrator może zapisać chroniony plik .env', async t => {
     const written = await createWriteTool().execute(args, vaultApp, plugin(true)) as ToolRes;
     t.true(written.success);
     t.is(app.files['.env'], 'test=value');
+});
+
+for (const name of ['list', 'read', 'write', 'delete', 'create_folder'] as const)
+test(`F4 private drafts deny admin ${name} and preserve manifest`, async t => {
+    const app = makeApp(), host = app as unknown as ToolApp, admin = plugin(true);
+    const root = '.pkm-assistant/subagent-drafts';
+    const path = `${root}/v1/draft/manifests/000002.json`;
+    app.files[path] = 'MANIFEST';
+    for (const dir of [root, `${root}/v1`, `${root}/v1/draft`, `${root}/v1/draft/manifests`]) app.folders.add(dir);
+    const tool = { list: createListTool(), read: createReadTool(), write: createWriteTool(),
+        delete: createDeleteTool(), create_folder: createCreateFolderTool(host) }[name];
+    const result = await tool.execute(ctx({ path: name === 'create_folder' ? `${root}/extra` : path,
+        folder: root, content: 'CORRUPTED', mode: 'replace' }), host, admin) as ToolRes;
+    t.is(result.success, false);
+    t.is(app.files[path], 'MANIFEST');
+    const listed = await createListTool().execute(ctx({ folder: '.pkm-assistant' }), host, admin) as ToolRes;
+    t.deepEqual(listed.files?.map(f => f.path), ['.pkm-assistant/agents']);
+    const recursive = await createListTool().execute(ctx({ folder: '/', recursive: true }), host, admin) as ToolRes;
+    t.deepEqual(recursive.files, []);
+});
+
+test('F4 public MCP admin cannot read or corrupt a private manifest', async t => {
+    const app = makeApp(), host = app as unknown as ToolApp;
+    const admin = { name: 'Nika', admin_access: true, mcp_servers: ['*'] };
+    const path = '.pkm-assistant/subagent-drafts/v1/draft/manifests/000002.json';
+    app.files[path] = 'MANIFEST';
+    const registry = new ToolRegistry();
+    for (const tool of [createReadTool(), createWriteTool(), createListTool()]) registry.registerTool(tool);
+    const client = new MCPClient(host, { agentManager: { getAgent: () => admin, getActiveAgent: () => admin },
+        permissionSystem: new PermissionSystem(host.vault, {}),
+        approvalManager: { requestApproval: async () => ({ result: 'approve' }) } }, registry);
+    for (const [name, args] of [['list', { folder: path.split('/').slice(0, -1).join('/') }],
+        ['read', { path }], ['write', { path, content: 'CORRUPTED', mode: 'replace' }]] as const) {
+        const result = await client.executeToolCall({ name, arguments: args }, 'Nika', { autonomy: 'yolo' }) as { isError: boolean; error: string };
+        t.is(result.isError, true);
+        t.regex(result.error, /Private draft storage/);
+        t.is(await app.vault.adapter.read(path), 'MANIFEST');
+    }
 });

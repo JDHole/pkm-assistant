@@ -1,3 +1,5 @@
+import type { DraftRef } from '../vault-drafts/index.js';
+import { isPrivateDraftPath } from '../../core/index.js';
 /**
  * Adapter helpers for vault paths invisible to Obsidian's indexed Vault API.
  *
@@ -18,9 +20,11 @@ export function isHiddenVaultPath(path: string | undefined): boolean {
 // barrel `core/index.js` wciąga obsidian, a ten plik musi być node-safe (testy AVA).
 export { ensureAdapterFolder } from '../../core/index.js';
 
+export interface ListingAmbiguity { status: 'ambiguous-input'; sources: readonly DraftRef[] }
+
 /** Minimalny widok DataAdaptera: tylko `list` (duck-typing, żeby testy AVA nie wciągały obsidiana). */
 export interface ListCapableAdapter {
-    list: (folder: string) => Promise<{ files?: string[]; folders?: string[] } | null | undefined>;
+    list: (folder: string) => Promise<{ files?: string[]; folders?: string[]; ambiguities?: Record<string, ListingAmbiguity> } | null | undefined>;
 }
 
 /** Wpis listingu — ten sam kształt, co zwraca `ListTool` z Vault API. */
@@ -29,6 +33,8 @@ export interface AdapterEntry {
     path: string;
     isFolder: boolean;
     extension: string | undefined;
+    status?: 'ambiguous-input';
+    sources?: readonly DraftRef[];
 }
 
 /** Opcje chodzenia po drzewie adaptera. */
@@ -81,16 +87,19 @@ export async function listAdapterFolder(adapter: ListCapableAdapter, folderPath:
     });
 
     const walk = async (folder: string, depth: number): Promise<void> => {
+        if (isPrivateDraftPath(folder)) return;
         if (depth > maxDepth || scanned >= maxScanned || files.length >= maxFiles) return;
         const listed = await adapter.list(folder);
 
         for (const file of listed?.files || []) {
+            if (isPrivateDraftPath(file)) continue;
             if (scanned++ >= maxScanned) return;
-            files.push(makeEntry(file, false));
+            files.push({ ...makeEntry(file, false), ...listed?.ambiguities?.[file] });
             if (files.length >= maxFiles) return;
         }
 
         for (const subFolder of listed?.folders || []) {
+            if (isPrivateDraftPath(subFolder)) continue;
             if (scanned++ >= maxScanned) return;
             if (!recursive) {
                 files.push(makeEntry(subFolder, true));

@@ -19,6 +19,7 @@ function barrier() {
 }
 class Storage implements DraftStorageIO {
     files = new Map<string, Uint8Array>();
+    async remove(path: string): Promise<void> { this.files.delete(path); }
     failPublication = false;
     beforePublish?: () => Promise<void>;
     beforeBlob?: () => Promise<void>;
@@ -393,4 +394,42 @@ test('fractional filesystem timestamps survive base capture and recovery exactly
     await write(store, 'Druga');
     const value = (await restart().restore()).drafts[0].changes[0].base;
     t.is(value.kind === 'file' && value.version.mtime, 7.125);
+});
+
+for (const protectedScan of [false, true]) test(`F8 orphan blobs after Stop and restart; unknown=${protectedScan}`, async t => {
+    const f = await fixture();
+    const entered = barrier(), release = barrier();
+    f.storage.beforePublish = async () => { entered.resolve(); await release.promise; };
+    const writing = write(f.store, 'Osierocony');
+    const failed = t.throwsAsync(writing, { code: 'draft-closed' });
+    await entered.promise;
+    const sealing = f.store.seal(id, 'stopped');
+    release.resolve(); await failed; await sealing;
+    f.storage.beforePublish = undefined;
+    const blobs = [...f.storage.files.keys()];
+    t.is(blobs.length, 2);
+    if (protectedScan) f.storage.files.set(`${DRAFT_ROOT}/${id}/manifests/future.json`, encode('future'));
+    const restarted = f.restart();
+    const restored = await restarted.restore();
+    t.is(restored.drafts.length, 0);
+    t.is(restored.issues.length, protectedScan ? 1 : 0);
+    await restarted.collectResolved();
+    t.deepEqual(blobs.filter(path => f.storage.files.has(path)), protectedScan ? blobs : []);
+    if (protectedScan) t.is(decode(f.storage.files.get(`${DRAFT_ROOT}/${id}/manifests/future.json`)!), 'future');
+});
+
+test('F8 active blob references and unknown orphan layout remain readable', async t => {
+    const f = await fixture();
+    const active = await write(f.store, 'Referencja');
+    const release = f.store.retain([id]);
+    await f.store.seal(id, 'finished');
+    await f.store.setReview(id, active.changes[0].id, active.changes[0].revision, { kind: 'rejected' });
+    const unknown = `${DRAFT_ROOT}/orphan/blobs/future-format`;
+    f.storage.files.set(unknown, encode('NIEZNANY'));
+    await f.store.collectResolved();
+    t.is(await proposal(f.persistence, active), 'Referencja');
+    t.is(decode(await f.storage.read(unknown)), 'NIEZNANY');
+    release(); await f.store.collectResolved();
+    t.deepEqual(await f.storage.list(`${DRAFT_ROOT}/${id}/blobs`), []);
+    t.is(decode(await f.storage.read(unknown)), 'NIEZNANY');
 });

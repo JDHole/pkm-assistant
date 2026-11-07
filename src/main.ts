@@ -794,7 +794,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       }
       if (this.vaultDraftRuntime) this.toolRegistry.registerTool(this.vaultDraftRuntime.tool);
       this.toolRegistry.registerTool(createDelegateTool(this.app, { drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' } }));
-      this.toolRegistry.registerTool(createSubAgentTool(this.app));
+      this.toolRegistry.registerTool(createSubAgentTool(this.app, { drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' } }));
       // agent_delegate stays: it works without the communicator (context ping is optional/null-safe).
       this.toolRegistry.registerTool(createAgentDelegateTool());
       // Poczta (kom_send/kom_list/kom_read) zależy od KomunikatorManagera - tylko przy fladze ON.

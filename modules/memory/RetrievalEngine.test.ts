@@ -36,6 +36,20 @@ function makeAdapter(files: Record<string, string>): RetrievalVaultAdapterLike {
 
 const vaultOf = (files: Record<string, string>): RetrievalVaultLike => ({ adapter: makeAdapter(files) });
 
+test('F4 private draft storage is never read even from stale semantic index hits', async t => {
+    const privatePath = '.pkm-assistant/subagent-drafts/draft/blobs/secret.md';
+    const vault = vaultOf({ [privatePath]: 'target secret', 'a.md': 'target public' });
+    const read = vault.adapter.read!.bind(vault.adapter), reads: string[] = [];
+    vault.adapter.read = async path => { reads.push(path); return read(path); };
+    const engine = new RetrievalEngine({ vault, embeddingHelper: { embed: async () => [1] }, oramaDb: {},
+        vectorSearch: async () => ({ hits: [{ document: { path: privatePath }, score: 1 }, { document: { path: 'a.md' }, score: 0.5 }] }) });
+    for (const mode of ['keyword', 'semantic'] as const) {
+        const result = await engine.runSearch({ query: 'target', mode });
+        t.deepEqual(result.results.map(hit => hit.path), ['a.md']);
+    }
+    t.false(reads.includes(privatePath));
+});
+
 const memoryPaths = (base = '.pkm-assistant/agents/jaskier/memory') => ({
     brain: `${base}/brain.md`,
     brainNotes: `${base}/brain`,

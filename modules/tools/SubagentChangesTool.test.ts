@@ -23,6 +23,7 @@ async function fixture() {
     let failPublish = false;
     let beforePublish: (() => void) | undefined;
     const storage: DraftStorageIO = {
+        remove: async path => { disk.delete(path); },
         list: async path => [...new Set([...disk.keys()].filter(key => key.startsWith(`${path}/`)).map(key => key.slice(path.length + 1).split('/')[0]))],
         read: async path => { const bytes = disk.get(path); if (!bytes) throw new Error('missing'); return bytes.slice(); },
         writeBlob: async (path, bytes) => { disk.set(path, bytes.slice()); },
@@ -34,9 +35,13 @@ async function fixture() {
             disk.set(path, bytes.slice()); return 'published';
         },
     };
+    const events = new Map<string, Set<(entry: { path: string }) => void>>();
+    const emit = (name: string, path: string) => { for (const handler of events.get(name) ?? []) handler({ path }); };
     const files = new Map<string, { bytes: Uint8Array; mtime: number }>();
+    const trash = new Map<string, Uint8Array>();
+    let atDestructiveOperation: (() => Promise<void>) | undefined;
     const folders = new Set<string>();
-    const set = (path: string, text: string | Uint8Array, mtime = 7) => files.set(path, { bytes: typeof text === 'string' ? encode(text) : text.slice(), mtime });
+    const set = (path: string, text: string | Uint8Array, mtime = 7) => { files.set(path, { bytes: typeof text === 'string' ? encode(text) : text.slice(), mtime }); emit('modify', path); };
     set('x.md', 'Baza'); set('y.md', 'Baza-Y');
     let processHook: (() => void) | undefined;
     let writeHook: (() => void) | undefined;
@@ -53,16 +58,21 @@ async function fixture() {
         const next = transform(decode(await read(path)));
         writes.push(`process:${path}`); set(path, next, 10); writeHook?.(); return next;
     };
-    const remove = async (path: string) => { writes.push(`delete:${path}`); files.delete(path); };
+    const remove = async (path: string) => { writes.push(`delete:${path}`); files.delete(path); emit('delete', path); };
     const app = { vault: {
+        on: (name: string, handler: (entry: { path: string }) => void) => {
+            if (!events.has(name)) events.set(name, new Set());
+            events.get(name)!.add(handler); return { name, handler };
+        },
+        offref: (ref: { name: string; handler: (entry: { path: string }) => void }) => events.get(ref.name)?.delete(ref.handler),
         getFileByPath: entry, getAbstractFileByPath: entry,
         read: async (file: { path: string }) => decode(await read(file.path)),
         process: (file: { path: string }, transform: (value: string) => string) => process(file.path, transform),
         create, createBinary: create,
-        modifyBinary: async (file: { path: string }, bytes: ArrayBuffer) => { writes.push(`binary:${file.path}`); set(file.path, new Uint8Array(bytes), 10); writeHook?.(); },
+        modifyBinary: async (file: { path: string }, bytes: ArrayBuffer) => { await atDestructiveOperation?.(); writes.push(`binary:${file.path}`); set(file.path, new Uint8Array(bytes), 10); writeHook?.(); },
         createFolder: async (path: string) => { if (files.has(path) || folders.has(path)) throw new Error('exists'); writes.push(`folder:${path}`); folders.add(path); },
-        trash: async (file: { path: string }) => { writes.push('trash'); await remove(file.path); },
-        delete: (file: { path: string }) => remove(file.path),
+        trash: async (file: { path: string }) => { await atDestructiveOperation?.(); trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path); },
+        delete: async (file: { path: string }) => { await atDestructiveOperation?.(); await remove(file.path); },
         adapter: {
             stat: async (path: string) => { const value = files.get(path); return value ? { type: 'file', size: value.bytes.length, mtime: value.mtime }
                 : folders.has(path) ? { type: 'folder' } : null; },
@@ -103,7 +113,8 @@ async function fixture() {
         return { action, draft_id: manifest.draftId, change_id: change.id, revision: change.revision };
     };
     const restart = async () => { const next = new DraftStore(new DraftPersistence(storage, hasher), io, { now: () => 101 }); await next.restore(); return next; };
-    return { files, set, folders, writes, disk, storage, io, persistence, store, review, client, tool, registry, call, make, decision,
+    return { files, set, folders, writes, trash,
+        atDestructive: (fn: () => Promise<void>) => { atDestructiveOperation = fn; }, disk, storage, io, persistence, store, review, client, tool, registry, call, make, decision,
         agent, previews, approvals, restart, text: (path = 'x.md') => decode(files.get(path)!.bytes),
         approval: (fn: typeof approve) => { approve = fn; }, general: (fn: typeof approveGeneral) => { approveGeneral = fn; },
         onProcess: (fn: () => void) => { processHook = fn; }, onWrite: (fn: () => void) => { writeHook = fn; },
@@ -279,12 +290,13 @@ test('P4 detail truncates text explicitly and list pagination preserves paths', 
     t.is(detail.changes[0].truncated, true); t.is(f.text(), 'Baza');
 });
 
-for (const disposition of ['trash', 'permanent'] as const) test(`P4 deletion ${disposition} previews removal and uses requested disposition`, async t => {
+for (const disposition of ['trash', 'permanent'] as const) test(`P4 deletion ${disposition} previews removal and always uses trash`, async t => {
     const f = await fixture(), draft = await f.make('delete', [['x.md', { kind: 'deleted', disposition }, 'delete']]);
     t.is((await f.call(f.decision(draft), { autonomy: 'all' }) as Result).kind, 'accepted');
     t.deepEqual(f.previews[0].preview, { kind: 'deleted', oldContent: 'Baza', newContent: '' });
     t.is(f.previews[0].rememberAvailable, false);
-    t.deepEqual(f.writes, disposition === 'trash' ? ['trash', 'delete:x.md'] : ['delete:x.md']);
+    t.deepEqual(f.writes, ['trash', 'delete:x.md']);
+    t.is(decode(f.trash.get('x.md')!), 'Baza');
     t.deepEqual(await f.io.stat(parseVaultPath('x.md')), { kind: 'missing' }); t.is(f.text('y.md'), 'Baza-Y');
 });
 
@@ -376,4 +388,82 @@ test('P4 parallel denied acceptances share existing denial memory without extra 
     t.deepEqual(results.map(result => (result as Result).kind), ['denied', 'denied']);
     t.deepEqual(f.store.list().map(draft => draft.changes[0].review.kind), ['pending', 'pending']);
     t.deepEqual([f.previews.length, f.approvals.length], [1, 1]); t.is(f.text(), 'Baza');
+});
+
+for (const kind of ['binary', 'deleted'] as const) test(`F5 host barrier ${kind} preserves recovery bytes and reports uncertainty`, async t => {
+    const f = await fixture(); f.set('image.png', new Uint8Array([1, 2]));
+    const value: DraftMutation['value'] = kind === 'binary' ? { kind, bytes: new Uint8Array([3, 4]) } : { kind, disposition: 'permanent' };
+    const draft = await f.make('race', [['image.png', value]]);
+    const entered = deferred<void>(), release = deferred<void>();
+    f.atDestructive(async () => { entered.resolve(); await release.promise; });
+    const pending = f.call(f.decision(draft, 'image.png'));
+    await entered.promise;
+    // Receipt and blob already exist BEFORE the host's destructive operation.
+    const applying = f.store.snapshot(draft.draftId).changes[0].review;
+    const backup = 'recoveryBlob' in applying ? applying.recoveryBlob! : undefined;
+    const beforeOperation = backup && [...await f.persistence.readBlob(draft.draftId, backup.blob, backup.hash, backup.bytes)];
+    f.set('image.png', new Uint8Array([9, 9]), 8);
+    release.resolve();
+    const result = await pending as Result;
+    t.is(result.kind, 'recovery-required');
+    t.is(applying.kind, 'applying');
+    t.deepEqual(beforeOperation, [1, 2]);
+    t.deepEqual('recoveryBlob' in result ? result.recoveryBlob : undefined, backup);
+    const restored = await f.restart();
+    const saved = restored.snapshot(draft.draftId).changes[0].review;
+    t.is(saved.kind, 'recovery-required');
+    t.deepEqual('recoveryBlob' in saved ? saved.recoveryBlob : undefined, backup);
+    if (kind === 'deleted') {
+        t.deepEqual([...f.trash.get('image.png')!], [9, 9]);
+        t.deepEqual(f.writes, ['trash', 'delete:image.png']);
+    } else t.deepEqual([...f.files.get('image.png')!.bytes], [3, 4]);
+    await restored.collectResolved();
+    t.deepEqual([...await f.persistence.readBlob(draft.draftId, backup!.blob, backup!.hash, backup!.bytes)], [1, 2]);
+});
+
+for (const kind of ['binary', 'deleted'] as const) test(`F5 ${kind} result mismatch retains readable recovery receipt`, async t => {
+    const f = await fixture(); f.set('image.png', new Uint8Array([1, 2]));
+    const draft = await f.make('mismatch', [['image.png', kind === 'binary'
+        ? { kind, bytes: new Uint8Array([3, 4]) } : { kind, disposition: 'trash' }]]);
+    if (kind === 'binary') f.onWrite(() => f.set('image.png', new Uint8Array([7, 7])));
+    else {
+        const remove = f.io.deleteFile;
+        f.io.deleteFile = async (...args) => { await remove(...args); f.set('image.png', new Uint8Array([7, 7])); };
+    }
+    const result = await f.call(f.decision(draft, 'image.png')) as Result;
+    t.is(result.kind, 'recovery-required');
+    const blob = 'recoveryBlob' in result ? result.recoveryBlob! : undefined;
+    t.deepEqual(blob && [...await f.persistence.readBlob(draft.draftId, blob.blob, blob.hash, blob.bytes)], [1, 2]);
+    t.deepEqual([...f.files.get('image.png')!.bytes], [7, 7]);
+});
+
+test('F5 permission revoked during durable checkpoint prevents the destructive operation', async t => {
+    const f = await fixture(); f.set('image.png', new Uint8Array([1, 2]));
+    const draft = await f.make('revoked', [['image.png', { kind: 'binary', bytes: new Uint8Array([3, 4]) }]]);
+    const publish = f.storage.publish;
+    f.storage.publish = async (path, bytes, allowed) => {
+        const envelope = JSON.parse(decode(bytes)) as { payload: string };
+        if (envelope.payload.includes('"recoveryBlob"')) f.agent.permissions.guidance_mode = false;
+        return publish(path, bytes, allowed);
+    };
+    const result = await f.call(f.decision(draft, 'image.png')) as Result;
+    t.is(result.kind, 'recovery-required');
+    t.deepEqual(f.writes, []);
+    t.deepEqual([...f.files.get('image.png')!.bytes], [1, 2]);
+    const backup = 'recoveryBlob' in result ? result.recoveryBlob! : undefined;
+    t.deepEqual(backup && [...await f.persistence.readBlob(draft.draftId, backup.blob, backup.hash, backup.bytes)], [1, 2]);
+});
+
+test('F5 accepted binary recovery bytes survive payload GC and restart', async t => {
+    const f = await fixture(); f.set('image.png', new Uint8Array([1, 2]));
+    const draft = await f.make('receipt', [['image.png', { kind: 'binary', bytes: new Uint8Array([3, 4]) }]]);
+    const result = await f.call(f.decision(draft, 'image.png')) as Result;
+    t.is(result.kind, 'accepted');
+    await f.store.collectResolved();
+    const restored = await f.restart();
+    t.is(restored.snapshot(draft.draftId).payloadCollected, true);
+    const receipt = restored.snapshot(draft.draftId).changes[0].review;
+    const blob = 'recoveryBlob' in receipt ? receipt.recoveryBlob! : undefined;
+    t.deepEqual(blob && [...await f.persistence.readBlob(draft.draftId, blob.blob, blob.hash, blob.bytes)], [1, 2]);
+    t.deepEqual([...f.files.get('image.png')!.bytes], [3, 4]);
 });

@@ -36,6 +36,10 @@ export class DraftPersistence {
         if (base.kind === 'file') await this.readBlob(id, base.blob, base.version.hash, base.version.bytes);
     }
     private async verifyBlobs(manifest: DraftManifest): Promise<void> {
+        for (const change of manifest.changes) if ('recoveryBlob' in change.review && change.review.recoveryBlob) {
+            const blob = change.review.recoveryBlob;
+            await this.readBlob(manifest.draftId, blob.blob, blob.hash, blob.bytes);
+        }
         if (manifest.payloadCollected) return;
         for (const touch of manifest.firstTouches) await this.verifyBase(manifest.draftId, touch.base);
         for (const change of manifest.changes) {
@@ -87,9 +91,37 @@ export class DraftPersistence {
             for (const name of await this.io.list(`${root}/${folder}`)) {
                 if (folder === 'manifests' && name === `${String(manifest.generation).padStart(6, '0')}.json`) continue;
                 if (folder === 'manifests' && !generationName.test(name)) continue;
+                if (folder === 'blobs' && (!/^[0-9a-f]{64}$/.test(name) || manifest.changes.some(c => 'recoveryBlob' in c.review && c.review.recoveryBlob?.blob === name))) continue;
+                if (folder === 'decisions' && !/^[A-Za-z0-9_-]{1,128}\.json$/.test(name)) continue;
                 await this.io.remove(`${root}/${folder}/${name}`);
             }
         }
+    }
+    /** Only manifestless v1 directories are eligible. A complete clean scan is
+     * required; live IDs, receipts, unknown layouts and filenames stay untouched. */
+    async collectOrphans(isProtected: (id: DraftId) => boolean): Promise<void> {
+        if (!this.io.remove) return;
+        const scan = await this.loadAll();
+        if (scan.issues.length) return;
+        const known = new Set(scan.manifests.map(m => m.draftId));
+        const candidates: { id: DraftId; path: string }[] = [];
+        for (const name of await this.io.list(DRAFT_ROOT)) {
+            const id = parseDraftId(name);
+            if (known.has(id) || isProtected(id)) continue;
+            const root = this.directory(id);
+            const layout = await this.io.list(root);
+            if (layout.some(name => !['blobs', 'manifests'].includes(name))) continue;
+            if ((await this.io.list(`${root}/manifests`)).length) continue;
+            const blobs = await this.io.list(`${root}/blobs`);
+            if (blobs.some(name => !/^[0-9a-f]{64}$/.test(name))) continue;
+            for (const blob of blobs) {
+                const path = `${root}/blobs/${blob}`;
+                if (await this.hash(await this.io.read(path)) !== blob) return;
+                candidates.push({ id, path });
+            }
+        }
+        // Nothing is deleted until every candidate has been scanned successfully.
+        for (const { id, path } of candidates) if (!isProtected(id)) await this.io.remove(path);
     }
     async loadAll(): Promise<{ manifests: DraftManifest[]; issues: RecoveryIssue[] }> {
         const manifests: DraftManifest[] = [], issues: RecoveryIssue[] = [];

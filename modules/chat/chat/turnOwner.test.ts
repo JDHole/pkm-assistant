@@ -8,6 +8,7 @@ import {
     saveMemoryCandidatesFor,
     buildOwnerWindowOptions,
     freezeTurnOwner,
+    ensureTurnSessionEpoch,
     isOwnerTabActive,
 } from './turnOwner.js';
 import { _switchTab } from './chat_tabs.js';
@@ -495,4 +496,20 @@ test('po zamrożeniu send_message nie czyta już globalnych luster widoku', t =>
     t.false(/getActiveAgent\(/.test(body), 'getActiveAgent() po zamrożeniu = odczyt globalnego lustra zamiast zamrożonego właściciela');
     t.false(/this\.rollingWindow/.test(body), 'this.rollingWindow po zamrożeniu = okno cudzej zakładki');
     t.false(/getActiveMemory/.test(body), 'getActiveMemory() po zamrożeniu = sesja cudzego agenta');
+});
+
+test('F1 tab guard prevents legacy epoch publication after switching tabs during readback', async t => {
+    const path = '.pkm-assistant/agents/a/memory/sessions/active/legacy.md';
+    let content = '---\ntype: active_session\nagent: A\n---\nHistoria';
+    const tab = { agentName: 'A', sessionPath: path, sessionEpoch: null, isActive: true };
+    const memory = new AgentMemory({ adapter: { exists: async () => true, mkdir: async () => {}, list: async () => ({ files: [] }),
+        read: async () => content, write: async (_p, value) => { content = value; tab.isActive = false; } } }, 'A');
+    memory.setActiveSessionIdentity(path, null);
+    const agent = { name: 'A' };
+    const view: Runtime = { chatTabs: [tab], rollingWindow: new RollingWindow(), plugin: { agentManager: {
+        getActiveAgent: () => agent, getAgentMemory: () => memory } } };
+    await t.throwsAsync(ensureTurnSessionEpoch(view), { message: 'Session epoch: owner changed' });
+    t.is(memory.sessionEpoch, null);
+    t.is(tab.sessionEpoch, null);
+    t.regex((await memory.loadActiveSession(path)).metadata.epoch as string, /^[0-9a-f]{32}$/);
 });

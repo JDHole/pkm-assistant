@@ -1054,3 +1054,11 @@ Testy P5 runtime i UI wskazano w `../vault-drafts/CLAUDE.md`.
 DI runnera i DelegateTool przyjmuje także `{kind:'unavailable'}`: runtime po błędzie
 odtworzenia nie wraca na zapis live. Odmawia biegów wymagających zapisu/warstw,
 ale zachowuje zwykły odczyt bez kopii. Test P5 w runnerDrafts.test.ts.
+
+
+### 2.4.7 — kompletność DI produkcyjnego
+
+Composition root przekazuje identyczny SubRunDrafts (lub unavailable) do obu fabryk:
+`delegate` oraz `sub_agent`. Druga przekazuje DI do swojego wewnętrznego delegate,
+więc kontynuacja widzi poprzednią kopię i tworzy nową. Harness 75 weryfikuje składanie
+po pełnym boocie: read daje A, write C pozostaje w kopii, a vault nadal ma Baza.

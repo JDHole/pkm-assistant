@@ -68,6 +68,7 @@ export {
 export {
   sanitizePath,
   isProtectedPath,
+  isPrivateDraftPath,
   VAULT_GITIGNORE_ENTRIES,
 } from './security/keySanitizer.js';
 export { expandFocusEntries } from './security/vaultGroups.js';

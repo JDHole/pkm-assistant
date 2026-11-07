@@ -2422,3 +2422,34 @@ test('saveSession zachowuje terminalne pytanie i dorobek wyniku z tła', async t
         { role: 'user', content: 'Inny wynik', seq: 2 },
     ]);
 });
+
+test('F1 legacy epoch is durable, queued with appends, and survives reload', async t => {
+    const f = makeVault();
+    const memory = new AgentMemory(f.vault, 'Lead');
+    const path = `${memory.paths.sessionsActive}/legacy.md`;
+    f.files[path] = '---\ntype: active_session\nagent: Lead\n---\n\nHistoria\n';
+    memory.setActiveSessionIdentity(path, null);
+    const [epoch] = await Promise.all([
+        memory.ensureActiveSessionEpoch(path, () => true),
+        memory.appendToActiveSession({ content: 'Kolejka' }),
+    ]);
+    t.regex(epoch, /^[0-9a-f]{32}$/);
+    const fresh = new AgentMemory(f.vault, 'Lead');
+    const parsed = await fresh.loadActiveSession(path);
+    t.is(parsed.metadata.epoch, epoch);
+    t.is(memory.sessionEpoch, epoch);
+    t.true(f.files[path].includes('Historia'));
+    t.true(f.files[path].includes('Kolejka'));
+});
+
+test('F1 epoch migration does not publish identity into a switched owner', async t => {
+    const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+    const path = `${memory.paths.sessionsActive}/legacy.md`;
+    const original = '---\ntype: active_session\nagent: Lead\n---\nHistoria';
+    f.files[path] = original;
+    memory.setActiveSessionIdentity(path, null);
+    const read = f.vault.adapter.read;
+    f.vault.adapter.read = async p => { const data = await read(p); memory.setActiveSessionIdentity('other.md', 'b'.repeat(32)); return data; };
+    await t.throwsAsync(memory.ensureActiveSessionEpoch(path, () => true), { message: 'Session epoch: owner changed' });
+    t.deepEqual([memory.activeSessionPath, memory.sessionEpoch, f.files[path]], ['other.md', 'b'.repeat(32), original]);
+});

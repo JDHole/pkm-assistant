@@ -457,6 +457,38 @@ export class AgentMemory {
         this._sessionIdentityRevision++;
     }
 
+    /** Upgrade a known legacy owner under the same queue as session appends.
+     * No missing-file repair or redirection. RAM identity changes only after readback. */
+    async ensureActiveSessionEpoch(path: string, isCurrent: () => boolean): Promise<string> {
+        const revision = this._sessionIdentityRevision;
+        const expectedEpoch = this.sessionEpoch;
+        const current = () => this.activeSessionPath === path && this._sessionIdentityRevision === revision
+            && this.sessionEpoch === expectedEpoch && isCurrent();
+        const root = `${this.paths.sessionsActive}/`;
+        if (!path.startsWith(root) || !path.endsWith('.md') || path.slice(root.length).includes('/')
+            || path.includes('\\') || path.split('/').some(part => part === '..' || part === '.'))
+            throw new Error('Session epoch: target is outside the owning active sessions');
+        return this._enqueuePathWrite(path, async () => {
+            if (!current()) throw new Error('Session epoch: owner changed');
+            const content = await this.vault.adapter.read(path);
+            const metadata = this._parseFrontmatter(content);
+            if (!current() || metadata.agent && metadata.agent !== this.agentName)
+                throw new Error('Session epoch: owner changed');
+            if (expectedEpoch && metadata.epoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
+            let epoch = metadata.epoch;
+            if (typeof epoch !== 'string' || !/^[0-9a-f]{32}$/.test(epoch)) {
+                epoch = this._newSessionEpoch();
+                const updated = this._setFrontmatterField(content, 'epoch', epoch);
+                await this._writeSessionFile(path, updated);
+                if (await this.vault.adapter.read(path) !== maskSensitiveData(updated))
+                    throw new Error('Session epoch: write verification failed');
+            }
+            if (!current()) throw new Error('Session epoch: owner changed');
+            this.sessionEpoch = epoch;
+            return epoch;
+        });
+    }
+
     /**
      * Restore persisted activeSessionPath from disk (call on plugin init).
      * Returns the path if restored, null otherwise.

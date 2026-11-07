@@ -14,7 +14,7 @@
  * Returns shape `{ ok: bool, safePath: string, error: string|null, code: string|null }`.
  * Code = 'invalid_path' | 'protected' | 'empty' — pozwala tool'om mapować na własne i18n keys.
  */
-import { isProtectedPath, sanitizePath } from '../../core/index.js';
+import { isProtectedPath, isPrivateDraftPath, sanitizePath } from '../../core/index.js';
 
 /** Kod odmowy — tool mapuje go na własny klucz i18n. */
 export type VaultPathErrorCode = 'invalid_path' | 'protected' | 'empty';
@@ -96,6 +96,8 @@ export function validateVaultPath(rawPath: unknown, options: VaultPathOptions = 
     if (!safePath && safePath !== '') {
         return { ok: false, safePath: '', error: 'Path failed sanitization (../, %2e%2e, null byte, zero-width unicode)', code: 'invalid_path' };
     }
+
+    if (isPrivateDraftPath(safePath)) return { ok: false, safePath, error: 'Private draft storage', code: 'protected' };
 
     if (!allowProtected && !adminAccess && isProtectedPath(safePath)) {
         return { ok: false, safePath, error: 'Path is protected (.pkm-assistant/settings.json, .env, data.json, ...)', code: 'protected' };

@@ -4,7 +4,7 @@
  */
 import { AccessGuard } from './AccessGuard.js';
 import type { GuardedAgent, ScopeFolders } from './AccessGuard.js';
-import { isProtectedPath, sanitizePath } from './keySanitizer.js';
+import { isProtectedPath, isPrivateDraftPath, sanitizePath } from './keySanitizer.js';
 import {
     normalizeAutonomy,
     classifyToolRisk,
@@ -262,6 +262,8 @@ export class PermissionSystem {
         if (TARGET_REQUIRED_ACTIONS.has(action) && !String(targetPath ?? '').trim()) {
             return { allowed: false, reason: t('perm.no_target'), requiresApproval: false };
         }
+
+        if (targetPath && isPrivateDraftPath(targetPath)) return { allowed: false, reason: 'Private draft storage', requiresApproval: false };
 
         // A1: admin_access jest jedynym jawnym wyjątkiem od No-Go/protected.
         // YOLO nadal nie ma z tym nic wspólnego — autonomia tylko usuwa pytania.

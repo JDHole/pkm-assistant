@@ -24,12 +24,13 @@ const proposed: Schema = { oneOf: [
     object({ kind: { const: 'folder' } }),
     object({ kind: { const: 'deleted' }, disposition: choice('trash', 'permanent') }),
 ] };
+const recoveryBlob: Schema = object({ blob: hash, hash, bytes: integer });
 const review: Schema = { oneOf: [
     object({ kind: choice('pending', 'rejected') }),
     object({ kind: { const: 'conflict' }, reason: choice('base-changed', 'dependency-changed', 'ambiguous-input'), actual: version }),
-    object({ kind: { const: 'applying' }, attemptId: id, approvedRevision: revision }),
-    object({ kind: { const: 'accepted' }, attemptId: id, applied: version }),
-    object({ kind: { const: 'recovery-required' }, attemptId: id }),
+    object({ kind: { const: 'applying' }, attemptId: id, approvedRevision: revision, recoveryBlob }, ['kind', 'attemptId', 'approvedRevision']),
+    object({ kind: { const: 'accepted' }, attemptId: id, applied: version, recoveryBlob }, ['kind', 'attemptId', 'applied']),
+    object({ kind: { const: 'recovery-required' }, attemptId: id, recoveryBlob }, ['kind', 'attemptId']),
 ] };
 const source: Schema = object({ tool: text, callId: text });
 const touch = { id, path, base };

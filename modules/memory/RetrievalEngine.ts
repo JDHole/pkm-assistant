@@ -1,3 +1,4 @@
+import { isPrivateDraftPath } from '../../core/index.js';
 /**
  * RetrievalEngine - silnik jednego narzędzia `search`.
  *
@@ -454,6 +455,7 @@ export class RetrievalEngine {
             const out: Candidate[] = [];
             for (const f of this.app.vault.getMarkdownFiles()) {
                 const p = f.path;
+                if (isPrivateDraftPath(p)) continue;
                 if (!this.includeHiddenVault && p.startsWith('.pkm-assistant/')) continue;
                 if (prefix && !p.startsWith(prefix)) continue;
                 if (glob && !this._matchesGlob(p, glob)) continue;
@@ -519,16 +521,18 @@ export class RetrievalEngine {
      * Deliberate admin capability, not a missed Vault API call.
      */
     private async _walkVault(rootPath: string, accumulator: Candidate[], globPattern?: string, depth = 0): Promise<void> {
+        if (isPrivateDraftPath(rootPath)) return;
         if (depth > 8) return; // safety
         try {
             const listed = await this.vault.adapter.list(rootPath);
             for (const p of listed?.files || []) {
-                if (!p.endsWith('.md')) continue;
+                if (isPrivateDraftPath(p) || !p.endsWith('.md')) continue;
                 if (p.startsWith('.pkm-assistant/')) continue; // dane pluginu poza vault scope
                 if (globPattern && !this._matchesGlob(p, globPattern)) continue;
                 accumulator.push({ path: p, name: p.split('/').pop() as string });
             }
             for (const subFolder of listed?.folders || []) {
+                if (isPrivateDraftPath(subFolder)) continue;
                 if (!this.includeHiddenVault && subFolder.startsWith('.pkm-assistant')) continue;
                 await this._walkVault(subFolder, accumulator, globPattern, depth + 1);
             }
@@ -745,7 +749,7 @@ export class RetrievalEngine {
             const result = await vectorSearch(this.oramaDb, embedding, { k });
             let hits = (result?.hits || [])
                 .map(h => ({ path: h.document?.path as string, score: h.score || 0 }))
-                .filter(h => h.path);
+                .filter(h => h.path && !isPrivateDraftPath(h.path));
             if (this._hasWhere(where)) {
                 const set = new Set(candidates.map(c => c.path));
                 hits = hits.filter(h => set.has(h.path));

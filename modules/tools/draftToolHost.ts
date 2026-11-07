@@ -1,6 +1,6 @@
 import { parseYaml, stringifyYaml } from '../../core/index.js';
 import { DraftError, parseVaultPath } from '../vault-drafts/index.js';
-import type { Change, DraftView } from '../vault-drafts/index.js';
+import type { Change, DraftRef, DraftView } from '../vault-drafts/index.js';
 import type { SearchToolPlugin } from './SearchTool.js';
 import type { ArtifactFrontmatter } from '../artifacts/index.js';
 
@@ -8,7 +8,7 @@ const searchBases = new WeakMap<object, SearchToolPlugin>();
 export function bindDraftSearchPlugin(local: object, base: SearchToolPlugin): void { searchBases.set(local, base); }
 export function draftSearchBase(local: object): SearchToolPlugin | undefined { return searchBases.get(local); }
 
-interface LocalFile { path: string; name: string; basename: string; extension: string; stat: { size: number; mtime: number; ctime: number }; children?: LocalFile[]; }
+interface LocalFile { status?: 'ambiguous-input'; sources?: readonly DraftRef[]; path: string; name: string; basename: string; extension: string; stat: { size: number; mtime: number; ctime: number }; children?: LocalFile[]; }
 const denied = (): never => { throw new DraftError('mutation-denied', 'Unsupported draft host operation'); };
 /** No prototype/global fallthrough: an unknown method is an explicit refusal. */
 function closed<T extends object>(surface: T): T {
@@ -41,7 +41,11 @@ export async function createDraftToolHost(view: DraftView, options: {
         files.clear(); metadata.clear(); files.set('', file('', true));
         const walk = async (path: string): Promise<void> => {
             const listed = await view.list(path);
-            for (const p of listed.ambiguous) files.set(p, file(p, false));
+            for (const p of listed.ambiguous) {
+                const resolved = view.resolve(p);
+                if (resolved.kind === 'ambiguous-input') files.set(p, { ...file(p, false),
+                    status: 'ambiguous-input', sources: resolved.sources.map(source => source.ref) });
+            }
             for (const p of listed.files) {
                 const stat = await view.stat(p);
                 if (stat.kind !== 'file') continue;
@@ -97,7 +101,17 @@ export async function createDraftToolHost(view: DraftView, options: {
             const stat = technicalFolders.has(path) ? { kind: 'folder' as const } : await view.stat(path);
             return stat.kind === 'missing' ? null : { type: stat.kind, size: stat.kind === 'file' ? stat.bytes : 0, mtime: stat.kind === 'file' ? stat.mtime : 0, ctime: 0 };
         },
-        list: (path: string) => view.list(path), mkdir,
+        list: async (path: string) => {
+            const listed = await view.list(path);
+            if (!listed.ambiguous.length) return listed;
+            const ambiguities: Record<string, { status: 'ambiguous-input'; sources: readonly DraftRef[] }> = {};
+            for (const p of listed.ambiguous) {
+                const resolved = view.resolve(p);
+                if (resolved.kind === 'ambiguous-input') ambiguities[p] = {
+                    status: 'ambiguous-input', sources: resolved.sources.map(source => source.ref) };
+            }
+            return { ...listed, files: [...listed.files, ...listed.ambiguous], ambiguities };
+        }, mkdir,
         write: (path: string, text: string) => write(path, { kind: 'text', text }),
         writeBinary: (path: string, bytes: ArrayBuffer) => write(path, { kind: 'binary', bytes: new Uint8Array(bytes) }),
         remove: (path: string) => remove(path, 'permanent'),

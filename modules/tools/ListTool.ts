@@ -1,3 +1,4 @@
+import { isPrivateDraftPath } from '../../core/index.js';
 /**
  * ListTool — jeden prymityw `list`.
  *
@@ -101,6 +102,12 @@ export interface ListToolPlugin {
     agentManager?: ListToolAgentManager | null;
 }
 
+/** Metadata comes only from the trusted local draft host. */
+function ambiguity(file: VaultFileLike) {
+    if ('status' in file && file.status === 'ambiguous-input' && 'sources' in file)
+        return { status: file.status, sources: file.sources };
+    return {};
+}
 const MAX_RESULTS = 100;
 
 function getInvocationMemory(
@@ -201,7 +208,8 @@ async function listVault(args: ListToolArgs, app: ListToolApp, plugin: ListToolP
             name: file.name,
             path: file.path,
             isFolder: false,
-            extension: file.extension
+            extension: file.extension,
+            ...ambiguity(file),
         }));
     } else {
         files = (targetFolder as VaultFolderLike).children.map(child => {
@@ -210,11 +218,13 @@ async function listVault(args: ListToolArgs, app: ListToolApp, plugin: ListToolP
                 name: child.name,
                 path: child.path,
                 isFolder: folder,
-                extension: folder ? undefined : child.extension
+                extension: folder ? undefined : child.extension,
+                ...ambiguity(child),
             };
         });
     }
 
+    files = files.filter(file => !isPrivateDraftPath(file.path));
     const totalCount = files.length;
     if (files.length > MAX_RESULTS) files = files.slice(0, MAX_RESULTS);
 
@@ -272,6 +282,7 @@ async function listMemory(args: ListToolArgs, plugin: ListToolPlugin): Promise<R
         });
     }
 
+    files = files.filter(file => !isPrivateDraftPath(file.path));
     const totalCount = files.length;
     if (files.length > MAX_RESULTS) files = files.slice(0, MAX_RESULTS);
 

@@ -14,6 +14,7 @@ import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.
 import { MCPClient } from './MCPClient.js';
 import { ToolRegistry } from './ToolRegistry.js';
 import { createWriteTool } from './WriteTool.js';
+import { createListTool } from './ListTool.js';
 import { createReadTool } from './ReadTool.js';
 import { createDeleteTool } from './DeleteTool.js';
 import { createCreateFolderTool } from './CreateFolderTool.js';
@@ -109,15 +110,15 @@ async function runtime(t: ExecutionContext, activate = false) {
     const f = await fixture({ 'a.md': 'Baza', 'b.md': 'Baza-B', 'source.png': 'IMG' });
     const registry = new SubTaskRegistry();
     const tools = new ToolRegistry();
-    for (const tool of [createWriteTool(), createReadTool(), createDeleteTool(), createCreateFolderTool(f.app as never),
+    for (const tool of [createWriteTool(), createReadTool(), createListTool(), createDeleteTool(), createCreateFolderTool(f.app as never),
         createArtifactCreateTool(), createArtifactUpdateTool(), createGenerateImageTool(), createAddTextToImageTool(),
         createMemorySaveTool(), createTodoTool(), ...createKomunikatorTools()]) tools.registerTool(tool);
-    const agent = { name: 'Tester', permissions: { memory: true, guidance_mode: false }, mcp_servers: ['*'], activeSubAgents: [{ name: 'child' }] };
+    const agent = { name: 'Tester', admin_access: false, permissions: { memory: true, guidance_mode: false }, mcp_servers: ['*'], activeSubAgents: [{ name: 'child' }] };
     const memory = { agentName: 'Tester', activeSessionPath: 'session.md', basePath: '.pkm-assistant/agents/tester',
         paths: { brainNotes: '.pkm-assistant/agents/tester/brain' }, vault: f.app.vault,
         appendSessionEvent: async (_path: string, event: unknown) => { journal.push(event); return 'saved'; } };
     const journal: unknown[] = [];
-    const config = { name: 'child', description: 'child', role: 'worker', model: 'openai/model', tools: ['write', 'read'], prompt: 'METHOD', scope: null, max_iterations: 25, min_iterations: 1, max_tool_result_length: 15000, enabled: true };
+    const config = { name: 'child', description: 'child', role: 'worker', model: 'openai/model', tools: ['write', 'read', 'list'], prompt: 'METHOD', scope: null, max_iterations: 25, min_iterations: 1, max_tool_result_length: 15000, enabled: true };
     const manager = new KomunikatorManager(f.app.vault, null, { now: () => 42 });
     let approvals = 0;
     const permissions: string[] = [];
@@ -218,7 +219,7 @@ test.serial(`P3 runner isolates writer family ${family} and checks the draft eff
     t.deepEqual(f.store.snapshot(view.draftId!).phase, { kind: 'sealed', reason: 'finished' });
     t.is(decode(f.files.get('a.md')!), 'Baza');
     t.deepEqual([...f.files.keys()].sort(), ['a.md', 'b.md', 'source.png']);
-    t.is(f.approvals(), 0);
+    t.is(f.approvals(), family === 'generate_image' ? 1 : 0);
     t.deepEqual(outcome.outcome.effects.map(effect => [effect.tool, effect.location?.kind, effect.check]),
         names.map(name => [name, 'draft', 'matches']));
     switch (family) {
@@ -248,8 +249,10 @@ test.serial(`P3 runner isolates writer family ${family} and checks the draft eff
     }
 });
 
-for (const ambiguous of [false, true]) test.serial(`P3 A/B -> C receives sealed inputs; ambiguous=${ambiguous}`, async t => {
+for (const [ambiguous, admin] of [[false, false], [true, false], [true, true]]) test.serial(`P3 A/B -> C receives sealed inputs; ambiguous=${ambiguous}; admin=${admin}`, async t => {
     const f = await runtime(t);
+    f.agent.permissions.guidance_mode = true;
+    f.agent.admin_access = admin;
     modelsTest.setChatModelFactory(() => new f.Model() as never);
     const delegate = createDelegateTool(f.app, { drafts: f.drafts });
     t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
@@ -269,7 +272,15 @@ for (const ambiguous of [false, true]) test.serial(`P3 A/B -> C receives sealed 
     b.call('write', { path: ambiguous ? 'a.md' : 'b.md', content: 'B' }); const br = await f.requests.next();
     t.like(lastTool(br), { success: true, path: ambiguous ? 'a.md' : 'b.md' });
     ar.done('Answer A'); br.done('Answer B');
-    const c = await f.requests.next();
+    let c = await f.requests.next();
+    if (ambiguous) {
+        c.call('list', { recursive: true });
+        c = await f.requests.next();
+        t.is(lastTool(c).success, true);
+        const entries = lastTool(c).files as Array<{ path: string }>;
+        t.like(entries.find(entry => entry.path === 'a.md'), { path: 'a.md', status: 'ambiguous-input',
+            sources: [{ draftId: 'run-draft-1', revision: 1 }, { draftId: 'run-draft-2', revision: 1 }] });
+    }
     t.true(c.payload.messages.some(message => message.content.includes('TASK C')));
     c.call('read', { path: 'a.md', scope: 'vault' }); const cr = await f.requests.next();
     if (ambiguous) {

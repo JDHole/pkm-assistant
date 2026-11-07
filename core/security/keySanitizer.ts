@@ -229,3 +229,9 @@ export function maskKey(key: unknown): string {
     if (key.length <= 8) return '********';
     return key.slice(0, 4) + '...' + key.slice(-4);
 }
+
+/** Runtime-owned storage. No content tool or admin override may enter it. */
+export function isPrivateDraftPath(path: string): boolean {
+    const canonical = sanitizePath(path);
+    return typeof canonical === 'string' && /^\.pkm-assistant\/subagent-drafts(?:\/|$)/i.test(canonical);
+}

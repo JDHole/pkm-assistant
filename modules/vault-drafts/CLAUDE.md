@@ -161,14 +161,31 @@ metadata-only zmiana ukrytego pliku w samym callbacku nie ma warunkowej operacji
 Tworzenie plików używa create-only Vault API. Brak potrzebnej metody kończy się
 odmową/niepewną decyzją, nigdy niezabezpieczonym fallbackiem.
 
-Zainstalowane deklaracje Obsidiana nie oferują warunkowego `modifyBinary/trash/delete`.
-Dla binariów i usunięć ponownie odczytujemy hash/mtime **bezpośrednio przed operacją,
-pod blokadą ścieżki magazynu**, po przygotowaniu blobów i rodziców. To gwarancja
-optymistyczna wobec niezależnego pisarza poza pluginem: taki pisarz może zmienić plik
-między końcowym sprawdzeniem i operacją hosta. Nie jest to compare-and-swap. Blokada
-zamyka wyścigi przyjęć tego magazynu, nie zewnętrzne procesy ani zwykłe zapisy live.
-To ograniczenie pozostawia możliwość nadpisania niezależnej zmiany w tym krótkim
-oknie dla binariów i usunięć; nie jest pełną gwarancją konfliktu z architektury.
+**Decyzja Kuby 07.11.2026: „Okno + siatka asekuracyjna”.** Obsidian nie oferuje
+warunkowego modifyBinary/trash. Przyjęte usunięcie ZAWSZE trafia do kosza, nawet gdy
+propozycja zawiera permanent; host nie ma tu ścieżki delete/remove. Przed nadpisaniem
+binarium (także przed usunięciem) host odczytuje bieżące bajty i woła checkpoint.
+Ten zapisuje blob trwale i publikuje `applying.recoveryBlob` przed operacją. Manifest
+jest dziennikiem decyzji; pierwotna intencja pozostaje niezmienna. Pokwitowanie accepted
+lub recovery-required oraz restore zachowują recoveryBlob (blob/hash/bytes). GC nie
+usuwa tego bloba nawet po zebraniu pozostałego payloadu zaakceptowanej kopii.
+
+Host ponownie sprawdza bajty/metadane po utrwaleniu checkpointu i obserwuje zdarzenia
+modify/delete podczas operacji. Po tych awaitach synchronicznie ponawia autoryzację
+przed wejściem do operacji hosta. Zmiana na granicy hosta, obserwowalny wyścig, błąd
+operacji albo wynik różny od zatwierdzonego daje recovery-required ze wskazaniem
+zachowanych bajtów; operacja nie jest ponawiana. Po udanej operacji DraftReview
+odczytuje stan i wymaga dokładnej zgodności rodzaju, SHA-256 i długości z propozycją.
+
+**To nie jest compare-and-swap.** Niezależny pisarz, który zmieni bajty po ostatnim
+odczycie, a przed operacją i nie dostarczy obserwowalnego zdarzenia, nadal może zostać
+nadpisany bez wykrycia, jeśli wynik końcowy odpowiada propozycji. Blob chroni ostatnie
+odczytane bajty, nie niezaobserwowaną edycję z tego okna. Kosz przechowuje faktycznie
+usunięty plik. Kolejka magazynu serializuje przyjęcia, ale nie blokuje innych pisarzy.
+Testy F5 `SubagentChangesTool.test.ts` zatrzymują prawdziwy host na barierze operacji,
+wprowadzają konkurencyjną zmianę i odczytują recoveryBlob oraz zawartość kosza po
+recovery-required. Osobne testy sprawdzają rozbieżny wynik, restart, GC pokwitowania
+i cofnięcie uprawnień podczas trwałego checkpointu.
 
 Host review `createDraftReviewHost(app)` jest w tools (barrel). Nie uruchamia się
 samodzielnie. Runtime P5 współdzieli jeden store i wykonuje restore przed rejestracją
@@ -206,3 +223,16 @@ referencji, czterech liczników oraz ścieżek/statusów. Brak zmian daje undefi
 Źródłem decyzji pozostaje store; historia przechowuje tylko referencję.
 Testy P5: `../tools/vaultDraftRuntime.test.ts`, `../tools/runnerDrafts.test.ts`,
 `../chat/chat/subTaskStrip.test.ts`, `../ui-components/SubAgentBlock.test.ts`.
+
+
+### 2.4.7 — osierocone bloby
+
+Po poprawnym skanie `collectResolved` wywołuje konserwatywne `collectOrphans`.
+Usuwa poprawne bloby v1 z katalogów bez żadnego manifestu (np. Stop przed pierwszą
+publikacją), dopiero po pełnym skanie i sprawdzeniu hashy wszystkich kandydatów.
+Żaden katalog znany bieżącemu store, z manifestem lub decyzją nie jest kandydatem;
+żywych ID sprawdza także przed usuwaniem, aby nowy bieg nie wpadł pod stary skan.
+Nierozpoznany układ/nazwa pozostaje nietknięty, a błąd odzyskiwania blokuje sprzątanie.
+Referencje wejść nadal blokują zwykły GC rozstrzygniętych kopii. Testy F8 w
+`DraftStore.test.ts` odtwarzają Stop przed manifestem, restart, aktywną referencję
+i nieznany format; test P5 w `tools/vaultDraftRuntime.test.ts` sprawdza referencję C.

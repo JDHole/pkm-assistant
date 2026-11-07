@@ -445,3 +445,12 @@ P4 nie zmienia istniejących tekstów, modeli uprawnień ani inicjalizacji runti
 
 P5 2.4.7 dodaje PL/EN dla liczników, sekcji, zaległych kopii, błędów recovery
 i instrukcji subagent_changes w powiadomieniu. Główne API core pozostaje bez zmian.
+
+
+### 2.4.7 — prywatna przestrzeń kopii
+
+`isPrivateDraftPath` kanonizuje ścieżkę i rozpoznaje namespace
+`.pkm-assistant/subagent-drafts/` niezależnie od wielkości liter. PermissionSystem
+oraz AccessGuard odmawiają przed wyjątkiem admin_access. Narzędzia treści, ich
+listingi i skany pamięci używają tego samego helpera; runtime review ma własne I/O.
+Test behawioralny publicznego MCP: `modules/tools/AdminVaultTools.test.ts` (F4).

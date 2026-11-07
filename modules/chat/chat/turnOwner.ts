@@ -299,3 +299,25 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
         artifactId: view?.currentArtifactId ?? null,
     };
 }
+
+/** Legacy migration is complete BEFORE freezeTurnOwner. Every await keeps the
+ * original tab/window/agent guard, so another tab cannot inherit this send. */
+export async function ensureTurnSessionEpoch(view: FreezeViewLike): Promise<boolean> {
+    const manager = view.plugin?.agentManager;
+    const agent = manager?.getActiveAgent?.();
+    const memory = agent?.name ? resolveOwnerMemory(manager, agent.name) : null;
+    const path = memory?.activeSessionPath;
+    if (!memory || !path || /^[0-9a-f]{32}$/.test(memory.sessionEpoch ?? '')) return true;
+    const tab = view.chatTabs?.find(tab => tab.isActive);
+    const window = view.rollingWindow;
+    const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch;
+    const current = () => manager?.getActiveAgent?.() === agent && view.rollingWindow === window
+        && (!tab || tab.isActive && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch);
+    if (tabPath && tabPath !== path) return false;
+    // Old read-only hosts can lack the migration API; writers still fail closed on missing origin.
+    if (typeof memory.ensureActiveSessionEpoch !== 'function') return true;
+    const epoch = await memory.ensureActiveSessionEpoch(path, current);
+    if (!current()) return false;
+    if (tab) { tab.sessionPath = path; tab.sessionEpoch = epoch; }
+    return true;
+}

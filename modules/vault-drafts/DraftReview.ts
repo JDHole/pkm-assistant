@@ -2,17 +2,18 @@ import { DraftStore } from './DraftStore.js';
 import { DraftPersistence } from './DraftPersistence.js';
 import { DraftError } from './types.js';
 import { parseVaultPath } from './schema.js';
-import type { Change, ChangeId, DraftId, DraftIdentity, DraftManifest, DraftVaultIO, FileVersion, Revision, VaultPath } from './types.js';
+import type { Change, ChangeId, DraftId, DraftIdentity, DraftManifest, DraftVaultIO, FileVersion, RecoveryBlob, Revision, VaultPath } from './types.js';
 
 /** Host uses vault.process (adapter.process for hidden text). Throwing in the callback
  * must leave the file unchanged. No modify fallback. Create operations are create-only. */
+export type BeforeDestructiveWrite = (bytes: Uint8Array, mtime: number) => Promise<() => void>;
 export interface DraftReviewIO extends DraftVaultIO {
     processText(path: VaultPath, transform: (current: string, mtime: number) => string): Promise<void>;
     createText(path: VaultPath, text: string): Promise<void>;
     createBinary(path: VaultPath, bytes: Uint8Array): Promise<void>;
-    modifyBinary(path: VaultPath, bytes: Uint8Array): Promise<void>;
+    modifyBinary(path: VaultPath, bytes: Uint8Array, checkpoint: BeforeDestructiveWrite): Promise<void>;
     createFolder(path: VaultPath): Promise<void>;
-    deleteFile(path: VaultPath, disposition: 'trash' | 'permanent'): Promise<void>;
+    deleteFile(path: VaultPath, disposition: 'trash', checkpoint: BeforeDestructiveWrite): Promise<void>;
 }
 export type DraftPreview =
     | { kind: 'text'; oldContent: string; newContent: string }
@@ -27,11 +28,11 @@ export interface DraftReviewContext {
     approve(change: Change, preview: DraftPreview): Promise<boolean>;
 }
 export type ReviewDecision =
-    | { kind: 'accepted'; attemptId: string; applied: FileVersion }
+    | { kind: 'accepted'; attemptId: string; applied: FileVersion; recoveryBlob?: RecoveryBlob }
     | { kind: 'rejected' }
     | { kind: 'conflict'; reason: 'base-changed' | 'dependency-changed' | 'ambiguous-input'; actual: FileVersion }
     | { kind: 'stale-revision' | 'not-sealed' | 'denied' }
-    | { kind: 'recovery-required'; attemptId: string };
+    | { kind: 'recovery-required'; attemptId: string; recoveryBlob?: RecoveryBlob };
 export type ChangeSummary = {
     draft_id: DraftId; change_id: ChangeId; path: VaultPath; kind: Change['proposed']['kind'];
     run_id: string; revision: Revision; status: Change['review']['kind'];
@@ -146,7 +147,8 @@ export class DraftReview {
             const save = async (state: Change['review']) => this.store.setReview(input.draftId, change.id, change.revision, state);
             switch (change.review.kind) {
                 case 'accepted': case 'rejected': case 'recovery-required': return change.review;
-                case 'applying': return { kind: 'recovery-required', attemptId: change.review.attemptId };
+                case 'applying': return { kind: 'recovery-required', attemptId: change.review.attemptId,
+                    ...(change.review.recoveryBlob ? { recoveryBlob: change.review.recoveryBlob } : {}) };
                 case 'conflict': if (input.action === 'accept') return change.review; break;
                 case 'pending': break;
                 default: { const exhaustive: never = change.review; return exhaustive; }
@@ -176,6 +178,17 @@ export class DraftReview {
             // Applying + immutable intent are durable before any vault mutation.
             const attemptId = `${change.id}-${fresh.generation + 1}`;
             await save({ kind: 'applying', attemptId, approvedRevision: change.revision });
+            let recoveryBlob: RecoveryBlob | undefined;
+            const checkpoint: BeforeDestructiveWrite = async (current, mtime) => {
+                recoveryBlob = await this.persistence.putBlob(input.draftId, current);
+                await save({ kind: 'applying', attemptId, approvedRevision: change.revision, recoveryBlob });
+                const expected = change.base.kind === 'file' ? change.base.version : change.base;
+                if (!sameVersion({ kind: 'file', hash: recoveryBlob.hash, bytes: recoveryBlob.bytes, mtime }, expected))
+                    throw new Error('Host observed a change at the destructive operation boundary');
+                return () => {
+                    if (!context.authorize(change.path, 'accept', change)) throw new Error('Permission revoked');
+                };
+            };
             try {
                 for (const path of parents) if ((await this.vault.stat(path)).kind === 'missing') {
                     if (!context.authorize(path, 'folder', change)) throw new Error('Permission revoked');
@@ -208,10 +221,10 @@ export class DraftReview {
                     case 'binary':
                         if (!bytes) throw new Error('Missing binary proposal');
                         if (change.base.kind === 'missing') await this.vault.createBinary(change.path, bytes);
-                        else await this.vault.modifyBinary(change.path, bytes);
+                        else await this.vault.modifyBinary(change.path, bytes, checkpoint);
                         break;
                     case 'deleted':
-                        if (change.base.kind !== 'missing') await this.vault.deleteFile(change.path, value.disposition);
+                        if (change.base.kind !== 'missing') await this.vault.deleteFile(change.path, 'trash', checkpoint);
                         break;
                     case 'folder': await this.vault.createFolder(change.path); break;
                     default: { const exhaustive: never = value; return exhaustive; }
@@ -221,7 +234,7 @@ export class DraftReview {
                     : value.kind === 'deleted' ? applied.kind === 'missing'
                     : applied.kind === 'file' && applied.hash === value.hash && applied.bytes === value.bytes;
                 if (!matches) throw new Error('Applied result differs from the approved proposal');
-                const accepted = { kind: 'accepted' as const, attemptId, applied };
+                const accepted = { kind: 'accepted' as const, attemptId, applied, ...(recoveryBlob ? { recoveryBlob } : {}) };
                 await save(accepted);
                 return accepted;
             } catch (error) {
@@ -231,7 +244,7 @@ export class DraftReview {
                     await save(result); return result;
                 }
                 // A failed write/acknowledgement is uncertain. NEVER retry the vault operation.
-                const result = { kind: 'recovery-required' as const, attemptId };
+                const result = { kind: 'recovery-required' as const, attemptId, ...(recoveryBlob ? { recoveryBlob } : {}) };
                 try { await save(result); } catch { /* durable applying still forces recovery on restart */ }
                 return result;
             }

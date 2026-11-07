@@ -1093,7 +1093,7 @@ export class MCPClient {
                     sources: resolved.sources.map(source => source.ref),
                     error: `Ambiguous input ${targetPath}: ${resolved.sources.map(source => source.ref.draftId).join(', ')}` };
             }
-            permResult.requiresApproval = !draftWrite && this._shouldRequestApproval({
+            permResult.requiresApproval = (!draftWrite || toolCall.name === 'generate_image') && this._shouldRequestApproval({
                 actionType,
                 targetPath,
                 toolName: toolCall.name,

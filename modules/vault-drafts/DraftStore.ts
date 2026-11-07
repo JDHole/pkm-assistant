@@ -30,7 +30,7 @@ export class DraftStore {
     }
     async collectResolved(): Promise<void> {
         // Incomplete/future-format scans cannot prove that a blob is unreferenced.
-        if (this.recoveryIssues) return;
+        if (this.recoveryIssues || (await this.persistence.loadAll()).issues.length) return;
         for (const [id, entry] of this.entries) await this.publish(entry, async () => {
             const old = entry.manifest;
             if (this.references.has(id) || old.phase.kind !== 'sealed'
@@ -42,6 +42,7 @@ export class DraftStore {
                 await this.persistence.collect(entry.manifest);
             } finally { this.collecting.delete(id); }
         });
+        await this.persistence.collectOrphans(id => this.entries.has(id));
     }
     private changed(entry: Entry): void { this.events.emit('draft:changed', structuredClone(entry.manifest)); }
     private readonly entries = new Map<DraftId, Entry>();
@@ -91,14 +92,14 @@ export class DraftStore {
             const from = change.review.kind, to = review.kind;
             if (!(from === 'pending' && ['rejected', 'conflict', 'applying'].includes(to)
                 || from === 'conflict' && to === 'rejected'
-                || from === 'applying' && ['accepted', 'conflict', 'recovery-required'].includes(to)))
+                || from === 'applying' && ['applying', 'accepted', 'conflict', 'recovery-required'].includes(to)))
                 throw new DraftError('invalid-transition', 'Invalid review transition');
             entry.manifest = await this.persistence.save({ ...old,
                 changes: old.changes.map(item => item.id === changeId ? { ...item, review } : item),
                 updatedAt: this.clock.now(),
             }, () => true);
             this.changed(entry);
-            if (review.kind === 'applying') await this.persistence.writeIntent(entry.manifest, change, review.attemptId);
+            if (review.kind === 'applying' && from !== 'applying') await this.persistence.writeIntent(entry.manifest, change, review.attemptId);
         });
     }
     private requireOpen(entry: Entry): void {
@@ -222,7 +223,7 @@ export class DraftStore {
         const restored: DraftManifest[] = [];
         for (const input of recovered.manifests) {
             const changes = input.changes.map(change => change.review.kind === 'applying'
-                ? { ...change, review: { kind: 'recovery-required', attemptId: change.review.attemptId } as const } : change);
+                ? { ...change, review: { kind: 'recovery-required', attemptId: change.review.attemptId, ...(change.review.recoveryBlob ? { recoveryBlob: change.review.recoveryBlob } : {}) } as const } : change);
             const needsSave = input.phase.kind === 'open' || input.changes.some(change => change.review.kind === 'applying');
             const manifest = needsSave ? await this.persistence.save({ ...input, changes,
                 phase: input.phase.kind === 'open' ? { kind: 'sealed', reason: 'restart' } : input.phase,

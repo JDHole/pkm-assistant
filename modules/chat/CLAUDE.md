@@ -1776,3 +1776,13 @@ i `../ui-components/SubAgentBlock.test.ts`; stare asercje DOM pozostają.
 Po restarcie nierozstrzygnięte kopie pozostają dostępne do przeglądu; odtworzenie
 nie wznawia subagenta. UI nie ma przycisków przyjęcia: prowadzący wywołuje narzędzie,
 a istniejący przepływ zgody i diff obsługuje rzeczywisty zapis.
+
+
+### 2.4.7 — starsze sesje przed zamrożeniem tury
+
+`send_message` wywołuje `ensureTurnSessionEpoch` przed `freezeTurnOwner`. Starsza istniejąca
+sesja otrzymuje trwałą epokę przez kolejkę AgentMemory. Sprawdzane są agent, aktywna
+zakładka, ścieżka/epoka i okno rozmowy po każdym oczekiwaniu; przełączenie nie przypisuje
+migrowanej tożsamości nowej zakładce ani nie uruchamia jej modelu. Brak rzeczywistego
+właściciela nadal odmawia piszącemu subowi, bez zapisu live. Test F1 w `turnOwner.test.ts`
+oraz harness 74 używający produkcyjnego send_message i rzeczywistej pamięci po boocie.

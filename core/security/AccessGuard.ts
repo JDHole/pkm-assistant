@@ -12,7 +12,7 @@
 import { log } from '../utils/Logger.js';
 import { t } from '../i18n/index.js';
 import { expandFocusEntries } from './vaultGroups.js';
-import { sanitizePath } from './keySanitizer.js';
+import { sanitizePath, isPrivateDraftPath } from './keySanitizer.js';
 import { getAgentSafeName } from '../utils/agentSlug.js';
 import { globPatternToRegex } from './globPattern.js';
 import type { FocusEntry, FocusFolder, VaultGroup } from './vaultGroups.js';
@@ -396,6 +396,8 @@ export class AccessGuard {
         // Bariera suba PRZED wszystkim innym - także przed admin_access rodzica.
         const subScopeDenial = AccessGuard._checkSubScope(targetPath, opts?.scopeFolders);
         if (subScopeDenial) return subScopeDenial;
+
+        if (targetPath && isPrivateDraftPath(targetPath)) return { allowed: false, reason: 'Private draft storage' };
 
         // A1: jawny, per-agent escape hatch. Nadal operujemy wyłącznie na ścieżkach
         // relatywnych do vaulta — sanitizePath jest wcześniejszą, niezależną warstwą.

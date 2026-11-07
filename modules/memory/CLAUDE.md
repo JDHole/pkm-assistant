@@ -991,3 +991,19 @@ do kopii treści. `RetrievalEngine` pozostaje publicznym silnikiem wyszukiwania;
 hosta należy do `tools/SearchTool`: keyword/text widzą warstwy kopii, auto przechodzi
 na keyword, a semantic korzysta z bazowego vaulta i nie widzi kopii. `scope: memory`
 zachowuje dotychczasowy odczyt. Osobna tożsamość hosta kopii izoluje cache skanów.
+
+
+### 2.4.7 — trwała epoka starszej sesji przed turą
+
+`ensureActiveSessionEpoch(path, isCurrent)` odczytuje istniejącą sesję pod kolejką
+`_enqueuePathWrite`, sprawdza katalog właściciela, metadane agenta i rewizję tożsamości.
+Brakująca lub niepoprawna epoka dostaje 32 znaki hex; zapis przechodzi `_writeSessionFile`
+i pełny odczyt kontrolny. Nie tworzy brakującej sesji. `isCurrent` pilnuje zakładki/okna;
+RAM dostaje epokę dopiero po trwałym zapisie i ponownym potwierdzeniu właściciela.
+Przywrócenie sesji samo nie migruje pliku; robi to `send_message` przed freezeTurnOwner.
+Testy F1 w `AgentMemory.test.ts`, `chat/turnOwner.test.ts` oraz scenariusz harnessu 74
+sprawdzają kolejkę z appendem, przełączenie zakładki i ponowny odczyt nową instancją.
+
+`RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
+administratora oraz w wynikach starego indeksu semantycznego; nie odczytuje jego
+zawartości przy zbieraniu kandydatów ani podglądów. Test F4 w `RetrievalEngine.test.ts`.

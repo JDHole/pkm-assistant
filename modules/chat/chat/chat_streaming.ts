@@ -73,7 +73,7 @@ import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
 import { createTurnAbort, stopSubTasksForOwners } from './turnAbort.js';
 import { ChatTurnPartialState } from './turnPartial.js';
 import type { ActiveSessionEventInput } from '../../memory/index.js';
-import { freezeTurnOwner } from './turnOwner.js';
+import { freezeTurnOwner, ensureTurnSessionEpoch } from './turnOwner.js';
 import { evaluateAutoTurnChain, resetAutoTurnChain } from './autoTurnChain.js';
 import { RenderThrottle, shouldPaintFrame } from './renderThrottle.js';
 import type { StreamFrame } from './renderThrottle.js';
@@ -534,6 +534,14 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     } else {
         await this.appendToActiveSession?.(userEvent);
+    }
+
+    if (!questionDelivery) {
+        if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
+        try { if (!await ensureTurnSessionEpoch(this)) return; }
+        catch (error) { this.handle_error(error); return; }
+        if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)
+            || (this.plugin?.agentManager?.getActiveAgent()?.name || '?') !== activeAgentName) return;
     }
 
     // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU - razem z zapaleniem guzika Stop i PRZED pierwszym
