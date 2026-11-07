@@ -1,7 +1,7 @@
 import { DraftPersistence } from './DraftPersistence.js';
 import { parseChangeId, parseDraftId, parseDraftManifest, parseDraftMutation, parseRevision } from './schema.js';
 import { DraftError } from './types.js';
-import type { BaseSnapshot, DraftClock, DraftId, DraftManifest, DraftMutation, DraftPhase, DraftVaultIO, FirstTouch, ProposedValue, RecoveryIssue, VaultPath, VaultStat } from './types.js';
+import type { BaseSnapshot, DraftClock, DraftId, DraftManifest, DraftMutation, DraftPhase, DraftRef, DraftVaultIO, FirstTouch, ProposedValue, RecoveryIssue, VaultPath, VaultStat } from './types.js';
 
 type Entry = { manifest: DraftManifest; persisted: boolean; closed: boolean; publication: Promise<void>; paths: Map<VaultPath, Promise<void>> };
 type SealReason = Extract<DraftPhase, { kind: 'sealed' }>['reason'];
@@ -40,16 +40,34 @@ export class DraftStore {
         entry.publication = result.then(() => {}, () => {});
         return result;
     }
-    mutate(id: DraftId, input: DraftMutation): Promise<DraftManifest> {
+    mutate(id: DraftId, input: DraftMutation, inheritedFrom: readonly DraftRef[] = []): Promise<DraftManifest> {
         const entry = this.get(id);
         this.requireOpen(entry);
         const mutation = parseDraftMutation(input);
+        const inherited = inheritedFrom.map(ref => {
+            const manifest = this.snapshot(ref.draftId);
+            const change = manifest.changes.find(item => item.path === mutation.path);
+            if (manifest.phase.kind !== 'sealed' || manifest.revision !== ref.revision || !change)
+                throw new DraftError('invalid-transition', 'Invalid predecessor reference');
+            return { ref: { ...ref }, change };
+        });
         const previous = entry.paths.get(mutation.path) ?? Promise.resolve();
         const result = previous.then(async () => {
             this.requireOpen(entry);
             const first = entry.manifest.firstTouches.find(item => item.path === mutation.path);
-            const base = first?.base ?? await this.captureBase(id, mutation.path);
-            const current = entry.manifest.changes.find(item => item.path === mutation.path)?.proposed;
+            let base = first?.base;
+            if (!base && inherited.length) {
+                const inheritedBase = inherited[0].change.base;
+                if (inherited.some(item => JSON.stringify(item.change.base) !== JSON.stringify(inheritedBase)))
+                    throw new DraftError('ambiguous-input', 'Predecessors have different conflict bases');
+                if (inheritedBase.kind === 'file') {
+                    const bytes = await this.persistence.readBlob(inherited[0].ref.draftId, inheritedBase.blob, inheritedBase.version.hash, inheritedBase.version.bytes);
+                    await this.persistence.putBlob(id, bytes);
+                }
+                base = inheritedBase;
+            }
+            base ??= await this.captureBase(id, mutation.path);
+            const current = entry.manifest.changes.find(item => item.path === mutation.path)?.proposed ?? inherited[0]?.change.proposed;
             const kind = current?.kind === 'deleted' ? 'missing' : current?.kind ?? base.kind;
             if (kind === 'folder' || mutation.value.kind === 'folder' && (kind !== 'missing' || base.kind !== 'missing')
                 || mutation.value.kind === 'deleted' && kind === 'missing')
@@ -61,8 +79,9 @@ export class DraftStore {
                 const revision = parseRevision(entry.persisted ? old.revision + 1 : 1);
                 const touch: FirstTouch = first ?? { id: parseChangeId(`change-${revision}`), path: mutation.path, base };
                 const changes = old.changes.filter(item => item.path !== mutation.path);
-                if (!(base.kind === 'missing' && proposed.kind === 'deleted')) changes.push({ ...touch, proposed, revision,
-                    review: { kind: 'pending' }, inheritedFrom: [], source: mutation.source });
+                const origins = old.changes.find(item => item.path === mutation.path)?.inheritedFrom ?? inherited.map(item => item.ref);
+                if (!(base.kind === 'missing' && proposed.kind === 'deleted' && !origins.length)) changes.push({ ...touch, proposed, revision,
+                    review: { kind: 'pending' }, inheritedFrom: origins, source: mutation.source });
                 const manifest = await this.persistence.save({ ...old, revision,
                     generation: entry.persisted ? old.generation : 0,
                     updatedAt: this.clock.now(), changes,

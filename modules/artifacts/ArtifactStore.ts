@@ -83,6 +83,7 @@ interface ArtifactStoreDependencies {
      * przy `onunload`.
      */
     registerEvent?: (ref: unknown) => void;
+    observeEvents?: boolean;
 }
 interface ArtifactCreateOptions { tytul: string; pola?: Record<string, ArtifactScalar>; sekcje?: ArtifactPatchOp[]; agent?: string; }
 interface ArtifactImportOptions { tytul: string; agent?: string; status?: string; pola?: Record<string, ArtifactScalar>; body?: string; utworzono?: string; zaktualizowano?: string; }
@@ -136,7 +137,7 @@ export class ArtifactStore {
      * @param {Function} [deps.now] - () => Date (wstrzykiwalny zegar do testów)
      * @param {Function} [deps.registerEvent] - sprzątanie nasłuchów vaulta (opcjonalne)
      */
-    constructor({ app, typeLoader, getArtifactsFolder, now, registerEvent }: Partial<ArtifactStoreDependencies> = {}) {
+    constructor({ app, typeLoader, getArtifactsFolder, now, registerEvent, observeEvents = true }: Partial<ArtifactStoreDependencies> = {}) {
         // `app` jest w praktyce obowiązkowy (bez fallbacku, w przeciwieństwie do reszty pól
         // niżej) - `Partial<>` obejmuje całą sygnaturę tylko dla wygody jednego obiektu opcji.
         this.app = app as ArtifactStoreApp;
@@ -146,8 +147,13 @@ export class ArtifactStore {
         this._pathIndex = new Map();
         this._registry = null;
         this._registryRoot = null;
-        this._eventsRegistered = false;
+        this._eventsRegistered = !observeEvents;
         this._registerEventHook = typeof registerEvent === 'function' ? registerEvent : undefined;
+    }
+
+    /** Fresh indexes on the supplied host; never subscribes to the live vault. */
+    forHost(app: ArtifactStoreApp): ArtifactStore {
+        return new ArtifactStore({ app, typeLoader: this.typeLoader, getArtifactsFolder: this._getFolder, now: this._now, observeEvents: false });
     }
 
     // ─── create ──────────────────────────────────────────────────────────────

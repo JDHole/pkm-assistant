@@ -1,13 +1,12 @@
 # modules/vault-drafts/
 
-P1 wersji 2.4.7: kontrakt i trwały magazyn kopii roboczych. Moduł nie jest jeszcze
+P1–P2 wersji 2.4.7: trwały magazyn i warstwowy widok kopii roboczych. Moduł nie jest jeszcze
 podłączony do runtime. Nie importuje Obsidiana, runnera, czatu ani MCPClient.
 Nie ma żadnego portu zapisu treści do bazowego vaulta.
 
-Pięć plików produkcyjnych ma jawne, tymczasowe wpisy w `ZNANE_SIEROTY` w
-`core/dead_code_zasieg.test.ts`: architektura §11 wymaga braku aktywacji P1–P4.
-Przy podłączeniu do grafu runtime (P5) usunąć odpowiadające wpisy; strażnik nadal
-porównuje dokładny zestaw sierot i wykrywa zarówno nowe, jak i nieaktualne wpisy.
+Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), ale żaden
+runner ani runtime nie tworzy widoku/hosta. Dlatego usunięto pięć nieaktualnych
+wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 
 ## Co tu mieszka
 
@@ -19,6 +18,8 @@ porównuje dokładny zestaw sierot i wykrywa zarówno nowe, jak i nieaktualne wp
   suma SHA-256 manifestu, odczyt kontrolny, skan odzyskiwania.
 - `DraftStore.ts`: leniwe kopie, pierwsza baza, kolejki ścieżek, serializacja publikacji
   całego manifestu, `open → sealed`, odtworzenie po restarcie.
+- `DraftView.ts`: własna kopia → zamrożeni poprzednicy → vault; listing, tombstones,
+  tekst/binary, pochodzenie i kolejka read-modify-write współdzielona przez hosty biegu.
 - `DraftStore.test.ts`: AVA, odczyty faktycznie zapisanych bajtów przez nową instancję,
   awarie i bariery sterujące wyścigami; bez Obsidiana i rzeczywistych timerów.
 
@@ -29,7 +30,7 @@ porównuje dokładny zestaw sierot i wykrywa zarówno nowe, jak i nieaktualne wp
 - `create(identity: unknown)`: waliduje właściciela (agentName, sessionPath,
   sessionEpoch), draftId, runId, threadId i opcjonalny planId/nodeId. Nie tworzy plików.
   ID dostarcza zaufany runtime; nie wolno używać do tego argumentów modelu.
-- `mutate(draftId, {path, source: {tool, callId}, value})`: tekst, bajty, folder albo
+- `mutate(draftId, {path, source: {tool, callId}, value}, inheritedFrom?)`: tekst, bajty, folder albo
   tombstone z dyspozycją trash/permanent. Zwraca trwały snapshot manifestu.
 - `snapshot(draftId)`, `list()`: niezależne kopie danych; to wewnętrzne API, nie
   autoryzowane narzędzie prowadzącego. Własność i zakres dostępu egzekwuje przyszłe P4.
@@ -84,11 +85,30 @@ Nie ma GC ani TTL; dane i referencje zachowujemy dla następnych paczek.
 
 ## Następne paczki
 
-P2 dostarczy widok, warstwy i pochodzenie odziedziczonych zmian (`inheritedFrom` jest
-na razie puste). Musi zachować bazę poprzednika przy pierwszej mutacji pochodnej;
-nie może zastąpić jej świeżą bazą vaulta. Techniczne katalogi nadrzędne tworzy adapter
-przy przyjęciu, jawny folder jest osobną zmianą. `source` łączy pliki jednego wywołania
-oraz zachowuje narzędzie źródłowe dla kontroli uprawnień P4.
+`DraftView(store, persistence, vaultIO, draftId | null, predecessors = [])`:
+- `resolve(path)` zwraca vault/proposal/ambiguous-input i źródła; `read/readBinary/stat`
+  nie wybierają zwycięzcy przy różnych niezależnych propozycjach.
+- `list(folder = '')` zwraca `{files, folders, ambiguous}` pod logicznymi ścieżkami;
+  ukrywa tombstones i prywatny katalog magazynu, scala foldery jawne i rodziców plików.
+- `freeze()` wymaga zamkniętej własnej kopii; daje głęboko zamrożony `FrozenDraftView`
+  z odziedziczonym grafem. Bliższy potomek przesłania przodka, identyczne niezależne
+  propozycje zachowują oba źródła. Decyzje review nie zmieniają zamrożonych danych.
+- `mutate(path, source, value | transform, expectation)` czyta wewnątrz kolejki ścieżki;
+  jeden obiekt widoku należy współdzielić między wywołaniami danego biegu.
+  `draftId: null` pozwala tylko czytać poprzedników. Bez poprzedników i potrzeby
+  pisania runtime ma wybierać istniejące wykonanie `live`, nie tworzyć hosta kopii.
+
+Port `DraftViewIO` rozszerza odczyt vaulta o `list` bezpośrednich dzieci (root `''`).
+`DraftStore.mutate` przyjmuje zaufane referencje poprzedników od widoku, waliduje seal
+oraz rewizję i kopiuje blob pierwotnej bazy do namespace następcy. Kolejne patche
+zachowują bazę i źródła. Identyczna propozycja z różnymi bazami pozwala czytać, ale
+odmawia pochodnego zapisu (`ambiguous-input`), żeby nie zgubić konfliktu.
+Tombstone odziedziczonego NOWEGO pliku z bazą missing musi pozostać w manifeście:
+usunięcie go z zestawu netto odsłoniłoby plik poprzednika. Walidator dopuszcza go
+wyłącznie z niepustym `inheritedFrom`; własne create → delete nadal znika netto.
+
+Testy P2: `modules/tools/subToolExecution.test.ts` (narzędzia, widok, izolacja,
+artefakty/frontmatter, Orama, adapter, odtworzenie pochodnego tombstone i paginacja).
 
 P3 wiąże store z biegiem i Stopem; P4 implementuje decyzje, blokady logicznych ścieżek,
 kontrolę konfliktu, intencje i idempotencję. Same typy stanów przeglądu nie oznaczają

@@ -27,10 +27,10 @@ Pełny opis jest w [`core/SECURITY.md`](SECURITY.md). Skrót dla agenta:
 
 ## Kryterium wstępu
 
-Strażnik `dead_code_zasieg.test.ts` uwzględnia pięć imiennych plików
-`modules/vault-drafts/` jako tymczasowo niepodłączone (architektura 2.4.7, §11,
-P1–P4 bez aktywacji). Integracja w P5 usuwa te wpisy z `ZNANE_SIEROTY`;
-skaner i asercje dokładnego zestawu sierot pozostają bez zmian.
+P2 wersji 2.4.7 udostępnia host kopii przez barrel tools, więc pliki vault-drafts
+są już osiągalne statycznie. Usunięto pięć nieaktualnych wyjątków P1 z
+`ZNANE_SIEROTY`; dokładne asercje strażnika pozostały. Nie oznacza to aktywacji
+kopii w runtime. i18n ma dwa komunikaty `mcp.search.draft_auto/draft_semantic`.
 
 Do `core/` trafia TYLKO plik który spełnia **wszystkie 3 warunki**:
 

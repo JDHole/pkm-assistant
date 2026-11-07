@@ -7,3 +7,6 @@ export type { DraftId, ChangeId, VaultPath, BlobId, ContentHash, Revision, FileV
     DraftClock, DraftHasher, VaultStat, RecoveryIssue } from './types.js';
 export { parseDraftId, parseChangeId, parseBlobId, parseContentHash, parseRevision,
     parseVaultPath, parseDraftManifest, parseDraftMutation } from './schema.js';
+
+export { DraftView, FrozenDraftView } from './DraftView.js';
+export type { DraftViewIO, DraftResolution } from './DraftView.js';

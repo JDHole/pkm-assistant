@@ -167,3 +167,16 @@ Generator to pure `basesView.ts` (`buildArtifactsBaseContent(folder)` + `buildAr
 - `modules/tools/CLAUDE.md` - serwer `artifacts` (artifact_* + todo); aliasy chat_todo/idea_review/plan_review w `toolAliases.ts`.
 - `modules/chat/CLAUDE.md` - chip aktywnego artefaktu + segment slim bara + live-widok `todo` (`todoPanel.ts`).
 - `modules/agents/CLAUDE.md` - `AgentManager` owner `ArtifactTypeLoader` + `artifact_types` per agent.
+
+
+### 2.4.7 P2 — osobny store nad hostem kopii
+
+`ArtifactStore.forHost(app)` jest publiczną fabryką osobnej instancji z tymi samymi
+ustawieniami folderu, zegarem i biblioteką typów, ale nowymi indeksami ID/rejestrem.
+Instancja nie rejestruje nasłuchów (`observeEvents:false` w konstruktorze); metadane,
+body i processFrontMatter pochodzą wyłącznie z przekazanego hosta. Domyślny store
+zachowuje dotychczasowe nasłuchy i zachowanie. Host jest przygotowywany na każde
+wywołanie, także przed synchronicznym contextExtractor, więc nie dzieli starego
+indeksu ze store'em globalnym ani poprzednim wywołaniem. Test integracyjny
+`modules/tools/subToolExecution.test.ts`: create → update → read/list oraz
+niezmienione body/frontmatter bazowego artefaktu. Runtime jeszcze niepodłączony.

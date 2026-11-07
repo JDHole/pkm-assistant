@@ -146,3 +146,6 @@ export type { OpenAiToolDefinition, ServerVisibilityAgent, ServerManagerPluginLi
 export type { ToolsSettingsCtx, ImageGenSettings, SttSettings } from './SettingsContent.js';
 export type { ConnectorsPluginLike } from './ConnectorsBackstageTab.js';
 export type { BackstageTabDef, BackstageRegistryLike } from './BackstageTab.js';
+
+export { prepareSubToolExecution } from './subToolExecution.js';
+export type { VaultExecution } from './subToolExecution.js';

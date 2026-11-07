@@ -71,7 +71,7 @@ export function parseDraftManifest(value: unknown): DraftManifest {
             || changed.has(change.path) || change.revision > manifest.revision
             || (change.proposed.kind === 'text' || change.proposed.kind === 'binary') && change.proposed.blob !== String(change.proposed.hash)
             || change.base.kind === 'folder' || change.proposed.kind === 'folder' && change.base.kind !== 'missing'
-            || change.proposed.kind === 'deleted' && change.base.kind === 'missing'
+            || change.proposed.kind === 'deleted' && change.base.kind === 'missing' && !change.inheritedFrom.length
             || change.review.kind === 'applying' && change.review.approvedRevision !== change.revision
             || change.review.kind === 'conflict' && !finiteVersion(change.review.actual)
             || change.review.kind === 'accepted' && !finiteVersion(change.review.applied))

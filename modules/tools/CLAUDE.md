@@ -802,3 +802,36 @@ osobna sekcja przed dopasowaniem rozmowy do budżetu. Odmowa zgody blokuje
 następników tego węzła. Zaufany sub→sub otrzymuje pokwitowanie po przyjęciu
 planu, a wyniki i pytania przez skrzynkę rodzica; plan pozostaje żywy po zwrocie
 pokwitowania aż do rozliczenia puli, także dla Stopu i unload.
+
+
+### 2.4.7 P2 — host kopii (bez aktywacji runtime)
+
+Barrel eksportuje `prepareSubToolExecution` oraz `VaultExecution` (`live`,
+`overlay-read` z view, `overlay-write` z workspace — wspólnym `DraftView` biegu).
+Wołacz dostarcza zaufaną kanoniczną tożsamość narzędzia z rejestru i `callId`, poza
+argumentami modelu. Przygotowanie jest po aliasach/whiteliście, przed extractorem;
+TA SAMA para app/plugin ma trafić do extractora i execute. Uprawnienia, zgody,
+filtrowanie wyników i odcięcie definicji MCP pozostają zadaniem integracji P3–P5.
+P2 nie podpina tej funkcji do MCPClient/runnera ani nie zmienia UI.
+
+`draftToolHost.ts` tworzy zamknięte lokalne app/vault/adapter/fileManager/metadataCache.
+Nieznana metoda daje `mutation-denied`; nie ma automatycznego przekazywania metod,
+rename, globalnych podmian ani fallbacku zapisu do vaulta. Wszystkie zapisy są
+potwierdzane przez trwały DraftStore. `plugin.app` wskazuje TEN SAM lokalny host.
+Lokalny plugin udostępnia tylko usługi czytane przez narzędzia treści; artefakty
+korzystają z `ArtifactStore.forHost`, z własnymi indeksami i bez nasłuchów globalnych.
+Metadane artefaktów są wczytywane tylko pod rootem artefaktów; inne odczyty metadanych
+wyszukiwania używają dotychczasowego parsera na treści odczytanej z overlayu.
+
+Każde wywołanie tworzy osobny host (odrębna tożsamość cache skanu); `DraftView` i jego
+kolejka `process` są wspólne dla biegu. Jawne create_folder utrwala tylko docelowy
+folder, pomocnicze mkdir/createFolder writerów pozostają wymaganiami plików,
+bez dodatkowych pozycji przeglądu. Pamięć/todo/poczta oraz scope memory zachowują
+oryginalny host. Nieznane narzędzia i source:user są odmawiane w trybach kopii.
+
+SearchTool rozpoznaje host poprzez prywatny WeakMap, nie argument modelu:
+keyword/text czytają overlay; semantic używa bazowego pluginu i bazowych fragmentów
+(także przy dotychczasowej degradacji semantyki); auto przechodzi jawnie na keyword.
+`draft_note` ma komunikaty PL/EN. Bez wpisu WeakMap odpowiedzi pozostają bez zmian.
+Testy: `subToolExecution.test.ts` — prawdziwe narzędzia oraz binarne helpery obrazów,
+bez runnera, sieci, canvasu i Obsidiana.

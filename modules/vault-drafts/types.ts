@@ -50,7 +50,7 @@ export type DraftMutation = Readonly<{
 }>;
 export type DraftErrorCode = 'invalid-id' | 'invalid-path' | 'invalid-hash' | 'invalid-revision'
     | 'invalid-manifest' | 'invalid-mutation' | 'invalid-version' | 'integrity-error' | 'io-error'
-    | 'draft-closed' | 'draft-not-found' | 'draft-exists' | 'invalid-transition' | 'base-unstable';
+    | 'ambiguous-input' | 'file-missing' | 'mutation-denied' | 'draft-closed' | 'draft-not-found' | 'draft-exists' | 'invalid-transition' | 'base-unstable';
 export class DraftError extends Error {
     constructor(readonly code: DraftErrorCode, message: string, options?: ErrorOptions) {
         super(message, options);

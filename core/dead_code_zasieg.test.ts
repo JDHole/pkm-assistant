@@ -108,13 +108,6 @@ const ZNANE_SIEROTY: Record<string, string> = {
     'core/utils/httpLogSummary.ts': 'czeka na core/http — bezpieczna linia logu żądania',
     'modules/models/testing/harness.ts': 'atrapy testów klastra modeli — z definicji poza bundlem, jak `utils/release_helpers.ts`',
     'core/forbiddenVocabulary.ts': 'wzorzec bramki „grep zero" — wspólny dla dwóch testów, z definicji poza bundlem',
-    // Architektura 2.4.7, §11: P1–P4 są testowane bez aktywacji runtime; integracja w P5.
-    // Usunąć każdy wpis, gdy plik stanie się osiągalny z src/main.ts.
-    'modules/vault-drafts/index.ts': '2.4.7 P1: publiczny kontrakt kopii, czeka na integrację runtime w P5',
-    'modules/vault-drafts/types.ts': '2.4.7 P1: typy i porty nieaktywnego magazynu kopii',
-    'modules/vault-drafts/schema.ts': '2.4.7 P1: walidacja granic nieaktywnego magazynu kopii',
-    'modules/vault-drafts/DraftStore.ts': '2.4.7 P1: magazyn kopii testowany przez AVA, bez konsumenta runtime do P5',
-    'modules/vault-drafts/DraftPersistence.ts': '2.4.7 P1: trwałość kopii przez wstrzykiwane I/O, adapter runtime w P5',
 };
 /**
  * Klucze wyżej pisane są ze slashami (czytelność), a `walk()` oddaje ścieżki

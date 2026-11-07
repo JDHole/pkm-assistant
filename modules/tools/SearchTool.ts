@@ -17,6 +17,7 @@ import type { SemanticNotePlugin, SemanticScope } from './semanticNote.js';
 import { validateVaultFolder, invocationHasAdminAccess, getInvocationAgentName } from './vault_path_validator.js';
 import type { AgentIdentityLike } from './vault_path_validator.js';
 import { log } from '../../core/utils/Logger.js';
+import { draftSearchBase } from './draftToolHost.js';
 import { runTextSearch } from './TextSearch.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 
@@ -225,7 +226,9 @@ export function createSearchTool() {
                     where.folder = validation.safePath;
                 }
 
-                const engine = buildEngine(plugin, scope, invocationAgentName, adminAccess);
+                const basePlugin = scope === 'vault' ? draftSearchBase(plugin) : undefined;
+                const overlayAuto = basePlugin && !['keyword', 'semantic'].includes(args.mode ?? 'auto');
+                const engine = buildEngine(basePlugin && args.mode === 'semantic' ? basePlugin : plugin, scope, invocationAgentName, adminAccess);
                 if (scope === 'memory' && !engine.agentMemory) {
                     return { success: false, error: t('mcp.search.no_agent') };
                 }
@@ -234,7 +237,7 @@ export function createSearchTool() {
                     query: args?.query,
                     scope,
                     where,
-                    mode: args?.mode,
+                    mode: overlayAuto ? 'keyword' : args?.mode,
                     limit: args?.limit
                 } as never);
 
@@ -264,6 +267,8 @@ export function createSearchTool() {
                     // bajtowo identyczny jak dziś.
                     ...(decision.source === 'default' ? { scope_hint: t('mcp.search.scope_hint_default_memory') } : {}),
                     ...(note ? { note } : {}),
+                    ...(basePlugin && args.mode === 'semantic' ? { draft_note: t('mcp.search.draft_semantic') } : {}),
+                    ...(overlayAuto ? { draft_note: t('mcp.search.draft_auto') } : {}),
                     ...(scan ? { scan } : {})
                 };
             } catch (e) {
