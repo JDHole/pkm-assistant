@@ -2623,3 +2623,105 @@ test.serial('P4 shared epoch failure masks diagnostics once and clears them on s
     t.is((await new AgentMemory(f.vault, 'Lead').loadActiveSession(path)).metadata.epoch, epoch);
     t.is(memory.getSessionEpochFailure(path), null);
 });
+
+for (const source of ['event', 'frontmatter', 'raw', 'raw-invalid', 'raw-no-header'] as const) {
+    test(`archive promotes resolved epoch to frontmatter: ${source}`, async t => {
+        const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+        const path = `${memory.paths.sessionsActive}/legacy.md`;
+        const epoch = '0123456789abcdef0123456789abcdef';
+        const body = source.startsWith('raw') ? '\r\n## unknown block\r\nOpaque  \r\n'
+            : '\n## User\n\nHistoria\n\n## Assistant\n\nOdpowiedź\n';
+        const event = '\n## 2026-11-07T12:00:00Z — session epoch\n\n**epoch:**\n\n0123456789abcdef0123456789abcdef\n\n**seq:**\n\n1\n\n';
+        const original = (source === 'raw-no-header' ? '' : `\uFEFF---\r\nagent: Lead\r\n${source === 'frontmatter' ? `epoch: ${epoch}\r\n` : source === 'raw-invalid' ? 'epoch:\r\n  - bad\r\n' : ''}---\r\n`) + body + event;
+        f.files[path] = original;
+        const write = f.vault.adapter.write;
+        f.vault.adapter.write = async (target, data) => {
+            t.not(target, path, 'active source is never rewritten');
+            if (target.endsWith('/legacy.md')) t.is(f.files[path], original, 'source survives until archive readback');
+            await write(target, data);
+        };
+        const archived = await memory.archiveActiveSession(path);
+        t.is(archived, `${memory.paths.sessionsArchive}/legacy.md`);
+        t.is(memory._parseFrontmatter(f.files[archived!]).epoch, epoch);
+        if (source.startsWith('raw')) t.is(f.files[archived!], `---\n${source === 'raw-no-header' ? '' : 'agent: Lead\n'}epoch: ${epoch}\n---\n` + body + event);
+        else t.deepEqual(parseSessionFile(f.files[archived!]).messages, [
+            { role: 'user', content: 'Historia' }, { role: 'assistant', content: 'Odpowiedź' },
+        ]);
+        t.false(path in f.files);
+    });
+}
+
+test('independent appenders resolve the first record', async t => {
+    const f = makeVault();
+    let entered!: () => void, release!: () => void;
+    const bothRead = new Promise<void>(resolve => { entered = resolve; });
+    const firstWritten = new Promise<void>(resolve => { release = resolve; });
+    let reads = 0;
+    const read = async (path: string) => {
+        const data = await f.vault.adapter.read(path);
+        if (++reads === 2) entered();
+        if (reads <= 2) await bothRead;
+        return data;
+    };
+    const first = new AgentMemory({ adapter: { ...f.vault.adapter, read, append: async (path, data) => {
+        f.files[path] += data; release();
+    } } }, 'Lead');
+    const second = new AgentMemory({ adapter: { ...f.vault.adapter, read, append: async (path, data) => {
+        await firstWritten; f.files[path] += data;
+    } } }, 'Lead');
+    first._newSessionEpoch = () => 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    second._newSessionEpoch = () => 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const path = `${first.paths.sessionsActive}/legacy.md`;
+    f.files[path] = '---\nagent: Lead\n---\n\n## User\n\nHistoria\n';
+    for (const memory of [first, second]) memory.setActiveSessionIdentity(path, null);
+    t.deepEqual(await Promise.all([first, second].map(m => m.ensureActiveSessionEpoch(path, () => true))),
+        ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
+    t.deepEqual([...f.files[path].matchAll(/\*\*epoch:\*\*\n\n([a-f]+)/g)].map(match => match[1]),
+        ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']);
+    for (const adapter of [first.vault.adapter, second.vault.adapter]) {
+        const fresh = new AgentMemory({ adapter: { ...adapter } }, 'Lead');
+        const parsed = await fresh.loadActiveSession(path);
+        t.is(parsed.metadata.epoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+        t.deepEqual(parsed.messages, [{ role: 'user', content: 'Historia', seq: null }]);
+    }
+});
+
+test('completed append followed by error is adopted on retry', async t => {
+    const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+    const path = `${memory.paths.sessionsActive}/legacy.md`;
+    f.files[path] = '## User\n\nHistoria\n';
+    memory.setActiveSessionIdentity(path, null);
+    memory._newSessionEpoch = () => 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    memory.vault.adapter.append = async (target, data) => { f.files[target] += data; throw new Error('EIO after append'); };
+    await t.throwsAsync(memory.ensureActiveSessionEpoch(path, () => true), { message: 'EIO after append' });
+    t.is(memory.sessionEpoch, null);
+    const persisted = f.files[path];
+    t.is(await memory.ensureActiveSessionEpoch(path, () => true), 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    t.is(f.files[path], persisted);
+    t.is(memory.getSessionEpochFailure(path), null);
+    const fresh = new AgentMemory({ adapter: { ...f.vault.adapter } }, 'Lead');
+    await memory.stateManager.addActiveSession('legacy.md');
+    t.is(await fresh.restoreActiveSession(), path);
+    t.is(fresh.sessionEpoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    t.deepEqual((await fresh.loadActiveSession(path)).messages, [{ role: 'user', content: 'Historia', seq: null }]);
+});
+
+for (const fail of [false, true]) test(`owner switch A→B→A cannot publish epoch or failure (error=${fail})`, async t => {
+    const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+    const path = `${memory.paths.sessionsActive}/legacy.md`;
+    f.files[path] = '## User\n\nHistoria\n';
+    memory.setActiveSessionIdentity(path, null);
+    memory._newSessionEpoch = () => 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    memory.vault.adapter.append = async (target, data) => {
+        f.files[target] += data;
+        memory.setActiveSessionIdentity('other.md', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+        memory.setActiveSessionIdentity(path, null);
+        if (fail) throw new Error('EACCES old owner');
+    };
+    await t.throwsAsync(memory.ensureActiveSessionEpoch(path, () => true), { message: 'Session epoch: owner changed' });
+    t.deepEqual([memory.activeSessionPath, memory.sessionEpoch, memory.getSessionEpochFailure(path)], [path, null, null]);
+    const before = f.files[path];
+    t.is(await memory.ensureActiveSessionEpoch(path, () => true), 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    t.is(f.files[path], before);
+    t.deepEqual((await memory.loadActiveSession(path)).messages, [{ role: 'user', content: 'Historia', seq: null }]);
+});

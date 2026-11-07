@@ -1,4 +1,5 @@
 import { ConsolidationSnapshot } from './ConsolidationSnapshot.js';
+import { withoutSessionEpochEvents } from './activeSessionFormat.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
@@ -1288,7 +1289,8 @@ ${String(body || '').trim()}
     private async _summaryFromFilesViaAgent(paths: string[], level: string, opts: LlmCallOptions = {}): Promise<string> {
         const documents = await Promise.all(paths.map(async (path) => {
             const content = await this.agentMemory.vault.adapter.read(path);
-            const stripped = content.replace(/^---[\s\S]*?---\n*/, '').trim();
+            const body = content.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n*/, '');
+            const stripped = (level === 'L1' ? withoutSessionEpochEvents(body) : body).trim();
             return {
                 filename: path.split('/').pop() as string,
                 content: stripped.slice(0, 5000)
@@ -1321,7 +1323,8 @@ ${String(body || '').trim()}
         // is a labelled cat of the source documents; nobody should mistake it for a real summary.
         const chunks = await Promise.all(paths.map(async (path) => {
             const content = await this.agentMemory.vault.adapter.read(path);
-            return `## ${path.split('/').pop()}\n${content.replace(/^---[\s\S]*?---\n*/, '').trim()}`;
+            const body = content.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n*/, '');
+            return `## ${path.split('/').pop()}\n${(level === 'L1' ? withoutSessionEpochEvents(body) : body).trim()}`;
         }));
         return `# ${level} raw concat (no LLM available)\n\n${chunks.join('\n\n')}`;
     }

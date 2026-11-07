@@ -262,7 +262,7 @@ function diskFixture(t: ExecutionContext) {
 }
 
 // Replaces both recreated-source races: protect history and both owners at the I/O boundary.
-for (const timing of ['read', 'readback'] as const) {
+for (const timing of ['read', 'readback', 'A→B→A', 'A→B→A-error'] as const) {
     test.serial(`P2 filesystem: owner switch during ${timing} preserves both sessions`, async t => {
         const f = diskFixture(t), chat = f.chat(`switch-${timing}`);
         t.teardown(chat.close);
@@ -278,6 +278,8 @@ for (const timing of ['read', 'readback'] as const) {
                 switched = true;
                 await append(path, `\n## User\n\nEXTERNAL switch-${timing}\n`);
                 f.memory.setActiveSessionIdentity(otherPath, 'b'.repeat(32));
+                if (timing.startsWith('A→B→A')) f.memory.setActiveSessionIdentity(f.path, null);
+                if (timing === 'A→B→A-error') throw new Error('EACCES departed owner');
             }
             return data;
         };
@@ -288,7 +290,8 @@ for (const timing of ['read', 'readback'] as const) {
             ['Historyczne pytanie', 'Historyczna odpowiedź', `Pytanie switch-${timing}`, `EXTERNAL switch-${timing}`]);
         t.is(await read(otherPath), other);
         t.deepEqual([f.memory.activeSessionPath, f.memory.sessionEpoch, chat.tab.sessionEpoch],
-            [otherPath, 'b'.repeat(32), null]);
+            timing.startsWith('A→B→A') ? [f.path, null, null] : [otherPath, 'b'.repeat(32), null]);
+        t.is(f.memory.getSessionEpochFailure(f.path), null);
         t.deepEqual(f.errors, ['Error: Session epoch: owner changed']);
         t.deepEqual(f.requests, []);
     });
@@ -333,12 +336,19 @@ for (const mode of ['append', 'read-failure'] as const) {
     });
 }
 
-test.serial('P2 filesystem: five failed epoch reads preserve history and the next send retries', async t => {
-    const f = diskFixture(t), read = f.adapter.read;
+for (const failure of ['read', 'append'] as const) test.serial(`every failed turn retries without creating files: ${failure}`, async t => {
+    const f = diskFixture(t), read = f.adapter.read, append = f.adapter.append;
+    const before = await f.adapter.list();
     let failures = 0;
+    f.adapter.append = async (path, data) => {
+        if (failure === 'append' && data.includes('— session epoch') && failures < 5) {
+            failures++; throw new Error('EACCES epoch append');
+        }
+        await append(path, data);
+    };
     f.adapter.read = async path => {
         const data = await read(path);
-        if (path === f.path && data.includes(`Pytanie failure-${failures}`) && failures < 5) {
+        if (failure === 'read' && path === f.path && data.includes(`Pytanie failure-${failures}`) && failures < 5) {
             failures++;
             throw new Error('EACCES epoch read');
         }
@@ -348,6 +358,7 @@ test.serial('P2 filesystem: five failed epoch reads preserve history and the nex
         const chat = f.chat(`failure-${i}`); t.teardown(chat.close);
         await chat.send();
         t.is(f.memory.sessionEpoch, null);
+        t.deepEqual(await f.adapter.list(), before);
     }
     t.is(failures, 5);
     t.deepEqual(f.errors, []);
@@ -361,6 +372,8 @@ test.serial('P2 filesystem: five failed epoch reads preserve history and the nex
     t.deepEqual(f.requests, ['failure-0', 'failure-1', 'failure-2', 'failure-3', 'failure-4', 'retry']);
     t.regex(retry.tab.sessionEpoch!, /^[0-9a-f]{32}$/);
     t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, retry.tab.sessionEpoch);
+    t.is(((await read(f.path)).match(/— session epoch/g) ?? []).length, 1);
+    t.deepEqual(await f.adapter.list(), before);
 });
 
 test.serial('P2 filesystem: successful migration preserves history and a fresh reader confirms identity', async t => {

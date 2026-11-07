@@ -482,3 +482,31 @@ for (const operation of ['edit', 'delete'] as const) for (const storage of ['cur
         t.false(JSON.stringify(view.rollingWindow.parentConversation.snapshot()).includes('USUNIĘTY SEKRET'));
     });
 }
+
+for (const fallback of [false, true]) test(`epoch survives a fresh reader and restore (fallback=${fallback})`, async t => {
+    const files = new Map<string, string>();
+    const adapter = {
+        exists: async (path: string) => files.has(path),
+        read: async (path: string) => { if (!files.has(path)) throw new Error('ENOENT'); return files.get(path)!; },
+        write: async (path: string, text: string) => { files.set(path, text); },
+        append: async (path: string, text: string) => { files.set(path, files.get(path)! + text); },
+        mkdir: async () => {}, list: async () => ({ files: [] }), stat: async () => ({ mtime: 1 }),
+    };
+    const memory = new AgentMemory({ adapter }, 'Jaskier');
+    const path = memory.paths.sessionsActive + '/legacy.md';
+    files.set(path, '---\nagent: Jaskier\n---\n\n## User\n\nHistoria\n\n## Assistant\n\nOdpowiedź\n');
+    memory.setActiveSessionIdentity(path, null);
+    memory._newSessionEpoch = () => 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    await memory.stateManager.addActiveSession('legacy.md');
+    await memory.ensureActiveSessionEpoch(path, () => true);
+    const fresh = new AgentMemory({ adapter: { ...adapter } }, 'Jaskier');
+    if (fallback) fresh.listActiveSessions = async () => [];
+    const view = buildFakeThis([]);
+    view.plugin.agentManager.getAgentMemory = () => fresh;
+    view.plugin.agentManager.getActiveMemory = () => fresh;
+    await _restoreActiveSession.call(view);
+    t.deepEqual([fresh.activeSessionPath, fresh.sessionEpoch, view.chatTabs[0].sessionEpoch],
+        [path, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
+    t.deepEqual(view.rollingWindow.messages.map((m: { role: string; content: unknown }) => ({ role: m.role, content: m.content })),
+        [{ role: 'user', content: 'Historia' }, { role: 'assistant', content: 'Odpowiedź' }]);
+});

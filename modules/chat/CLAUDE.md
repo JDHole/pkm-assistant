@@ -1801,3 +1801,9 @@ w jego oknie. Logger ostrzega o niezapisanym pytaniu; model korzysta z RAM.
 Błąd append_message, zapis nowej/potwierdzonej sesji i zmiana właściciela nie są
 połykane. Testy P4 w chat_streaming.epochMigration.test.ts sprawdzają odpowiedź
 modelu, origin, dokładne bajty historii oraz granice catcha.
+
+P5 migracji: `chat_session.test.ts` odtwarza epokę eventową i dokładne wiadomości
+nową pamięcią i adapterem, zarówno przez listę sesji, jak przez fallback restore.
+`chat_streaming.epochMigration.test.ts` sprawdza pięć nieudanych odczytów/dopisków
+z odpowiedziami modelu i udaną szóstą turę bez dodatkowych plików. A→B→A w trakcie
+readbacku (również z błędem) nie publikuje starej epoki ani diagnostyki do nowej rewizji.

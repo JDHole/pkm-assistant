@@ -1215,7 +1215,7 @@ epoch: ${epoch}
      * pozostają nietknięte.
      *
      * Plik, z którego czytnik nie wyciągnął ANI JEDNEJ wiadomości (pusty, sam frontmatter,
-     * nieznany kształt), kopiujemy surowo 1:1 — nie tracimy bajtów, których nie rozumiemy.
+     * nieznany kształt), zachowuje surowe body; efektywna epoka trafia do frontmatter.
      */
     async archiveActiveSession(path: string | null = this.activeSessionPath): Promise<string | null> {
         if (!path) return null;
@@ -1242,6 +1242,13 @@ epoch: ${epoch}
                 // `seq` z wiadomości nie idzie do transkryptu. Osobny tekst użytkownika
                 // formatToMarkdown zachowuje w metadanych dla kontynuacji/edycji.
                 output = formatToMarkdown(parsed.messages, meta, parsed.summary);
+            } else if (typeof parsed.metadata.epoch === 'string') {
+                // Edit only the archive header: unknown body bytes (including CRLF) survive.
+                const header = content.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0] ?? '';
+                // A malformed YAML list must not remain attached to the promoted scalar.
+                const scalarHeader = header.replace(/\r\n/g, '\n').replace(
+                    /^epoch:.*(?:\n(?:[ \t]+.*|-[ \t]+.*))*/gm, `epoch: ${parsed.metadata.epoch}`);
+                output = this._setFrontmatterField(scalarHeader, 'epoch', parsed.metadata.epoch) + content.slice(header.length);
             }
             await this._writeSessionFile(archivePath, output);
             // Kasacja ŹRÓDŁA nie ma prawa wyprzedzać

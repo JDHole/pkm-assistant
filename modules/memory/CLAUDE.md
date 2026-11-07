@@ -1040,3 +1040,15 @@ ale nie zwiększa liczby wiadomości. Test filesystemowy sendu potwierdza brak n
 `RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
 administratora oraz w wynikach starego indeksu semantycznego; nie odczytuje jego
 zawartości przy zbieraniu kandydatów ani podglądów. Test F4 w `RetrievalEngine.test.ts`.
+
+P5 migracji: `archiveActiveSession` przenosi efektywną epokę do frontmatter także
+przy zerze wiadomości. Wtedy zmienia tylko nagłówek nowego archiwum, zachowując
+surowe body (również CRLF i nieznane bloki); źródło usuwa dopiero po readbacku.
+Obie projekcje L1 w `ArchiveWorkflow` używają `withoutSessionEpochEvents` z formatu:
+pomijają rozpoznane bloki sterujące, również uszkodzone, zachowują nieznane nagłówki.
+L2/L3 pozostają bez tego filtrowania. Nie oznacza to zakazu przepisywania sesji przez
+`saveSession`: jego istniejący zapis metadanych nadal wykonuje read-modify-write.
+Testy P5: `AgentMemory.test.ts` (archiwum, niezależne adaptery, błąd po pełnym
+append, świeży restore, A→B→A) i `ArchiveWorkflow.test.ts` (literalne dokumenty L1
+oraz odpowiedź modelu). Niezależne adaptery mogą dopisać dwa rekordy; czytelnicy
+tych samych końcowych bajtów wybierają pierwszy, bez obietnicy blokady między procesami.

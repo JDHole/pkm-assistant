@@ -1124,3 +1124,27 @@ test('komplet stempli → wynik kroku bez pola `unstamped`', async t => {
     t.is(result.created, 1);
     t.is(result.unstamped, undefined, 'czysty przebieg nie zaśmieca zwrotki pustą listą');
 });
+
+for (const withModel of [false, true]) test(`raw archive retains unknown body and hides epoch from L1 (model=${withModel})`, async t => {
+    const { vault, files } = makeVault(), memory = new AgentMemory(vault, 'Lead');
+    const path = `${memory.paths.sessionsActive}/legacy.md`;
+    const unknown = 'Preamble\n## unknown block\nOpaque\n## session epoch\nUser heading\n';
+    files[path] = '---\nagent: Lead\n---\n' + unknown
+        + '## 2026-11-07T12:00:00Z — session epoch\n\n**epoch:**\n\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\n**seq:**\n\n1\n\n'
+        + '## 2026-11-07T12:00:01Z — session epoch\n\n**content:**\n\nBroken control record\n'
+        + '## another unknown\nRetained\n';
+    const archived = await memory.archiveActiveSession(path);
+    const expected = unknown + '## another unknown\nRetained';
+    let payload: unknown;
+    const model: StreamChatModelLike = { stream(request, handlers) {
+        payload = JSON.parse(String(request.messages[1].content));
+        handlers.done({ choices: [{ message: { content: 'Synteza' } }] });
+    } };
+    const workflow = new ArchiveWorkflow(memory, { model: withModel ? model : null });
+    const result = await workflow._summaryFromFiles([archived!], 'L1');
+    if (withModel) {
+        t.deepEqual(payload, { level: 'L1', count: 1, documents: [{ filename: 'legacy.md', content: expected }] });
+        t.is(result, 'Synteza');
+    } else t.is(result, '# L1 raw concat (no LLM available)\n\n## legacy.md\n' + expected);
+    t.is(memory._parseFrontmatter(files[archived!]).epoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+});
