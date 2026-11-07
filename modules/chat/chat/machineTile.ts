@@ -1,3 +1,4 @@
+import { draftPresentation } from './draftPresentation.js';
 /**
  * @module machineTile
  * Render współdzielony dla kafelka systemowego wiadomości maszynowej (spec A3/A3-fix, "Czat bez
@@ -65,7 +66,7 @@ async function _resolveArtifactPath(plugin: ChatViewLike['plugin'], artifactId: 
  */
 export async function renderMachineTile(container: HTMLElement, plugin: ChatViewLike['plugin'], view: MachineView): Promise<void> {
     if (view.subAgentResult) {
-        container.appendChild(createSubAgentBlock({ type: 'delegate', conversation: view.conversation, role: 'system', status: view.subAgentResult.status === 'error' ? 'error' : 'success', resultView: view.subAgentResult }));
+        container.appendChild(createSubAgentBlock({ type: 'delegate', draft: draftPresentation(view.subAgentResult.draftSummary, plugin.subTaskRegistry), conversation: view.conversation, role: 'system', status: view.subAgentResult.status === 'error' ? 'error' : 'success', resultView: view.subAgentResult }));
         return;
     }
     let action: { label: string; onClick: (ev: MouseEvent) => void; disabled?: boolean; title?: string } | undefined;

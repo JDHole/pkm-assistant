@@ -4,6 +4,12 @@
  * {{param}} for interpolation.
  */
 export const pl: Record<string, string> = {
+  'tools.label.subagent_changes': 'Zmiany suba',
+  'tool.subagent_changes': 'Zmiany suba',
+  "chat.subdraft.heading": "Zmiany w kopii",
+  "chat.subdraft.notification": "Kopia draft_id={{draft_id}}: {{count}} zmian. Przejrzyj i rozstrzygnij pliki narzędziem subagent_changes. Zakończenie suba nie oznacza przyjęcia.",
+  "chat.subdraft.backlog": "Zaległe zmiany agenta: {{count}}. Użyj subagent_changes z scope: agent.",
+  "chat.subdraft.recovery_error": "Nie udało się odtworzyć części kopii ({{count}}). Szczegóły w logu; pliki zachowano.",
   "mcp.subagent_changes.desc": "Przejrzyj, przyjmij albo odrzuć pojedynczą zmianę suba.",
   "mcp.subagent_changes.conflict": "Plik {{path}} zmienił się od przygotowania kopii. Odrzuć zmianę albo zleć ją ponownie.",
   "mcp.subagent_changes.stale_revision": "Lista zmian jest nieaktualna. Pobierz ją ponownie.",
@@ -18,6 +24,7 @@ export const pl: Record<string, string> = {
   "mcp.subagent_changes.param.change_id": "Identyfikator jednej zmiany; wymaga draft_id.",
   "mcp.subagent_changes.param.revision": "Dokładna rewizja zmiany z aktualnej listy.",
   "mcp.subagent_changes.param.cursor": "Kursor następnej strony zwrócony przez listę.",
+  'subagent.draft.unavailable': 'Magazyn kopii jest niedostępny. Sub nie może przygotować zmian; sprawdź log odzyskiwania.',
   "subagent.draft.saved": "Przygotowano w kopii roboczej; vault bez zmian.",
   "subagent.draft.ambiguous": "Różne wersje {{path}} od: {{sources}}.",
   "chat.subdraft.pending": "Do przeglądu: {{count}}",

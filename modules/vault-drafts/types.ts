@@ -38,6 +38,7 @@ export type DraftIdentity = Readonly<{
     plan?: Readonly<{ planId: string; nodeId: string }>;
 }>;
 export type DraftManifest = DraftIdentity & Readonly<{
+    payloadCollected?: true;
     version: 1; generation: number; revision: Revision; createdAt: number; updatedAt: number;
     phase: DraftPhase; changes: readonly Change[];
     /** Retained even when create + delete removes the net change. */
@@ -68,6 +69,8 @@ export interface DraftVaultIO {
 export interface DraftStorageIO {
     /** Immediate child names only; missing directory returns []. Other errors reject. */
     list(path: string): Promise<readonly string[]>;
+    /** Optional payload GC; never removes an unresolved manifest. */
+    remove?(path: string): Promise<void>;
     read(path: string): Promise<Uint8Array>;
     /** Creates parents; immutable blobs, durable before resolving. */
     writeBlob(path: string, bytes: Uint8Array): Promise<void>;

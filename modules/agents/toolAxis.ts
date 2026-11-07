@@ -35,7 +35,7 @@ export const BUILTIN_TOOL_GROUPS: Record<string, string[]> = {
     web: ['web_search', 'web_read'],
     multimodal: ['generate_image', 'add_text_to_image'],
     // `agent_message` OUT z delegacji - pocztę obsługuje grupa `komunikator`.
-    delegation: ['delegate', 'sub_agent', 'agent_delegate'],
+    delegation: ['delegate', 'sub_agent', 'agent_delegate', 'subagent_changes'],
     artifacts: ['artifact_create', 'artifact_read', 'artifact_update', 'artifact_list', 'todo'],
     // Trzy prymitywy poczty zamiast 13 narzędzi Project Huba.
     komunikator: ['kom_send', 'kom_list', 'kom_read'],

@@ -382,3 +382,41 @@ test.serial('czas po ludzku: 125000 ms => "2 min 5 s" (literalnie, ten sam wzorz
         t.is(meta.textContent, '2 min 5 s');
     });
 });
+
+import { draftFixture, owner as draftOwner } from '../tools/test-support/vaultDraftFixture.js';
+import { buildDelegateBlockOptions } from '../chat/chat/delegateBlockView.js';
+import { setLocale } from '../../core/i18n/index.js';
+
+test.serial('P5 stopped SubAgentBlock keeps outcome while live draft decisions update and detach', async t => {
+    setLocale('pl');
+    const f = await draftFixture(t);
+    const { task, draft } = await f.run('block');
+    await f.write(draft, 'x.md', 'Propozycja-X'); await f.write(draft, 'y.md', 'Propozycja-Y'); await draft.close('stopped');
+    const outcome = { end: { kind: 'stopped', by: 'user' } as const, completeness: 'partial' as const, hasAnswer: false, hasMaterial: true, effects: [] };
+    f.registry.finish(task, { ...f.result, outcome });
+    const oldDocument = globalThis.document, oldObserver = globalThis.MutationObserver;
+    let notifyRemoval: (() => void) | undefined;
+    globalThis.MutationObserver = class { constructor(callback: () => void) { notifyRemoval = callback; } observe() {} disconnect() {} } as never;
+    const doc = { createElement: (tag: string) => {
+        const node = makeFakeEl(tag);
+        return Object.assign(node, { ownerDocument: doc, isConnected: true, querySelector: (selector: string) => findByClass(node, selector.slice(1)) });
+    } };
+    globalThis.document = doc as never;
+    t.teardown(() => { globalThis.document = oldDocument; globalThis.MutationObserver = oldObserver; setLocale('en'); });
+    const options = buildDelegateBlockOptions({ success: false, outcome, draftSummary: f.registry.draftSummaries(draftOwner)[0], partial_result: 'Gotowe' }, { type: 'delegate', agentName: 'Piszący' }, f.registry);
+    const block = createSubAgentBlock(options) as unknown as FakeEl;
+    const title = findByClass(block, 'cs-tile__title')!.textContent;
+    t.is(findByClass(block, 'cs-subdraft__summary')?.textContent, 'Do przeglądu: 2');
+    findByClass(block, 'cs-tile__head')!.fire('click');
+    t.is(findByClass(block, 'cs-subdraft__details')?.textContent, 'Zmiany w kopii\nDo przeglądu: 2\nx.md: Do przeglądu: 1\ny.md: Do przeglądu: 1');
+    const manifest = f.runtime.store.list()[0];
+    const [x, y] = manifest.changes;
+    await f.runtime.review.decide(f.context, { action: 'accept', draftId: manifest.draftId, changeId: x.id, revision: x.revision });
+    await f.runtime.review.decide(f.context, { action: 'reject', draftId: manifest.draftId, changeId: y.id, revision: y.revision });
+    t.is(findByClass(block, 'cs-subdraft__summary')?.textContent, 'Przyjęto: 1 · Odrzucono: 1');
+    t.is(findByClass(block, 'cs-tile__title')?.textContent, title);
+    t.true(block.classList.contains('cs-tile--error'));
+    const subscriptions = f.registry.events.listenerCount('draft:changed');
+    Object.assign(block, { isConnected: false }); notifyRemoval?.();
+    t.is(f.registry.events.listenerCount('draft:changed'), subscriptions - 1);
+});

@@ -455,7 +455,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             || extractSecondVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id'])
             || null;
         const task = subTaskId ? ctx.getTask?.(subTaskId) : undefined;
-        const taskData = task && typeof task === 'object' ? task as { parentConversation?: ParentConversationMetadata; questionState?: { kind?: unknown; question?: unknown; resolution?: unknown }; result?: { question?: unknown } } : undefined;
+        const taskData = task && typeof task === 'object' ? task as { draftSummary?: unknown; parentConversation?: ParentConversationMetadata; questionState?: { kind?: unknown; question?: unknown; resolution?: unknown }; result?: { question?: unknown } } : undefined;
         const taskQuestion = taskData?.questionState?.kind === 'closed'
             ? { ...(typeof taskData.questionState.question === 'object' && taskData.questionState.question !== null ? taskData.questionState.question : {}), resolution: taskData.questionState.resolution }
             : taskData?.result?.question;
@@ -467,7 +467,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             : dedupedDetails;
         const saved = msg?._subTaskResult;
         const structural = saved && typeof saved === 'object' ? saved as {
-            name?: unknown; outcome?: unknown; result?: unknown; text?: unknown; handoff?: unknown;
+            draftSummary?: unknown; name?: unknown; outcome?: unknown; result?: unknown; text?: unknown; handoff?: unknown;
             partial?: unknown; partialResult?: unknown; partialText?: unknown; error?: unknown; effects?: unknown;
             thread?: unknown; question?: unknown;
         } : null;
@@ -486,6 +486,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         };
         const subAgentResult = structuredOutcome ? buildSubAgentResultView({
             name: typeof structural?.name === 'string' ? structural.name : name,
+            draftSummary: taskData?.draftSummary ?? structural?.draftSummary,
             outcome: structuredOutcome,
             text: typeof structural?.text === 'string' ? structural.text : typeof storedResult === 'string' ? storedResult : typeof storedResult?.text === 'string' ? storedResult.text : undefined,
             handoff: typeof structural?.handoff === 'string' ? structural.handoff : storedResult && typeof storedResult === 'object' && typeof storedResult.handoff === 'string' ? storedResult.handoff : undefined,
@@ -496,6 +497,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             question: structural?.question ?? taskQuestion,
             thread: availableThread(storedThread),
         }, ctx.t) : buildParsedNotificationResult(text, name, availableThread(reusableInstruction ? { kind: 'reusable', sub_id: reusableInstruction } : { kind: 'unknown' }), ctx.t, taskQuestion);
+        if (subAgentResult && taskData?.draftSummary) subAgentResult.draftSummary = taskData.draftSummary;
         return {
             kind,
             title,

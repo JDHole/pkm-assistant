@@ -34,6 +34,7 @@ const review: Schema = { oneOf: [
 const source: Schema = object({ tool: text, callId: text });
 const touch = { id, path, base };
 const manifestValidator = new Validator(object({
+    payloadCollected: { const: true },
     version: { const: 1 }, draftId: id, generation: revision, revision,
     owner: object({ agentName: text, sessionPath: text, sessionEpoch: { type: 'string', pattern: '^[0-9a-f]{32}$' } }),
     runId: text, threadId: text, plan: object({ planId: id, nodeId: id }),
@@ -59,6 +60,8 @@ export function parseDraftManifest(value: unknown): DraftManifest {
         throw new DraftError('invalid-version', 'Unsupported draft manifest version');
     if (!manifestValidator.validate(value).valid) throw new DraftError('invalid-manifest', 'Invalid draft manifest');
     const manifest = value as DraftManifest;
+    if (manifest.payloadCollected && (manifest.phase.kind !== 'sealed' || manifest.changes.some(c => c.review.kind !== 'accepted' && c.review.kind !== 'rejected')))
+        throw new DraftError('invalid-manifest', 'Collected payload requires terminal decisions');
     const paths = new Set<string>(), ids = new Set<string>(), changed = new Set<string>();
     for (const entry of manifest.firstTouches) {
         if (paths.has(entry.path) || ids.has(entry.id) || (entry.base.kind === 'file' && (entry.base.blob !== String(entry.base.version.hash) || !finiteVersion(entry.base.version))))

@@ -1499,3 +1499,9 @@ input.pkm-onboarding-key-input {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+/* Optional draft projection: these elements exist only for content proposals. */
+.cs-tile--draft .cs-tile__head { flex-wrap: wrap; }
+.cs-subdraft__summary { flex-basis: 100%; color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; }
+.cs-subdraft__details, .pkm-substrip__draft-details { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pkm-substrip__draft, .pkm-substrip__draft-backlog { color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; }

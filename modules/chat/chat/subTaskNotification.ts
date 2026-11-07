@@ -127,6 +127,9 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         ? t('chat.subagent_notification.meta_with_time', { status: lineStatus, seconds })
         : t('chat.subagent_notification.meta', { status: lineStatus }));
 
+    const draft = task.draft ?? task.result?.draft;
+    if (draft) parts.push(t('chat.subdraft.notification', { draft_id: draft.draftId, count: (task.draftSummary ?? task.result?.draftSummary)?.changes.length ?? 0 }));
+
     if (blocked) {
         parts.push(t('chat.substrip.plan_not_started'));
     } else if (outcome?.completeness === 'unconfirmed') {

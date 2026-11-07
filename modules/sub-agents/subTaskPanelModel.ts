@@ -65,6 +65,7 @@ export interface SubTaskResultModel {
 }
 
 export interface StripRun {
+    draftSummary?: import('../vault-drafts/index.js').DraftSummary;
     notStarted?: true;
     parentConversation?: SubTask['parentConversation'];
     questionState: QuestionState;
@@ -303,6 +304,7 @@ function runView(task: SubTask | undefined, id: string, number: number, now: num
     const endReason = partialOutcome && stripMaterial && task.error ? task.error : undefined;
     return {
         ...(task.plan && task.startedAt === undefined ? { notStarted: true as const } : {}),
+        ...(task.draftSummary ? { draftSummary: task.draftSummary } : {}),
         id, number, available: true, ...(task.parentConversation ? { parentConversation: task.parentConversation } : {}), state: runState(task, shared.state), status: task.status, questionState: task.questionState ?? { kind: 'none' },
         ...(task.outcome && task.plan?.state.kind !== 'blocked' ? { endLabelKey: shared.endLabelKey, completenessLabelKey: shared.completenessLabelKey } : {}),
         taskPreview: (task.taskPreview || '').slice(0, MAX_TASK), steps, outcome,

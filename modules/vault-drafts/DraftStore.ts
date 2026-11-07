@@ -1,3 +1,4 @@
+import { EventEmitter } from '../../core/index.js';
 import { DraftPersistence } from './DraftPersistence.js';
 import { parseChangeId, parseDraftId, parseDraftManifest, parseDraftMutation, parseRevision } from './schema.js';
 import { DraftError } from './types.js';
@@ -6,6 +7,43 @@ import type { BaseSnapshot, ChangeId, ReviewState, Revision, DraftClock, DraftId
 type Entry = { manifest: DraftManifest; persisted: boolean; closed: boolean; publication: Promise<void>; paths: Map<VaultPath, Promise<void>> };
 type SealReason = Extract<DraftPhase, { kind: 'sealed' }>['reason'];
 export class DraftStore {
+    readonly events = new EventEmitter();
+    private readonly references = new Map<DraftId, number>();
+    private readonly collecting = new Set<DraftId>();
+    private recoveryIssues = false;
+    /** A view holds every layer it can read, including transitive predecessors. */
+    retain(ids: readonly DraftId[]): () => void {
+        const unique = [...new Set(ids)];
+        for (const id of unique) {
+            if (this.collecting.has(id) || this.get(id).manifest.payloadCollected) throw new DraftError('invalid-transition', 'Draft payload was collected');
+        }
+        for (const id of unique) this.references.set(id, (this.references.get(id) ?? 0) + 1);
+        let released = false;
+        return () => {
+            if (released) return;
+            released = true;
+            for (const id of unique) {
+                const count = (this.references.get(id) ?? 1) - 1;
+                if (count) this.references.set(id, count); else this.references.delete(id);
+            }
+        };
+    }
+    async collectResolved(): Promise<void> {
+        // Incomplete/future-format scans cannot prove that a blob is unreferenced.
+        if (this.recoveryIssues) return;
+        for (const [id, entry] of this.entries) await this.publish(entry, async () => {
+            const old = entry.manifest;
+            if (this.references.has(id) || old.phase.kind !== 'sealed'
+                || old.changes.some(c => c.review.kind !== 'accepted' && c.review.kind !== 'rejected')) return;
+            if (!entry.persisted) return; // Runner finalization may still read its empty reference.
+            this.collecting.add(id);
+            try {
+                if (!old.payloadCollected) entry.manifest = await this.persistence.save({ ...old, payloadCollected: true }, () => !this.references.has(id));
+                await this.persistence.collect(entry.manifest);
+            } finally { this.collecting.delete(id); }
+        });
+    }
+    private changed(entry: Entry): void { this.events.emit('draft:changed', structuredClone(entry.manifest)); }
     private readonly entries = new Map<DraftId, Entry>();
     private readonly decisions = new Map<VaultPath, Promise<void>>();
     constructor(private readonly persistence: DraftPersistence, private readonly vault: DraftVaultIO, private readonly clock: DraftClock) {}
@@ -59,6 +97,7 @@ export class DraftStore {
                 changes: old.changes.map(item => item.id === changeId ? { ...item, review } : item),
                 updatedAt: this.clock.now(),
             }, () => true);
+            this.changed(entry);
             if (review.kind === 'applying') await this.persistence.writeIntent(entry.manifest, change, review.attemptId);
         });
     }
@@ -119,6 +158,7 @@ export class DraftStore {
                 }, () => !entry.closed);
                 entry.manifest = manifest;
                 entry.persisted = true;
+                this.changed(entry);
                 return structuredClone(manifest);
             });
         });
@@ -170,6 +210,7 @@ export class DraftStore {
             if (entry.manifest.phase.kind === 'sealed') return structuredClone(entry.manifest);
             const manifest = parseDraftManifest({ ...entry.manifest, phase: { kind: 'sealed', reason }, updatedAt: this.clock.now() });
             entry.manifest = entry.persisted ? await this.persistence.save(manifest, () => true) : manifest;
+            this.changed(entry);
             return structuredClone(entry.manifest);
         });
     }
@@ -177,6 +218,7 @@ export class DraftStore {
     async restore(): Promise<{ drafts: readonly DraftManifest[]; issues: readonly RecoveryIssue[] }> {
         if (this.entries.size) throw new DraftError('draft-exists', 'Restore requires an empty store');
         const recovered = await this.persistence.loadAll();
+        this.recoveryIssues = recovered.issues.length > 0;
         const restored: DraftManifest[] = [];
         for (const input of recovered.manifests) {
             const changes = input.changes.map(change => change.review.kind === 'applying'

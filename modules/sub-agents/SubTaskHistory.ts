@@ -11,6 +11,7 @@ import type { RunOutcome } from './runOutcome.js';
 import type { SubTask, SubTaskRegistry, SubThread } from './SubTaskRegistry.js';
 
 export interface SubTaskHistoryRecord {
+    draft?: import('../vault-drafts/index.js').DraftRef;
     plan?: PlanTaskMetadata;
     planReport?: PlanReport;
     startedAt?: number;
@@ -53,6 +54,7 @@ const outcome: Schema = object({
     effects: { type: 'array', items: object({
         tool: string, action: string, targets: { type: 'array', items: object({ path: string, id: string, kind: choice('vault-file', 'vault-folder', 'memory-file', 'message', 'todo-list') }, ['kind']) },
         outcome: choice('pending', 'returned', 'error', 'unknown'), check: choice('matches', 'mismatch', 'not-checked'),
+        location: object({ kind: { const: 'draft' }, draftId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' } }),
         cause: choice('natural', 'iteration-limit', 'synthesis-budget', 'tool-uncertain', 'manual-stop', 'superseded', 'task-timeout', 'silence', 'model-timeout', 'transport-error', 'model-error', 'hook-error'),
     }, ['tool', 'action', 'targets', 'outcome', 'check']) },
 });
@@ -83,6 +85,7 @@ const planReport: Schema = object({ planId, complete: { type: 'boolean' },
     counts: object({ waiting: count, queued: count, running: count, finished: count, failed: count, blocked: count }),
 });
 const validator = new Validator(object({
+    draft: object({ draftId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' }, revision: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } }),
     version: { const: 1 }, runId: id, threadId: id, name: id,
     owner: object({ agentName: id, sessionPath: id, sessionEpoch: { type: 'string', pattern: '^[0-9a-f]{32}$' } }),
     parentId: id, level: { type: 'integer', minimum: 1, maximum: 3 },
@@ -137,17 +140,17 @@ export class SubTaskHistory {
                 id: state.question.id, text: maskSensitiveData(state.question.text), askedAt: state.question.askedAt,
                 ...(state.kind === 'closed' ? { resolution: state.resolution.kind === 'answered' ? { ...state.resolution, text: maskSensitiveData(state.resolution.text) } : state.resolution } : {}),
             } : undefined;
-            save({ version: 1, runId: task.id, threadId: task.threadId ?? task.id, name: task.name,
+            save({ ...(task.draft ?? task.result?.draft ? { draft: task.draft ?? task.result?.draft } : {}), version: 1, runId: task.id, threadId: task.threadId ?? task.id, name: task.name,
                 owner: task.origin && { agentName: task.origin.agentName, sessionPath: task.origin.sessionPath, sessionEpoch: task.origin.sessionEpoch },
                 parentId: task.parentId, level: task.level ?? 1, state: task.status, createdAt: task.createdAt, endedAt: task.endedAt,
                 taskPreview: task.taskPreview, material: maskSensitiveData(task.result?.handoff || task.result?.text || task.partial?.text || ''),
                 error: task.error, outcome: task.outcome, question, plan: task.plan, planReport: task.planReport, startedAt: task.startedAt, parentConversation: task.parentConversation,
             });
         };
-        for (const event of ['task:created', 'task:partial', 'task:finished', 'task:context']) {
+        for (const event of ['task:created', 'task:partial', 'task:finished', 'task:context', 'task:draft']) {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const task = value as SubTask;
-                if (event === 'task:finished' || task.status === 'running' || task.plan) taskRecord(task);
+                if (event === 'task:finished' || event === 'task:draft' || task.status === 'running' || task.plan) taskRecord(task);
             }));
         }
         this.unsubscribe.push(registry.events.on('task:plan', value => {
@@ -199,6 +202,7 @@ export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): 
         const interrupted = record.state === 'waiting' || record.state === 'queued' || record.state === 'running';
         const hasMaterial = !!record.material || !!record.outcome?.hasMaterial;
         const task: SubTask & { threadId: string; endedAt: number } = {
+            ...(record.draft ? { draft: record.draft } : {}),
             id: record.runId, threadId: record.threadId, name: record.name, agentName: owner.agentName,
             origin: { ...owner }, parentId: record.parentId, level: record.level,
             status: interrupted ? 'aborted' : record.state as SubTask['status'], createdAt: record.createdAt,

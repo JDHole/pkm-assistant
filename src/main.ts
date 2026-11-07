@@ -64,6 +64,8 @@ import {
   // Skille bez narzędzi: odkrywalność = indeks w prompcie, przepis przez read()
   // Sub-agent + agent communication
   createDelegateTool,
+  initializeVaultDrafts,
+  desktopDraftPorts,
   createSubAgentTool,
   // Przerwanie biegów delegacji przy demontażu (patrz onunload)
   stopAllDelegations,
@@ -195,6 +197,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare artifactStore: ArtifactStore | undefined;
   declare vaultIndexer: VaultIndexer | undefined;
   // Nullowane w `onunload()` - patrz tam.
+  private vaultDraftRuntime?: Awaited<ReturnType<typeof initializeVaultDrafts>>;
   declare subTaskRegistry: SubTaskRegistry | null;
   declare _askUserChannels: AskUserChannels | null;
   declare subTaskNotifier: SubTaskNotifier | null;
@@ -456,6 +459,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     this._komunikatorCleanupUnsub = null;
     // Rejestr zamyka oczekiwania użytkownika i pytania przed odpięciem odbiorców.
     this.approvalManager?.dispose();
+    this.vaultDraftRuntime?.dispose();
     this.subTaskRegistry?.dispose?.();
     this.subTaskRegistry = null;
     this._askUserChannels = null;
@@ -777,7 +781,19 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.toolRegistry.registerTool(createMemoryDeleteTool());
       // brain_update: direct brain.md writes wyłączone; runtime pisze przez memory_save / /save session.
       // skill_list/skill_execute: skille odkrywane indeksem w prompcie, przepis przez read().
-      this.toolRegistry.registerTool(createDelegateTool(this.app));
+      try {
+        if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
+        this.vaultDraftRuntime = await initializeVaultDrafts({ ...desktopDraftPorts(this.app), registry: this.subTaskRegistry });
+      } catch (error) {
+        log.error('VaultDrafts', 'Draft runtime unavailable:', error);
+        new Notice(t('subagent.draft.unavailable'), 10000);
+      }
+      if (this.vaultDraftRuntime?.issues.length) {
+        log.warn('VaultDrafts', 'Recovery issues:', this.vaultDraftRuntime.issues);
+        new Notice(t('chat.subdraft.recovery_error', { count: this.vaultDraftRuntime.issues.length }), 10000);
+      }
+      if (this.vaultDraftRuntime) this.toolRegistry.registerTool(this.vaultDraftRuntime.tool);
+      this.toolRegistry.registerTool(createDelegateTool(this.app, { drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' } }));
       this.toolRegistry.registerTool(createSubAgentTool(this.app));
       // agent_delegate stays: it works without the communicator (context ping is optional/null-safe).
       this.toolRegistry.registerTool(createAgentDelegateTool());

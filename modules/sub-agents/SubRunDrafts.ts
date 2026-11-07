@@ -1,17 +1,27 @@
-import { DraftError, DraftView } from '../vault-drafts/index.js';
+import { DraftError, DraftView, summarizeDraft } from '../vault-drafts/index.js';
 import type { DraftStore, DraftPersistence, DraftViewIO, DraftId, DraftRef, DraftPhase, DraftIdentity, FrozenDraftView } from '../vault-drafts/index.js';
 import type { VaultExecution } from '../tools/index.js';
 import type { SubTaskOrigin } from './SubTaskRegistry.js';
 
 type SealReason = Extract<DraftPhase, { kind: 'sealed' }>['reason'];
-type ClosedRun = { owner: DraftIdentity['owner']; layers: readonly FrozenDraftView[] };
+type ClosedRun = { owner: DraftIdentity['owner']; layers: readonly FrozenDraftView[]; release: () => void };
+const layerIds = (layers: readonly FrozenDraftView[]): DraftId[] => layers.flatMap(layer => [layer.manifest.draftId, ...layerIds(layer.predecessors)]);
 
-/** Shared by runners, injected explicitly; production composition remains disconnected.
+/** Shared by runners; the production composition injects it after durable restore.
  * Frozen inputs live independently of registry retention. No input comes from tool args.
  */
 export class SubRunDrafts {
     private readonly runs = new Map<string, ClosedRun>();
     private readonly threads = new Map<string, ClosedRun>();
+    private keepRun: (id: string) => boolean = () => true;
+    private keepThread: (id: string) => boolean = () => true;
+    setRetention(keepRun: (id: string) => boolean, keepThread: (id: string) => boolean): void {
+        this.keepRun = keepRun; this.keepThread = keepThread;
+    }
+    prune(): void {
+        for (const [id, record] of this.runs) if (!this.keepRun(id)) { record.release(); this.runs.delete(id); }
+        for (const [id, record] of this.threads) if (!this.keepThread(id)) { record.release(); this.threads.delete(id); }
+    }
     constructor(private readonly store: DraftStore, private readonly persistence: DraftPersistence,
         private readonly vault: DraftViewIO, private readonly allocateId: () => DraftId) {}
 
@@ -32,20 +42,30 @@ export class SubRunDrafts {
         const owner = { agentName: origin.agentName, sessionPath: origin.sessionPath, sessionEpoch: origin.sessionEpoch };
         for (const parent of parents) if (parent.owner.agentName !== owner.agentName || parent.owner.sessionPath !== owner.sessionPath || parent.owner.sessionEpoch !== owner.sessionEpoch)
             throw new DraftError('mutation-denied', 'Foreign predecessor draft');
+        const release = this.store.retain(layerIds(layers));
         const id = input.writable ? this.allocateId() : null;
-        if (id) await this.store.create({ draftId: id, owner, runId: input.runId, threadId: input.threadId, ...(input.plan ? { plan: input.plan } : {}) });
-        const view = new DraftView(this.store, this.persistence, this.vault, id, layers);
-        return new RunDraft(view, closed => {
-            const record = { owner, layers: closed };
-            this.runs.set(input.runId, record);
-            this.threads.set(input.threadId, record);
-        });
+        try {
+            if (id) await this.store.create({ draftId: id, owner, runId: input.runId, threadId: input.threadId, ...(input.plan ? { plan: input.plan } : {}) });
+            const view = new DraftView(this.store, this.persistence, this.vault, id, layers);
+            const releaseOwn = id ? this.store.retain([id]) : () => {};
+            return new RunDraft(view, closed => {
+                if (this.keepRun(input.runId)) {
+                    this.runs.get(input.runId)?.release();
+                    this.runs.set(input.runId, { owner, layers: closed, release: this.store.retain(layerIds(closed)) });
+                }
+                if (this.keepThread(input.threadId)) {
+                    this.threads.get(input.threadId)?.release();
+                    this.threads.set(input.threadId, { owner, layers: closed, release: this.store.retain(layerIds(closed)) });
+                }
+                release(); releaseOwn();
+            });
+        } catch (error) { release(); throw error; }
     }
 
     /** Read-only runs still pass their (empty) view through a dependency graph. */
     recordLive(runId: string, origin?: SubTaskOrigin): void {
         if (origin?.sessionPath && origin.sessionEpoch) this.runs.set(runId, {
-            owner: { agentName: origin.agentName, sessionPath: origin.sessionPath, sessionEpoch: origin.sessionEpoch }, layers: [],
+            owner: { agentName: origin.agentName, sessionPath: origin.sessionPath, sessionEpoch: origin.sessionEpoch }, layers: [], release: () => {},
         });
     }
 }
@@ -70,6 +90,7 @@ export class RunDraft {
         }
         return this.closing;
     }
+    summary() { return this.view.draftId ? summarizeDraft(this.view.store.snapshot(this.view.draftId)) : undefined; }
     reference(): DraftRef | undefined {
         if (!this.view.draftId) return undefined;
         const manifest = this.view.store.snapshot(this.view.draftId);

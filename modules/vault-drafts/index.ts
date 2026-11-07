@@ -12,3 +12,7 @@ export { DraftView, FrozenDraftView } from './DraftView.js';
 export type { DraftViewIO, DraftResolution } from './DraftView.js';
 export { DraftReview } from './DraftReview.js';
 export type { DraftReviewIO, DraftReviewContext, DraftPreview, ReviewDecision, ChangeSummary } from './DraftReview.js';
+export { DesktopDraftStorage } from './DesktopDraftStorage.js';
+export type { DraftFileSystem } from './DesktopDraftStorage.js';
+export { summarizeDraft, parseDraftSummary } from './draftSummary.js';
+export type { DraftSummary } from './draftSummary.js';

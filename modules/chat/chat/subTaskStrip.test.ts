@@ -1159,3 +1159,84 @@ test.serial('P4 nested plan stays among real siblings; waiting has Stop and no s
     t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__state').map(el => el.textContent), ['working', 'blocked (failed: A)', 'failed', 'queued']);
     t.is(all(host).filter(el => el.className === 'pkm-substrip__stop').length, 0);
 });
+
+import { draftFixture, owner as draftOwner } from '../../tools/test-support/vaultDraftFixture.js';
+
+test.serial('P5 draft strip shows review counts, file decisions, conflicts and removes its subscription', async t => {
+    setLocale('pl');
+    const oldObserver = globalThis.MutationObserver;
+    let disconnect: (() => void) | undefined;
+    globalThis.MutationObserver = class {
+        constructor(callback: () => void) { disconnect = callback; }
+        observe() {} disconnect() {}
+    } as never;
+    t.teardown(() => { globalThis.MutationObserver = oldObserver; setLocale('en'); });
+    const f = await draftFixture(t);
+    const { task, draft } = await f.run('strip');
+    await f.write(draft, 'x.md', 'Propozycja-X'); await f.write(draft, 'y.md', 'Propozycja-Y');
+    await draft.close('stopped');
+    f.registry.finish(task, { ...f.result, outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+    const host = new MockEl(); Object.assign(host, { isConnected: true });
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: f.registry }, ...draftOwner, tabKey: 'Mira', expandedId: 'strip', onToggle() {} });
+    t.deepEqual(all(host).filter(n => n.classList.contains('pkm-substrip__draft')).map(n => n.textContent), ['Do przeglądu: 2']);
+    const manifest = f.runtime.store.list()[0];
+    const [x, y] = manifest.changes;
+    await f.runtime.review.decide(f.context, { action: 'accept', draftId: manifest.draftId, changeId: x.id, revision: x.revision });
+    await f.runtime.review.decide(f.context, { action: 'reject', draftId: manifest.draftId, changeId: y.id, revision: y.revision });
+    t.deepEqual(all(host).filter(n => n.classList.contains('pkm-substrip__draft')).map(n => n.textContent), ['Przyjęto: 1 · Odrzucono: 1']);
+    t.is(all(host).find(n => n.classList.contains('pkm-substrip__draft-details'))?.textContent,
+        'Zmiany w kopii\nPrzyjęto: 1 · Odrzucono: 1\nx.md: Przyjęto: 1\ny.md: Odrzucono: 1');
+    t.true(textTree(host).includes('zatrzymany przez Ciebie'));
+    t.deepEqual([...f.files], [['x.md', 'Propozycja-X'], ['y.md', 'Baza-Y']]);
+    const subscriptions = f.registry.events.listenerCount('draft:changed');
+    Object.assign(host, { isConnected: false }); disconnect?.();
+    t.is(f.registry.events.listenerCount('draft:changed'), subscriptions - 1);
+});
+
+test.serial('P5 backlog survives RAM retention without exposing another session or agent paths', async t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const f = await draftFixture(t);
+    for (const [id, who, path] of [
+        ['mine', draftOwner, 'x.md'], ['session', { ...draftOwner, sessionPath: 'other.md' }, 'secret-session.md'],
+        ['agent', { ...draftOwner, agentName: 'Borys' }, 'secret-agent.md'],
+    ] as const) {
+        const { task, draft } = await f.run(id, who);
+        await f.write(draft, path, 'Gotowe'); await draft.close('finished'); f.registry.finish(task, f.result);
+    }
+    f.registry.pruneSession(draftOwner.sessionPath);
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: f.registry }, ...draftOwner, tabKey: 'Mira', onToggle() {} });
+    t.deepEqual(host.children.map(n => n.textContent), ['Zaległe zmiany agenta: 2. Użyj subagent_changes z scope: agent.']);
+    t.false(textTree(host).includes('secret-session.md')); t.false(textTree(host).includes('secret-agent.md'));
+});
+
+test.serial('P5 ordinary read-only delegation keeps the literal strip DOM with activated storage', async t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const f = await draftFixture(t);
+    const task = f.registry.create({ id: 'read-only', name: 'Czytelnik', agentName: 'Mira', origin: draftOwner });
+    f.registry.finish(task, { ...f.result, text: 'Odczytano Bazę', toolsUsed: ['read'] });
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: f.registry }, ...draftOwner, tabKey: 'Mira', expandedId: 'read-only', onToggle() {} });
+    const baseline = new MockEl();
+    renderSubTaskStrip(baseline as never, { plugin: { subTaskRegistry: { list: () => [task] } }, ...draftOwner, tabKey: 'Mira', expandedId: 'read-only', onToggle() {} });
+    const dom = (el: MockEl): unknown => ({ tag: el.tagName, cls: el.className, text: el.textContent, children: el.children.map(dom) });
+    t.deepEqual(dom(host), dom(baseline));
+    t.is(all(host).find(n => n.classList.contains('pkm-substrip__outcome'))?.textContent, 'Odczytano Bazę');
+});
+
+test.serial('P5 conflicting proposal keeps stopped state and shows Konflikty without accepting the file', async t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const f = await draftFixture(t);
+    const { task, draft } = await f.run('conflict');
+    await f.write(draft, 'x.md', 'Szkic'); await draft.close('stopped');
+    f.registry.finish(task, { ...f.result, outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+    f.files.set('x.md', 'Kuba');
+    const manifest = f.runtime.store.list()[0], change = manifest.changes[0];
+    const decision = await f.runtime.review.decide(f.context, { action: 'accept', draftId: manifest.draftId, changeId: change.id, revision: change.revision });
+    t.is(decision.kind, 'conflict');
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: f.registry }, ...draftOwner, tabKey: 'Mira', expandedId: 'conflict', onToggle() {} });
+    t.deepEqual(all(host).filter(n => n.classList.contains('pkm-substrip__draft')).map(n => n.textContent), ['Konflikty: 1']);
+    t.is(all(host).find(n => n.classList.contains('pkm-substrip__draft-details'))?.textContent, 'Zmiany w kopii\nKonflikty: 1\nx.md: Konflikty: 1');
+    t.is(f.files.get('x.md'), 'Kuba');
+});

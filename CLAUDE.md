@@ -52,7 +52,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/shell/` | Settings tab, sidebar, modals |
 | `modules/agent-loop/` | **The core tool loop, no UI.** `runAgentLoop()`, `ArrayMessageStore`, canonical `parseToolCalls()` (handles several response shapes) + `splitConcatenatedToolCalls()` (anti-merging for model output) + `sanitizeToolTranscript()`. Consumers: sub-agents, chat, `tools/MCPClient` |
 | `modules/ui-components/` | Shared UI primitives: `ToolCallDisplay`, `ThinkingBlock`, `SubAgentBlock`, `AttachmentManager`, `MentionAutocomplete` |
-| `modules/vault-drafts/` | Unconnected 2.4.7 draft storage and layered view: immutable first-touch bases, durable blobs/manifests, predecessor provenance and restart recovery; injected I/O only |
+| `modules/vault-drafts/` | 2.4.7 draft storage, review and layered view: immutable first-touch bases, durable blobs/manifests, predecessor provenance and restart recovery; injected I/O only |
 | `modules/web/` | Web access layer: `WebSearchProvider` (several providers), `urlRegistry` (URL provenance), search settings |
 
 ## Commands and gates

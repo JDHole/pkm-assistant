@@ -1,3 +1,4 @@
+import { draftSummaryText, draftPresentation } from './draftPresentation.js';
 /** Render paska wątku i biegów w czacie. Komunikacja do suba pozostaje wyłącznie po stronie agenta. */
 import { buildParentConversationView } from './parentConversationView.js';
 import { t, pluralCategory } from '../../../core/i18n/index.js';
@@ -13,6 +14,7 @@ type El = HTMLElement & {
     createEl<K extends keyof HTMLElementTagNameMap>(tag: K, opts?: ElOpts): HTMLElementTagNameMap[K] & El;
 };
 interface RegistryLike {
+    draftSummaries?: import('../../sub-agents/index.js').SubTaskRegistry['draftSummaries'];
     events?: { on(event: string, handler: () => void): () => void };
     list?(): SubTask[];
     listThreads?(owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }): SubThread[];
@@ -120,8 +122,13 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     views.set(viewKey, view);
     const tree = buildStripTreeModel(rows, view.collapsed);
     host.classList.toggle('pkm-substrip--tree', tree.hierarchical);
-    host.classList.toggle('pkm-substrip--empty', rows.length === 0);
-    if (!rows.length) return 0;
+    const visibleDrafts = new Set(rows.flatMap(row => row.runs.flatMap(run => run.draftSummary ? [run.draftSummary.ref.draftId] : [])));
+    const backlog = (registry?.draftSummaries?.(owner, 'agent') ?? []).filter(summary => !visibleDrafts.has(summary.ref.draftId))
+        .reduce((count, summary) => count + summary.pending + summary.conflicts, 0);
+    host.classList.toggle('pkm-substrip--empty', rows.length === 0 && !backlog);
+    if (backlog) host.createDiv({ cls: 'pkm-substrip__draft-backlog', text: t('chat.subdraft.backlog', { count: backlog }) });
+    if (!rows.length && !registry?.draftSummaries) return 0;
+    if (rows.length) {
     if (tree.hierarchical) {
         const summary = host.createDiv({ cls: 'pkm-substrip__summary' });
         summary.createSpan({ text: t(tree.summary.key, tree.summary.params) });
@@ -145,11 +152,12 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
         for (const row of rows) renderChip(chips, row, ctx, expanded?.id === row.id);
     }
     if (expanded) renderDetail(host, host.createDiv({ cls: 'pkm-substrip__detail' }), expanded, registry, ctx, tree.hierarchical ? expandedNode : undefined);
+    }
     const ticks = questionTicks.get(host) ?? [];
     if (host.isConnected && (ticks.length || registry?.events)) {
         const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
         const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
-        const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context', 'task:plan'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
+        const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context', 'task:plan', 'draft:changed'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
         const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
         const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
         observer.observe(host.ownerDocument, { childList: true, subtree: true });
@@ -191,6 +199,7 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
     chip.createSpan({ cls: 'pkm-substrip__crystal', text: '◆', attr: { 'aria-hidden': 'true' } });
     chip.createSpan({ cls: 'pkm-substrip__name', text: row.name });
     chip.createSpan({ cls: 'pkm-substrip__state', text: label });
+    renderDraftCounts(chip, row);
     renderConversation(chip, row.parentConversation);
     if (!row.notStarted) chip.createSpan({ cls: 'pkm-substrip__time', text: node.time });
     chip.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
@@ -264,6 +273,7 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
     updateClock(chips.parentElement as El, row.questionState, () => { label.textContent = questionLabel(row.questionState, row.state); button.setAttribute('aria-label', `${row.name}: ${label.textContent}`); });
     if (row.state.kind === 'queued') button.createSpan({ cls: 'pkm-substrip__queue', text: t('chat.substrip.queue_position', { position: String(row.state.position) }) });
     if (row.threadId && row.runNumber > 0 && row.runLimit) button.createSpan({ cls: 'pkm-substrip__run-number', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
+    renderDraftCounts(button, row);
     renderConversation(button, row.parentConversation);
     if (!row.notStarted) button.createSpan({ cls: 'pkm-substrip__time', text: formatDuration(row.durationMs) });
     button.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
@@ -316,6 +326,8 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
             : stateLabel(run.state);
     header.createSpan({ cls: 'pkm-substrip__run-state', text: label });
     if (live && (row.state.kind === 'running' || row.state.kind === 'stopping')) renderStopButton(header, registry, row);
+    const draft = draftPresentation(run.draftSummary)?.read();
+    if (draft) card.createDiv({ cls: 'pkm-substrip__draft-details', text: [draft.title, draft.summary, ...draft.details].join('\n') });
     renderConversation(card, run.parentConversation, true);
     if (run.endReason) card.createDiv({ cls: 'pkm-substrip__end-reason', text: run.endReason });
     if (run.note) card.createDiv({ cls: 'pkm-substrip__end-reason', text: t(run.note === 'storage-error' ? 'chat.streaming.partial_storage_error' : 'chat.substrip.synthesis_pending') });
@@ -426,4 +438,8 @@ function renderConversation(parent: El, metadata: StripRow['parentConversation']
         const details = parent.createDiv({ cls: 'cs-parent-conversation__details' });
         for (const text of view.details) details.createDiv({ text });
     }
+}
+
+function renderDraftCounts(parent: El, row: StripRow): void {
+    for (const run of row.runs) if (run.draftSummary) parent.createSpan({ cls: 'pkm-substrip__draft', text: draftSummaryText(run.draftSummary) });
 }

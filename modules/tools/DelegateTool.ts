@@ -168,6 +168,7 @@ function _rawToString(value: unknown): string {
 }
 
 interface SubAgentRunResult {
+    draftSummary?: import('../vault-drafts/index.js').DraftSummary;
     draft?: DraftRef;
     parentConversation?: ParentConversationPreparation;
     question?: SubRunResult['question'];
@@ -287,7 +288,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
 
 /** DI dla testów: podmiana fabryki runnera (`__test__` + `DelegateTool.test.ts`). */
 interface DelegateToolDeps {
-    drafts?: SubRunDrafts;
+    drafts?: SubRunDrafts | { kind: 'unavailable' };
     makeRunner?: (plugin: DelegatePlugin) => SubAgentRunnerLike;
 }
 
@@ -510,7 +511,7 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
             ...(r.question ? { question: r.question } : {}),
             ...(Array.isArray(r.tool_call_details) ? { tool_call_details: r.tool_call_details } : {}),
             ...(r.usage ? { usage: r.usage } : {}),
-            ...(r.draft ? { draft: r.draft } : {}),
+            ...(r.draft ? { draft: r.draft, draftSummary: r.draftSummary, draft_id: r.draft_id, draft_note: r.draft_note } : {}),
         };
     };
 }
@@ -2115,7 +2116,7 @@ async function _executeSubAgent(
     if (result.failed) {
         return {
             success: false,
-            ...(result.draft ? { draft: result.draft } : {}),
+            ...(result.draft ? { draft: result.draft, draftSummary: result.draftSummary, draft_id: result.draft.draftId, draft_note: t('chat.subdraft.notification', { draft_id: result.draft.draftId, count: result.draftSummary?.changes.length ?? 0 }) } : {}),
             ...(result.parentConversation ? { parentConversation: result.parentConversation } : {}),
             error: typeof result.result === 'string' ? result.result : _rawResultToString(result.result),
             aspect: subAgentConfig.name,
@@ -2140,7 +2141,7 @@ async function _executeSubAgent(
         const cap = runControl.salvageCap ?? DEFAULT_LIMITS.subagent_salvage_max_chars;
         const partialText = (result.handoff?.trim() || resultText.trim() || _digestFromToolDetails(details, cap)).slice(0, cap);
         const common = {
-            ...(result.draft ? { draft: result.draft } : {}),
+            ...(result.draft ? { draft: result.draft, draftSummary: result.draftSummary, draft_id: result.draft.draftId, draft_note: t('chat.subdraft.notification', { draft_id: result.draft.draftId, count: result.draftSummary?.changes.length ?? 0 }) } : {}),
             ...(result.parentConversation ? { parentConversation: result.parentConversation } : {}),
             aspect: subAgentConfig.name,
             ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),
@@ -2167,7 +2168,7 @@ async function _executeSubAgent(
 
     return {
         success: true,
-        ...(result.draft ? { draft: result.draft } : {}),
+        ...(result.draft ? { draft: result.draft, draftSummary: result.draftSummary, draft_id: result.draft.draftId, draft_note: t('chat.subdraft.notification', { draft_id: result.draft.draftId, count: result.draftSummary?.changes.length ?? 0 }) } : {}),
         ...(result.parentConversation ? { parentConversation: result.parentConversation } : {}),
         result: result.result,
         aspect: subAgentConfig.name,

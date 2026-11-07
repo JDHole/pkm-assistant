@@ -5,6 +5,7 @@ import type { BuildSubTaskResultModelInput, SubTaskResultThread } from '../../su
 import type { SubAgentResultView } from '../../ui-components/index.js';
 
 export interface BuildSubAgentResultViewInput extends Omit<BuildSubTaskResultModelInput, 'thread'> {
+    draftSummary?: unknown;
     name: string;
     thread: SubTaskResultThread;
     taskId?: string;
@@ -35,6 +36,7 @@ export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, tra
         notes.push(translate('chat.subresult.user_stopped_next'));
     }
     return {
+        ...(input.draftSummary ? { draftSummary: input.draftSummary } : {}),
         title,
         badge,
         status: model.openQuestion !== undefined ? 'attention' : model.state.kind === 'done' ? 'ok' : 'error',

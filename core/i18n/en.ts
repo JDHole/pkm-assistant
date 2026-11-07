@@ -4,6 +4,12 @@
  * {{param}} for interpolation.
  */
 export const en: Record<string, string> = {
+  'tools.label.subagent_changes': 'Sub-agent changes',
+  'tool.subagent_changes': 'Sub-agent changes',
+  "chat.subdraft.heading": "Draft changes",
+  "chat.subdraft.notification": "Draft draft_id={{draft_id}}: {{count}} changes. Review and decide on files with subagent_changes. Ending the run does not accept changes.",
+  "chat.subdraft.backlog": "Outstanding agent changes: {{count}}. Use subagent_changes with scope: agent.",
+  "chat.subdraft.recovery_error": "Some drafts could not be restored ({{count}}). See the log; files were preserved.",
   "mcp.subagent_changes.desc": "Review, accept or reject an individual sub-agent change.",
   "mcp.subagent_changes.conflict": "File {{path}} changed since the draft was prepared. Reject the change or delegate it again.",
   "mcp.subagent_changes.stale_revision": "The change list is outdated. Fetch it again.",
@@ -18,6 +24,7 @@ export const en: Record<string, string> = {
   "mcp.subagent_changes.param.change_id": "One change identifier; requires draft_id.",
   "mcp.subagent_changes.param.revision": "Exact change revision from the current list.",
   "mcp.subagent_changes.param.cursor": "Next-page cursor returned by the list.",
+  'subagent.draft.unavailable': 'Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.',
   "subagent.draft.saved": "Prepared in the draft; vault unchanged.",
   "subagent.draft.ambiguous": "Different versions of {{path}} from: {{sources}}.",
   "chat.subdraft.pending": "Pending review: {{count}}",

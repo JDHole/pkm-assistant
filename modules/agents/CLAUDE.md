@@ -2,7 +2,7 @@
 
 **Infrastruktura agentów.** `AgentManager` (CRUD per agent, profil, przełączanie aktywnego agenta), `AgentLoader` (ładowanie z vault + wbudowanego agenta), `AgentProfileView` (panel profilu, 8 zakładek), `toolAxis.ts` (jedna oś narzędziowa `disabled_tools`).
 
-**Agent = Persona (osobowość) + Umiejętności (skille + konektory) + Uprawnienia + Ekipa (suby) + Pamięć.** Sterowanie wbudowanymi narzędziami idzie przez negatywną oś `disabled_tools`, nie przez `enabled_tools`/`permissions`; `mcp_servers[]` jest dodatkowym opt-inem wyłącznie dla serwerów userowych. Grupa `delegation` obejmuje `delegate`, `sub_agent` i `agent_delegate`, więc jej wyłączenie ukrywa i blokuje sterowanie wątkami subów.
+**Agent = Persona (osobowość) + Umiejętności (skille + konektory) + Uprawnienia + Ekipa (suby) + Pamięć.** Sterowanie wbudowanymi narzędziami idzie przez negatywną oś `disabled_tools`, nie przez `enabled_tools`/`permissions`; `mcp_servers[]` jest dodatkowym opt-inem wyłącznie dla serwerów userowych. Grupa `delegation` obejmuje `delegate`, `sub_agent`, `agent_delegate` i `subagent_changes`, więc jej wyłączenie ukrywa i blokuje sterowanie wątkami subów.
 
 **W kodzie pluginu jest tylko jeden wbudowany agent: Jaskier** (systemowy agent onboardingowy, `archetypes/HumanVibe.ts` / `createJaskier`). Pozostali agenci to agenci użytkownika (własne pliki YAML) i żyją poza kodem pluginu. Plugin daje im runtime + UI do produkcji.
 
@@ -231,3 +231,8 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
 - `modules/sub-agents/CLAUDE.md` - agenci dziedziczą konfigurację sub-agents
 - `modules/memory/CLAUDE.md` - każdy agent ma swój `AgentMemory`
 - `modules/komunikator/CLAUDE.md` - widoczność agenta w komunikatorze, kesz nagłówków skrzynki
+
+
+P5 2.4.7: grupa delegation obejmuje również subagent_changes. Wyłączenie grupy
+blokuje przegląd kopii; samo włączenie nadal nie przyznaje prawa do źródłowego
+writera ani ścieżki. Te kontrole wykonuje narzędzie przeglądu.

@@ -1,3 +1,5 @@
+import { summarizeDraft } from '../vault-drafts/index.js';
+import type { DraftStore, DraftRef, DraftSummary, DraftManifest } from '../vault-drafts/index.js';
 /**
  * SubTaskRegistry — księga zadań sub-agentów.
  *
@@ -73,6 +75,7 @@ export interface SubTaskBudget {
 
 /** Wynik biegu suba — mapowanie 1:1 z tym, co zwraca `runAgentLoop`. */
 export interface SubTaskResult {
+    draftSummary?: DraftSummary;
     draft?: import('../vault-drafts/index.js').DraftRef;
     parentConversation?: ParentConversationMetadata;
     text: string;
@@ -128,6 +131,8 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    draft?: DraftRef;
+    draftSummary?: DraftSummary;
     plan?: PlanTaskMetadata;
     /** Immutable snapshot of the transaction that ended this node. */
     planReport?: PlanReport;
@@ -415,6 +420,31 @@ export class SubTaskRegistry {
         }
     }
 
+    private draftStore?: DraftStore;
+    private draftUnsubscribe?: () => void;
+    attachDraftStore(store: DraftStore): void {
+        this.draftUnsubscribe?.();
+        this.draftStore = store;
+        this.draftUnsubscribe = store.events.on('draft:changed', value => {
+            this.projectDraft(value as DraftManifest);
+            this.events.emit('draft:changed');
+        });
+        for (const manifest of store.list()) this.projectDraft(manifest);
+    }
+    private projectDraft(manifest: DraftManifest): void {
+        const task = this.getTask(manifest.runId);
+        if (!task || task.origin?.agentName !== manifest.owner.agentName || task.origin.sessionPath !== manifest.owner.sessionPath
+            || task.origin.sessionEpoch !== manifest.owner.sessionEpoch) return;
+        const summary = summarizeDraft(manifest);
+        task.draft = summary?.ref;
+        task.draftSummary = summary;
+        this.events.emit('task:draft', task);
+    }
+    draftSummaries(owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }, scope: 'session' | 'agent' = 'session'): DraftSummary[] {
+        return (this.draftStore?.list() ?? []).filter(m => m.owner.agentName === owner.agentName
+            && (scope === 'agent' || m.owner.sessionPath === owner.sessionPath && m.owner.sessionEpoch === owner.sessionEpoch))
+            .flatMap(m => { const summary = summarizeDraft(m); return summary ? [summary] : []; });
+    }
     private readonly _history?: SubTaskHistory;
     flushHistory(): Promise<void> { return this._history?.flush() ?? Promise.resolve(); }
     /** Silent and idempotent: historical threads are closed and cannot resume execution. */
@@ -447,6 +477,7 @@ export class SubTaskRegistry {
             thread.level = task.level;
             thread.lastActiveAt = Math.max(thread.lastActiveAt, task.endedAt);
         }
+        for (const manifest of this.draftStore?.list() ?? []) this.projectDraft(manifest);
         return imported;
     }
 
@@ -1367,6 +1398,7 @@ export class SubTaskRegistry {
         this._inbox.dispose();
         this._questions.dispose();
         this._history?.dispose();
+        this.draftUnsubscribe?.();
         for (const { timer } of this._deferredPlanFinishes.values()) this._planResultClock.clearTimeout(timer);
         this._deferredPlanFinishes.clear();
         try {

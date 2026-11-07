@@ -25,6 +25,7 @@ export function buildSubTaskResultDelivery(task: SubTask, registry: SubTaskRegis
             ? { kind: 'single' as const }
             : { kind: 'unknown' as const };
     const subTaskResult = {
+        ...((task.draftSummary ?? task.result?.draftSummary) ? { draftSummary: task.draftSummary ?? task.result?.draftSummary } : {}),
         ...buildPlanNotice(task),
         outcome,
         result: task.result ? { text: task.result.text, handoff: task.result.handoff } : undefined,

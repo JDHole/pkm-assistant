@@ -324,3 +324,15 @@ wyłącznie dla legacy/text, nawet gdy wołacz omyłkowo poda rememberAvailable 
 wariantowi. Opcjonalny AbortSignal zamyka okno z deny. Brak preview/signal zachowuje
 starą strukturę DOM. Nie dodano przycisków zapisu poza istniejącą zgodą modala.
 Testy: nowe przypadki P4 w `DiffModal.test.ts` oraz niezmienione testy legacy.
+
+
+### 2.4.7 P5 — opcjonalna prezentacja kopii
+
+`SubAgentDraftView` zawiera read() z title/summary/details i opcjonalne subscribe.
+`createSubAgentBlock({draft})` dodaje licznik i leniwą sekcję Zmiany w kopii,
+aktualizuje je po zdarzeniu i odpina listener po usunięciu kafelka. Nie interpretuje
+decyzji domenowych, nie importuje rejestru ani magazynu i nie tworzy przycisków
+zapisu. Status/badge/outcome biegu pozostają bez zmian. Bez draft DOM jest ten sam.
+Klasy cs-tile--draft/cs-subdraft__summary/cs-subdraft__details mają style w src/styles.css.
+Test P5 w SubAgentBlock.test.ts przechodzi od pending do accepted/rejected przez
+rzeczywisty runtime/review oraz sprawdza zatrzymanie i odpięcie subskrypcji.

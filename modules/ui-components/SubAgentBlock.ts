@@ -33,7 +33,13 @@ export interface SubAgentUsage {
 }
 
 /** Kontrakt `createSubAgentBlock` - kształt, który realnie czyta render niżej. */
+export interface SubAgentDraftView {
+    read(): { title: string; summary: string; details: string[] };
+    subscribe?(refresh: () => void): () => void;
+}
 export interface SubAgentResultView {
+    draftSummary?: unknown;
+
     title: string;
     summary?: string;
     badge?: string;
@@ -53,6 +59,7 @@ export interface SubAgentConversationView {
 }
 
 interface SubAgentBlockOptions {
+    draft?: SubAgentDraftView;
     conversation?: SubAgentConversationView;
     type: string;
     aspectType?: string;
@@ -270,6 +277,17 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
         details = _buildResultDetails(opts, isError);
     }
 
+    let draftDetails: HTMLElement | undefined;
+    if (opts.draft) {
+        const original = details;
+        details = body => {
+            if (typeof original === 'function') original(body);
+            else if (original) body.createDiv().textContent = original;
+            draftDetails = body.createDiv({ cls: 'cs-subdraft__details' });
+            const view = opts.draft!.read();
+            draftDetails.textContent = [view.title, view.summary, ...view.details].join('\n');
+        };
+    }
     const conversation = opts.conversation;
     if (conversation) {
         const originalDetails = details;
@@ -299,6 +317,27 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
         handle.el.classList.add('cs-tile--conversation');
         const badge = handle.el.querySelector('.cs-tile__head')!.createSpan({ cls: `cs-parent-conversation__badge cs-parent-conversation--${conversation.state}` });
         badge.textContent = conversation.badge;
+    }
+    if (opts.draft) {
+        handle.el.classList.add('cs-tile--draft');
+        const source = opts.draft;
+        const badge = handle.el.querySelector('.cs-tile__head')!.createSpan({ cls: 'cs-subdraft__summary' });
+        const refresh = () => {
+            const view = source.read();
+            badge.textContent = view.summary;
+            if (draftDetails) draftDetails.textContent = [view.title, view.summary, ...view.details].join('\n');
+        };
+        refresh();
+        if (source.subscribe) {
+            const off = source.subscribe(refresh);
+            let mounted = handle.el.isConnected;
+            const observer = new MutationObserver((records = []) => {
+                if (records.some(record => Array.from(record.addedNodes).some(node => node === handle.el || node.contains(handle.el)))) mounted = true;
+                if (handle.el.isConnected) mounted = true;
+                else if (mounted) { off(); observer.disconnect(); }
+            });
+            observer.observe(handle.el.ownerDocument, { childList: true, subtree: true });
+        }
     }
     return handle.el;
 }

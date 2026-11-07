@@ -1,3 +1,4 @@
+import { draftPresentation } from './draftPresentation.js';
 import { t } from '../../../core/i18n/index.js';
 import { toolResultStatus } from '../../../core/index.js';
 import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
@@ -6,6 +7,7 @@ import { buildParentConversationView } from './parentConversationView.js';
 import { buildSubAgentResultView } from './subAgentResultView.js';
 
 interface DelegateResult {
+    draftSummary?: unknown;
     parentConversation?: import('../../sub-agents/index.js').ParentConversationMetadata;
     isError?: boolean;
     success?: boolean;
@@ -31,6 +33,7 @@ interface DelegateResult {
 }
 
 export interface DelegateBlockOptions {
+    draft?: import('../../ui-components/index.js').SubAgentDraftView;
     conversation?: import('../../ui-components/index.js').SubAgentConversationView;
     type: string;
     status: 'success' | 'error';
@@ -54,6 +57,7 @@ function hasStructuredOutcome(value: DelegateResult['outcome']): value is NonNul
 export function buildDelegateBlockOptions(
     rawResult: DelegateResult | string,
     identity: { type: string; agentName?: string; query?: string },
+    registry?: import('../../sub-agents/index.js').SubTaskRegistry,
 ): DelegateBlockOptions {
     const result = typeof rawResult === 'string' ? { result: rawResult } : rawResult;
     const outcome = hasStructuredOutcome(result.outcome) && (Array.isArray(result.effects) || Array.isArray(result.outcome.effects))
@@ -62,7 +66,9 @@ export function buildDelegateBlockOptions(
     const thread = result.thread ?? (result.sub_id?.trim()
         ? { kind: 'reusable' as const, sub_id: result.sub_id }
         : { kind: 'unknown' as const });
+    const draft = draftPresentation(result.draftSummary, registry);
     const common = {
+        ...(draft ? { draft } : {}),
         ...(result.parentConversation ? { conversation: buildParentConversationView(result.parentConversation) } : {}),
         type: identity.type,
         agentName: identity.agentName || result.aspect || '',

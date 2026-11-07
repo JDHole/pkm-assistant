@@ -74,7 +74,7 @@ export class DraftReview {
                 kind: change.proposed.kind, run_id: manifest.runId, revision: change.revision, status: change.review.kind,
                 old_bytes: change.base.kind === 'file' ? change.base.version.bytes : 0,
                 new_bytes: 'bytes' in change.proposed ? change.proposed.bytes : 0, source: change.source };
-            if (input.changeId && input.includePreview !== false) {
+            if (input.changeId && input.includePreview !== false && !manifest.payloadCollected) {
                 const preview = await this.preview(manifest.draftId, change);
                 if (preview.kind === 'text' || preview.kind === 'deleted') {
                     item.truncated = preview.oldContent.length > 2000 || preview.newContent.length > 2000;

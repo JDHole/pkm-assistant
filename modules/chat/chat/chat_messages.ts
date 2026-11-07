@@ -328,6 +328,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                         ? { kind: 'reusable' as const, sub_id: threadId }
                                         : { kind: 'unknown' as const };
                                     const options = buildDelegateBlockOptions({
+                                        draftSummary: task?.draftSummary,
                                         success: !failed,
                                         error: task?.error || (failed ? t('mcp.delegate.outcome_note') : undefined),
                                         result: task?.result ? { text: task.result.text, handoff: task.result.handoff } : '',
@@ -338,7 +339,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                         question: task?.result?.question,
                                         questionState: task?.questionState,
                                         thread: resultThread,
-                                    }, { type: tcName, agentName: name, query: taskQuery });
+                                    }, { type: tcName, agentName: name, query: taskQuery }, this.plugin?.subTaskRegistry);
                                     return [markReceipt(createDelegateBlock(options))];
                                 }
                                 return [markReceipt(createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: name, conversation,
@@ -352,7 +353,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             block = createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: _hName,
                                 query: taskQuery, response: buildBackgroundReceiptText(startedList, historyOutput.queued) });
                         } else {
-                            const options = buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery });
+                            const options = buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery }, this.plugin?.subTaskRegistry);
                             block = createDelegateBlock(options);
                         }
                         agentDiv.appendChild(block);

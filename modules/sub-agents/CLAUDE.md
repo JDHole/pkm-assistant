@@ -1035,3 +1035,24 @@ P4 dostarcza przyjęcie plików. P5 musi podłączyć trwały adapter publikacji
 referencji/osi efektów, odtworzenie, projekcję UI i retencję. Manager P3 zachowuje
 zamrożone wejścia niezależnie od retencji rejestru; nie ma automatycznego GC ani
 wznawiania pracy po restarcie.
+
+
+### 2.4.7 P5 — podłączenie historii i retencji
+
+Produkcyjny runtime wstrzykuje SubRunDrafts po restore. `setRetention`/`prune`
+zwalniają zamrożone wejścia zakończonych planów i zamkniętych wątków; otwarty
+następnik ma własną referencję do wszystkich warstw. `RunDraft.summary()` daje
+projekcję decyzji niezależną od outcome; odczytowy bieg bez zmian jej nie dostaje.
+
+`SubTaskRegistry.attachDraftStore` podpina draft:changed, sprawdza pełnego właściciela
+i wiąże runId z opcjonalnym draft/draftSummary. `draftSummaries(owner, scope)`
+nie zależy od retencji RAM. Import historii rekonstruuje projekcję z magazynu,
+nie wznawia modeli, pytań ani dostarczania wyników. Dispose odpina listener.
+SubTaskHistory zapisuje opcjonalny DraftRef, bez blobów/diffów/zgód; schemat
+rozpoznaje też RunEffect.location. Zapis pierwszej mutacji nie czeka na unload.
+Pasek otrzymuje opcjonalne draftSummary w StripRun; znaczenie StripState nie zmienia się.
+Testy P5 runtime i UI wskazano w `../vault-drafts/CLAUDE.md`.
+
+DI runnera i DelegateTool przyjmuje także `{kind:'unavailable'}`: runtime po błędzie
+odtworzenia nie wraca na zapis live. Odmawia biegów wymagających zapisu/warstw,
+ale zachowuje zwykły odczyt bez kopii. Test P5 w runnerDrafts.test.ts.

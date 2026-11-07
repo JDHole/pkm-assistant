@@ -441,3 +441,7 @@ PL/EN mają równoległe klucze `mcp.subagent_changes.*` (opis, parametry, odmow
 konflikt, rewizja, seal/recovery), `subagent.draft.*`, `chat.subdraft.*` i nowe
 warianty `modal.diff.*`. Klucze paska są przygotowane dla integracji P5;
 P4 nie zmienia istniejących tekstów, modeli uprawnień ani inicjalizacji runtime.
+
+
+P5 2.4.7 dodaje PL/EN dla liczników, sekcji, zaległych kopii, błędów recovery
+i instrukcji subagent_changes w powiadomieniu. Główne API core pozostaje bez zmian.

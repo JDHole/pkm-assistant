@@ -1682,7 +1682,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 blocks.at(-1)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && (result?.success === true || result?.success === false)) {
                 const name = result.aspect || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '';
-                const options = buildDelegateBlockOptions(result, { type: toolCall.name, agentName: name, query: toolArgs.task || '' });
+                const options = buildDelegateBlockOptions(result, { type: toolCall.name, agentName: name, query: toolArgs.task || '' }, this.plugin?.subTaskRegistry);
                 const fullBlock = createDelegateBlock(options);
                 toolDisplay.replaceWith(fullBlock);
                 fullBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

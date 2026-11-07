@@ -1,3 +1,5 @@
+import { buildSubTaskResultDelivery } from '../chat/chat/subTaskResultDelivery.js';
+import { initializeVaultDrafts, createDraftReviewHost } from './index.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { createHash } from 'node:crypto';
@@ -103,7 +105,7 @@ class Mailbox<T> {
 type Payload = { messages: Array<{ role: string; content: string }>; tools: Array<{ function: { name: string } }> };
 type Request = { payload: Payload; done(text: string): void; call(name: string, args: object): void; fail(): void };
 const origin = { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) };
-async function runtime(t: ExecutionContext) {
+async function runtime(t: ExecutionContext, activate = false) {
     const f = await fixture({ 'a.md': 'Baza', 'b.md': 'Baza-B', 'source.png': 'IMG' });
     const registry = new SubTaskRegistry();
     const tools = new ToolRegistry();
@@ -133,9 +135,15 @@ async function runtime(t: ExecutionContext) {
             config: { chat: { providers: { openai: { info: { id: 'openai' } } }, http: { send: async () => ({ status: 200, headers: {}, text: '', json: () => ({}) }) }, transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } } },
     };
     const client = new MCPClient(f.app as never, plugin, tools);
-    const fullPlugin = { ...plugin, mcpClient: client };
+    const fullPlugin = Object.assign(plugin, { mcpClient: client });
+    const boot = activate ? await initializeVaultDrafts({ storage: f.disk, registry,
+        vault: { ...createDraftReviewHost(f.app as never), ...f.io },
+        hasher: { sha256: async bytes => createHash('sha256').update(bytes).digest('hex') },
+    }) : undefined;
+    if (boot) { f.store = boot.store; f.persistence = boot.persistence; tools.registerTool(boot.tool); }
+    t.teardown(() => boot?.dispose());
     let sequence = 0;
-    const drafts = new SubRunDrafts(f.store, f.persistence, f.io, () => parseDraftId(`run-draft-${++sequence}`));
+    const drafts = boot?.drafts ?? new SubRunDrafts(f.store, f.persistence, f.io, () => parseDraftId(`run-draft-${++sequence}`));
     const runner = new SubAgentRunner({ app: f.app, plugin: fullPlugin, toolRegistry: tools, drafts });
     const requests = new Mailbox<Request>();
     class Model {
@@ -526,4 +534,52 @@ test.serial('P3 sealing failure cannot publish a successful plan result or write
     t.deepEqual(restored.list()[0].phase, { kind: 'sealed', reason: 'restart' });
     t.is(await new DraftView(restored, f.persistence, f.io, restored.list()[0].draftId).read('a.md'), 'Gotowe');
     t.is(decode(f.files.get('a.md')!), 'Baza');
+});
+
+test.serial('P5 activated runtime delegates through MCP, announces review and leaves live content intact', async t => {
+    const f = await runtime(t, true);
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    const delegate = createDelegateTool(f.app, { drafts: f.drafts });
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
+    f.tools.registerTool(delegate);
+    const receipt = await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'Prepare', aspect: 'child' } }, 'Tester', { origin, autonomy: 'yolo' });
+    t.like(receipt, { success: true, started: true });
+    (await f.requests.next()).call('write', { path: 'a.md', content: 'Szkic' });
+    const next = await f.requests.next();
+    t.like(lastTool(next), { success: true, path: 'a.md' });
+    next.done('Prepared');
+    await __test__._settleBackground(true);
+    const task = f.registry.list()[0];
+    const delivery = buildSubTaskResultDelivery(task, f.registry, 1000);
+    t.deepEqual([task.status, task.result?.text, decode(f.files.get('a.md')!)], ['done', 'Prepared', 'Baza']);
+    t.true(delivery.text.includes(`draft_id=${f.store.list()[0].draftId}`));
+    t.true(delivery.text.includes('subagent_changes'));
+    const listed = await f.client.executeToolCall({ name: 'subagent_changes', arguments: { action: 'list' } }, 'Tester', { origin, autonomy: 'yolo' }) as { kind: string; changes: Array<{ path: string; status: string }> };
+    t.deepEqual([listed.kind, listed.changes.map(c => [c.path, c.status])], ['listed', [['a.md', 'pending']]]);
+    const summary = f.registry.draftSummaries(origin)[0];
+    t.deepEqual([summary.pending, summary.changes], [1, [{ path: 'a.md', status: 'pending' }]]);
+});
+
+test.serial('P5 activated writer that only reads returns the legacy response with no review DOM data', async t => {
+    const f = await runtime(t, true);
+    const run = f.run(['write', 'read']);
+    (await f.requests.next()).call('read', { path: 'a.md' });
+    const next = await f.requests.next();
+    t.is(lastTool(next).content, 'Baza'); next.done('Read Baza');
+    const result = await run;
+    t.deepEqual([result.result, result.toolsUsed, result.draft, result.draftSummary, f.registry.draftSummaries(origin)], ['Read Baza', ['read'], undefined, undefined, []]);
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+});
+
+test.serial('P5 unavailable draft runtime denies writers but preserves ordinary reading', async t => {
+    const f = await runtime(t);
+    const runner = new SubAgentRunner({ app: f.app, plugin: f.plugin, toolRegistry: f.tools, drafts: { kind: 'unavailable' } });
+    const failed = await runner.runTask('Write', f.agent, f.config, new f.Model() as never, { origin });
+    t.deepEqual([failed.failed, failed.result, decode(f.files.get('a.md')!)], [true,
+        'Sub-agent child error: Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.', 'Baza']);
+    const read = runner.runTask('Read', f.agent, { ...f.config, tools: ['read'] }, new f.Model() as never, { origin, autonomy: 'yolo' });
+    (await f.requests.next()).call('read', { path: 'a.md' });
+    const next = await f.requests.next(); t.is(lastTool(next).content, 'Baza'); next.done('Read Baza');
+    const result = await read;
+    t.deepEqual([result.result, result.toolsUsed], ['Read Baza', ['read']]);
 });

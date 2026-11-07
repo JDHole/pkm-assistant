@@ -166,6 +166,7 @@ export type SubRunStoppedBy = 'natural' | 'backstop' | 'abort' | 'error';
  * (obecne WYŁĄCZNIE w gałęzi catch).
  */
 export type SubRunResult = {
+    draftSummary?: import('../vault-drafts/index.js').DraftSummary;
     draft?: DraftRef;
     parentConversation?: ParentConversationPreparation;
     result: string;
@@ -297,7 +298,7 @@ export class SubAgentRunner {
     declare plugin: RunnerPlugin;
     declare mcpClient: RunnerMcpClient | null;
     declare effectTargetIo: EffectTargetIo;
-    private readonly drafts?: SubRunDrafts;
+    private readonly drafts?: SubRunDrafts | { kind: 'unavailable' };
     /**
      * @param {Object} options
      * @param {Object} options.toolRegistry - ToolRegistry instance
@@ -310,7 +311,7 @@ export class SubAgentRunner {
     // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
     // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
     // realne obiekty `ToolRegistry`/`App`/plugin.
-    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts }) {
+    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' } }) {
         this.drafts = drafts;
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
         this.app = app as AppLike;
@@ -628,7 +629,10 @@ export class SubAgentRunner {
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
             let tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
-            if (this.drafts) {
+            if (this.drafts && 'kind' in this.drafts) {
+                if (tools.some(tool => isVaultContentWriter(tool.function.name)) || options.draftDependencies?.length)
+                    throw new Error(t('subagent.draft.unavailable'));
+            } else if (this.drafts) {
                 draft = await this.drafts.open({ runId: label, threadId: threadId ?? label, origin,
                     writable: tools.some(tool => isVaultContentWriter(tool.function.name)),
                     dependencies: options.draftDependencies, continuation: !!options.threadId,
@@ -885,7 +889,7 @@ export class SubAgentRunner {
                                 partial: snapshot, stoppedByActor: subTask.stopRequestedBy, effects, successfulToolResults });
                             const handoff = _buildHandoff(outcome, snapshot, observedToolDetails,
                                 limits.subagent_salvage_max_chars, knownSecrets, closedQuestion);
-                            material = { ...(draftRef ? { draft: draftRef } : {}), text: '', stoppedBy: 'abort', stopReason: snapshot.stopReason, outcome,
+                            material = { ...(draftRef ? { draft: draftRef, draftSummary: draft?.summary() } : {}), text: '', stoppedBy: 'abort', stopReason: snapshot.stopReason, outcome,
                                 toolsUsed: [...snapshot.toolsUsed], durationMs: Date.now() - startTime,
                                 usage: snapshot.usage, handoff: handoff.text,
                                 ...(closedQuestion ? { question: { ...closedQuestion,
@@ -938,7 +942,7 @@ export class SubAgentRunner {
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
             const result: SubTaskResult = {
-                ...(draftRef ? { draft: draftRef } : {}),
+                ...(draftRef ? { draft: draftRef, draftSummary: draft?.summary() } : {}),
                 ...(parentConversation ? { parentConversation } : {}),
                 text: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                 toolsUsed: response.toolsUsed || [],
@@ -969,7 +973,7 @@ export class SubAgentRunner {
                 }));
             }
             return {
-                ...(draftRef ? { draft: draftRef } : {}),
+                ...(draftRef ? { draft: draftRef, draftSummary: draft?.summary() } : {}),
                 ...(parentConversation ? { parentConversation } : {}),
                 result: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                 toolsUsed: response.toolsUsed || [],
@@ -1017,14 +1021,14 @@ export class SubAgentRunner {
             if (subTask) {
                 const failedTask = subTask;
                 _safeRegistry(() => registry?.fail?.(failedTask, safeErrorMsg, outcome, {
-                    ...(draftRef ? { draft: draftRef } : {}),
+                    ...(draftRef ? { draft: draftRef, draftSummary: draft?.summary() } : {}),
                     ...(parentConversation ? { parentConversation } : {}),
                     text: '', toolsUsed: [...(lastPartial?.toolsUsed || [])], durationMs: Date.now() - startTime,
                     usage: lastPartial?.usage || null, outcome, ...(handoff ? { handoff } : {}),
                 }));
             }
             return {
-                ...(draftRef ? { draft: draftRef } : {}),
+                ...(draftRef ? { draft: draftRef, draftSummary: draft?.summary() } : {}),
                 ...(parentConversation ? { parentConversation } : {}),
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 toolsUsed: [...(lastPartial?.toolsUsed || [])],

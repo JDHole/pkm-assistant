@@ -1752,3 +1752,23 @@ częściowy nie jest sukcesem odblokowującym kolejny węzeł.
 Po restarcie historia pokazuje przerwane wcześniej aktywne węzły i zachowane
 blokady, bez wznawiania planu. Lista bez krawędzi, również z `depends_on: []`,
 zachowuje dotychczasowe pokwitowania, powiadomienia i pasek.
+
+
+### 2.4.7 P5 — przegląd kopii
+
+`draftPresentation.ts` waliduje opcjonalną projekcję, tłumaczy liczniki/ścieżki
+i odczytuje aktualne decyzje z rejestru według właściciela i draftId. Adapter
+blokującego delegate i renderer powiadomień przekazują ją do SubAgentBlock;
+nie ma dodatkowych elementów ani pól odpowiedzi dla zwykłego odczytu.
+Pasek słucha draft:changed i pokazuje Do przeglądu/Konflikty/Przyjęto/Odrzucono
+oraz ścieżki w szczegółach. Niewidoczne/odtworzone kopie własnego agenta dają
+licznik zaległych zmian bez ujawniania ścieżek innych sesji. Decyzje wykonuje
+wyłącznie prowadzący przez subagent_changes. Obserwatory odpinają subskrypcje
+przy usunięciu widoku z DOM.
+
+Powiadomienie modelu niesie draft_id, liczbę zmian i instrukcję przeglądu także
+przy Stopie, timeoucie i błędzie, poza limitem materiału. Outcome pozostaje osobną
+osią; przyjęcie pliku nie zmienia zatrzymanego biegu w sukces. Metadane doręczenia
+niosą opcjonalną projekcję; po restarcie historia/rejestr łączą referencję ze store.
+Testy P5 w `chat/subTaskStrip.test.ts`, `../tools/vaultDraftRuntime.test.ts`
+i `../ui-components/SubAgentBlock.test.ts`; stare asercje DOM pozostają.

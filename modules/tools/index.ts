@@ -152,3 +152,4 @@ export { isDraftToolAllowed } from './ToolRegistry.js';
 export type { VaultExecution } from './subToolExecution.js';
 export { createSubagentChangesTool } from './SubagentChangesTool.js';
 export { createDraftReviewHost } from './draftReviewHost.js';
+export { initializeVaultDrafts, desktopDraftPorts } from './vaultDraftRuntime.js';

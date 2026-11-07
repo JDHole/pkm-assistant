@@ -900,3 +900,25 @@ nie zmienia to starego WriteTool ani jego fallbacków opisanych wyżej.
 Granica optymistyczna binariów/usunięć i metadanych ukrytych plików jest szczegółowo
 opisana w `modules/vault-drafts/CLAUDE.md`. P5 nadal dostarcza adapter magazynu.
 Testy P4: `SubagentChangesTool.test.ts`; dotychczasowe asercje pozostają bez zmian.
+
+
+### 2.4.7 P5 — aktywacja
+
+`initializeVaultDrafts({storage, vault, hasher, registry, clock?})` odtwarza magazyn,
+podpina projekcję rejestru, tworzy SubRunDrafts/DraftReview i zwraca narzędzie
+`subagent_changes`, issues, flush i dispose. `desktopDraftPorts(app)` waliduje
+zdolności filesystemu i dostarcza prywatny DesktopDraftStorage oraz review/view I/O.
+Composition root czeka na restore przed rejestracją delegacji i przeglądu. Narzędzie
+należy do manifestu delegation i tej samej grupy osi uprawnień agents.
+
+Wyniki z kopią dodają draftSummary, draft_id i instrukcję subagent_changes; zwrotki
+bez kopii pozostają bez dodatkowych pól. Manager utrzymuje wejścia aktywnego planu
+i dostępnych kontynuacji, zwalnia je po zamknięciu i uruchamia GC rozstrzygniętych
+kopii. Retencja rejestru nie jest retencją magazynu. Błąd recovery jest raportowany
+w Notice i logu, bez wznawiania modeli.
+Testy aktywacji: `vaultDraftRuntime.test.ts` i przypadki P5 `runnerDrafts.test.ts`.
+
+Gdy inicjalizacja magazynu zawiedzie, composition root przekazuje rozłączny stan
+`{kind:'unavailable'}` do delegacji. Writer suba odmawia przed modelem, zwykły sub
+odczytowy i pozostałe narzędzia głównego agenta nadal są dostępne. Historyczne
+wywołania bez DI zachowują stary kontrakt; produkcja nigdy nie używa go jako fallbacku.

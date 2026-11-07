@@ -36,6 +36,7 @@ export class DraftPersistence {
         if (base.kind === 'file') await this.readBlob(id, base.blob, base.version.hash, base.version.bytes);
     }
     private async verifyBlobs(manifest: DraftManifest): Promise<void> {
+        if (manifest.payloadCollected) return;
         for (const touch of manifest.firstTouches) await this.verifyBase(manifest.draftId, touch.base);
         for (const change of manifest.changes) {
             const value = change.proposed;
@@ -76,6 +77,18 @@ export class DraftPersistence {
         } catch (cause) {
             if (cause instanceof DraftError) throw cause;
             throw new DraftError('io-error', 'Cannot publish draft manifest', { cause });
+        }
+    }
+    /** Compact receipt is durable before any payload is removed. Retry is idempotent. */
+    async collect(manifest: DraftManifest): Promise<void> {
+        if (!manifest.payloadCollected || !this.io.remove) return;
+        const root = this.directory(manifest.draftId);
+        for (const folder of ['manifests', 'blobs', 'decisions']) {
+            for (const name of await this.io.list(`${root}/${folder}`)) {
+                if (folder === 'manifests' && name === `${String(manifest.generation).padStart(6, '0')}.json`) continue;
+                if (folder === 'manifests' && !generationName.test(name)) continue;
+                await this.io.remove(`${root}/${folder}/${name}`);
+            }
         }
     }
     async loadAll(): Promise<{ manifests: DraftManifest[]; issues: RecoveryIssue[] }> {

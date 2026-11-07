@@ -1,11 +1,11 @@
 # modules/vault-drafts/
 
-P1–P4 wersji 2.4.7: trwały magazyn, warstwowy widok i przegląd kopii roboczych. Moduł nie jest jeszcze
-podłączony do runtime. Nie importuje Obsidiana, runnera, czatu ani MCPClient.
+P1–P5 wersji 2.4.7: trwały magazyn, warstwowy widok i przegląd kopii roboczych.
+Runtime odtwarza magazyn przed rejestracją delegacji. Nie importuje Obsidiana, runnera, czatu ani MCPClient.
 Jedyny port zapisu do bazowego vaulta należy do jawnego DraftReview; magazyn i widok pozostają odizolowane.
 
 Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), a od P3 runner tworzy widok/host wyłącznie po jawnym wstrzyknięciu
-`SubRunDrafts`. Produkcyjny runtime nadal go nie tworzy. Dlatego usunięto pięć nieaktualnych
+`SubRunDrafts`. Od P5 tworzy go produkcyjny runtime po odtworzeniu magazynu. Dlatego usunięto pięć nieaktualnych
 wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 
 ## Co tu mieszka
@@ -60,7 +60,7 @@ Port `DraftStorageIO.publish` jest **atomową, create-only publikacją**, nie zw
 przerwy i zwrócić `cancelled` bez widocznej generacji, jeżeli zamknięto kopię.
 Odrzucenie oznacza brak publikacji, sukces — trwałe, odczytywalne bajty. Przygotowanie
 pliku tymczasowego może być asynchroniczne; punkt publikacji musi spełniać ten kontrakt.
-Adapter hosta zostanie dostarczony w następnych paczkach. Nie wolno zastąpić tego
+Adapter desktopowy P5 realizuje ten kontrakt synchroniczną publikacją przez hard link. Nie wolno zastąpić tego
 portu sekwencją „sprawdź flagę → await write”; zgubiłaby ochronę przed późnym zapisem.
 P1 testuje oba momenty Stopu: podczas bloba oraz przed atomową publikacją manifestu.
 Jeden aktywny store jest właścicielem namespace; równoległe procesy zapisujące ten sam
@@ -81,7 +81,7 @@ nieistniejącego pliku dają `invalid-transition`. Rename/move nie istnieją.
 Odtworzenie wybiera ostatnią kompletną generację ze sprawdzonymi blobami. Uszkodzenie
 jest zwracane w `issues`, plik pozostaje na dysku. Nierozpoznana wersja manifestu
 blokuje fallback i zapis do tego katalogu. Osierocone bloby nie tworzą propozycji.
-Nie ma GC ani TTL; dane i referencje zachowujemy dla następnych paczek.
+Nie ma TTL nierozstrzygniętych kopii. GC P5 opisano poniżej.
 
 ## Następne paczki
 
@@ -111,8 +111,8 @@ Testy P2: `modules/tools/subToolExecution.test.ts` (narzędzia, widok, izolacja,
 artefakty/frontmatter, Orama, adapter, odtworzenie pochodnego tombstone i paginacja).
 
 P3 wiąże store z biegiem i Stopem przez opcjonalny `SubRunDrafts` w module sub-agents.
-P5 dostarczy adapter trwałej publikacji magazynu, rejestrację, zdarzenia i retencję.
-Przed aktywacją konieczna jest weryfikacja kontraktu atomowej publikacji na hoście.
+P5 dostarcza adapter trwałej publikacji magazynu, rejestrację, zdarzenia i retencję.
+Test adaptera sprawdza rzeczywisty zapis, anulowanie i create-only publikację.
 
 ## P4 — przegląd, decyzje i granica atomowości
 
@@ -176,3 +176,33 @@ przez następników; P4 niczego nie usuwa z magazynu.
 Testy: `modules/tools/SubagentChangesTool.test.ts` (publiczne MCP, rzeczywisty system
 uprawnień, host review, trwałe bajty i restart, kontrolowane bariery),
 `modules/ui-components/DiffModal.test.ts` (nowe warianty DOM obok starych asercji).
+
+
+## 2.4.7 P5 — runtime, zdarzenia i sprzątanie
+
+`DesktopDraftStorage(fs, basePath)` jest implementacją portu prywatnego magazynu dla
+Obsidiana desktop (plugin ma `isDesktopOnly`). Node jest wstrzykiwany jako wąska
+zdolność; moduł nie importuje runtime'u Node ani Obsidiana. Adapter odrzuca traversal,
+ścieżki spoza namespace i symlinki. Zapisuje staging create-only, wykonuje fsync
+zawartości, następnie sprawdza mayPublish i synchronicznie publikuje przez linkSync.
+Nie ma await między sprawdzeniem a publikacją. Hard link nigdy nie nadpisuje
+istniejącej generacji. Brak tej zdolności hosta odmawia zapisu kopii; brak fallbacku
+adapter.write/live. To publikacja w jednym procesie, nie blokada wielu instancji
+pluginu ani gwarancja przetrwania utraty zasilania wszystkich metadanych filesystemu.
+
+`DraftStore.events` emituje `draft:changed` po trwałej mutacji, seal i decyzji.
+`retain(ids)` zwraca idempotentny release; następnik i kontynuacja trzymają wszystkie
+tranzytywne warstwy. `collectResolved()` usuwa payload wyłącznie sealed i w całości
+accepted/rejected, bez aktywnych referencji. Najpierw publikuje małe pokwitowanie
+`payloadCollected:true`, potem usuwa stare generacje, bloby i intencje. Pokwitowanie
+zachowuje ID, ścieżki, rewizje, hashe i decyzje, więc ponowienie decyzji po restarcie
+nadal działa; lista zebranej kopii nie próbuje czytać usuniętego podglądu. Walidator
+odrzuca payloadCollected dla nierozstrzygniętych zmian. Awaria usuwania pozwala
+ponowić GC po restarcie. Jakikolwiek problem pełnego skanu odzyskiwania blokuje GC;
+nie usuwamy nieznanego formatu. Zamknięcie sesji ani retencja RAM nie usuwa propozycji.
+
+`summarizeDraft` i walidujący `parseDraftSummary` dają opcjonalną projekcję właściciela,
+referencji, czterech liczników oraz ścieżek/statusów. Brak zmian daje undefined.
+Źródłem decyzji pozostaje store; historia przechowuje tylko referencję.
+Testy P5: `../tools/vaultDraftRuntime.test.ts`, `../tools/runnerDrafts.test.ts`,
+`../chat/chat/subTaskStrip.test.ts`, `../ui-components/SubAgentBlock.test.ts`.
