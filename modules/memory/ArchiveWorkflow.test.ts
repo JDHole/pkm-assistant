@@ -1125,6 +1125,38 @@ test('komplet stempli → wynik kroku bez pola `unstamped`', async t => {
     t.is(result.unstamped, undefined, 'czysty przebieg nie zaśmieca zwrotki pustą listą');
 });
 
+for (const withModel of [false, true])
+for (const bom of ['', '\uFEFF'])
+for (const newline of ['\n', '\r\n']) {
+    test(`F1: headerless epoch is hidden from L1 (model=${withModel}, BOM=${!!bom}, CRLF=${newline === '\r\n'})`, async t => {
+        const { vault, files } = makeVault();
+        const memory = new AgentMemory(vault, 'Lead');
+        const path = `${memory.paths.sessionsActive}/legacy.md`;
+        const source = bom + [
+            '## 2026-11-07T12:00:00Z — session epoch', '', '**epoch:**', '',
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '', '**seq:**', '', '1', '',
+            '## unknown block', 'Opaque', '',
+        ].join(newline);
+        files[path] = source;
+        const archived = await memory.archiveActiveSession(path);
+        const archiveContent = await vault.adapter.read(archived!);
+        t.is(archiveContent, '---\nepoch: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n---\n' + source);
+        let payload: unknown;
+        const model: StreamChatModelLike = { stream(request, handlers) {
+            payload = JSON.parse(String(request.messages[1].content));
+            handlers.done({ choices: [{ message: { content: 'Synteza' } }] });
+        } };
+        const workflow = new ArchiveWorkflow(memory, { model: withModel ? model : null });
+        const result = await workflow._summaryFromFiles([archived!], 'L1');
+        if (withModel) {
+            t.deepEqual(payload, { level: 'L1', count: 1,
+                documents: [{ filename: 'legacy.md', content: '## unknown block\nOpaque' }] });
+            t.is(result, 'Synteza');
+        } else t.is(result, '# L1 raw concat (no LLM available)\n\n## legacy.md\n## unknown block\nOpaque');
+        t.is(await vault.adapter.read(archived!), archiveContent, 'projekcja L1 nie zmienia bajtów archiwum');
+    });
+}
+
 for (const withModel of [false, true]) test(`raw archive retains unknown body and hides epoch from L1 (model=${withModel})`, async t => {
     const { vault, files } = makeVault(), memory = new AgentMemory(vault, 'Lead');
     const path = `${memory.paths.sessionsActive}/legacy.md`;

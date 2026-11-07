@@ -371,11 +371,11 @@ function isSessionEpochEvent(header: string): boolean {
         && eventTypeFromHeader(header) === 'session_epoch';
 }
 
-/** L1 projection: discard only recognized control blocks, retaining unknown text. */
+/** L1 working projection: normalize like the parser, retaining unknown text. */
 export function withoutSessionEpochEvents(content: string): string {
-    return content.split(/(?=^## )/m).filter(block => {
+    return normalizeSessionText(content).split(/(?=^## )/m).filter(block => {
         if (!block.startsWith('## ')) return true;
-        return !isSessionEpochEvent(block.split(/\r?\n/, 1)[0].slice(3));
+        return !isSessionEpochEvent(block.split('\n', 1)[0].slice(3));
     }).join('');
 }
 

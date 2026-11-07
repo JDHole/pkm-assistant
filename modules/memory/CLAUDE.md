@@ -1045,7 +1045,10 @@ P5 migracji: `archiveActiveSession` przenosi efektywną epokę do frontmatter ta
 przy zerze wiadomości. Wtedy zmienia tylko nagłówek nowego archiwum, zachowując
 surowe body (również CRLF i nieznane bloki); źródło usuwa dopiero po readbacku.
 Obie projekcje L1 w `ArchiveWorkflow` używają `withoutSessionEpochEvents` z formatu:
-pomijają rozpoznane bloki sterujące, również uszkodzone, zachowują nieznane nagłówki.
+normalizują początkowy BOM i CRLF wspólną funkcją parsera wyłącznie w roboczym tekście,
+pomijają rozpoznane bloki `session_epoch`, również uszkodzone, zachowują nieznane bloki.
+Bajty archiwum pozostają bez zmian. Regresje F1 w `ArchiveWorkflow.test.ts` obejmują
+obie drogi L1, BOM/brak BOM i LF/CRLF oraz literalny dokument i zachowanie archiwum.
 L2/L3 pozostają bez tego filtrowania. Nie oznacza to zakazu przepisywania sesji przez
 `saveSession`: jego istniejący zapis metadanych nadal wykonuje read-modify-write.
 Testy P5: `AgentMemory.test.ts` (archiwum, niezależne adaptery, błąd po pełnym
