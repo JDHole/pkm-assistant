@@ -69,7 +69,7 @@ export function createDraftReviewHost(app: App): DraftReviewIO {
         async createFolder(path) { await vault.createFolder(path); },
         async deleteFile(path, _disposition, checkpoint) {
             await destructive(path, checkpoint, async () => {
-                if (indexed(path)) await vault.trash(file(path), true);
+                if (indexed(path)) await app.fileManager.trashFile(file(path));
                 else if (!await vault.adapter.trashSystem(path)) await vault.adapter.trashLocal(path);
             }, true);
         },

@@ -59,7 +59,11 @@ async function fixture() {
         writes.push(`process:${path}`); set(path, next, 10); writeHook?.(); return next;
     };
     const remove = async (path: string) => { writes.push(`delete:${path}`); files.delete(path); emit('delete', path); };
-    const app = { vault: {
+    const trashCalls: string[] = [];
+    const app = { fileManager: { trashFile: async (file: { path: string }) => {
+        trashCalls.push(`fileManager:${file.path}`); await atDestructiveOperation?.();
+        trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path);
+    } }, vault: {
         on: (name: string, handler: (entry: { path: string }) => void) => {
             if (!events.has(name)) events.set(name, new Set());
             events.get(name)!.add(handler); return { name, handler };
@@ -71,7 +75,7 @@ async function fixture() {
         create, createBinary: create,
         modifyBinary: async (file: { path: string }, bytes: ArrayBuffer) => { await atDestructiveOperation?.(); writes.push(`binary:${file.path}`); set(file.path, new Uint8Array(bytes), 10); writeHook?.(); },
         createFolder: async (path: string) => { if (files.has(path) || folders.has(path)) throw new Error('exists'); writes.push(`folder:${path}`); folders.add(path); },
-        trash: async (file: { path: string }) => { await atDestructiveOperation?.(); trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path); },
+        trash: async (file: { path: string }) => { trashCalls.push(`vault:${file.path}`); await atDestructiveOperation?.(); trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path); },
         delete: async (file: { path: string }) => { await atDestructiveOperation?.(); await remove(file.path); },
         adapter: {
             stat: async (path: string) => { const value = files.get(path); return value ? { type: 'file', size: value.bytes.length, mtime: value.mtime }
@@ -113,7 +117,7 @@ async function fixture() {
         return { action, draft_id: manifest.draftId, change_id: change.id, revision: change.revision };
     };
     const restart = async () => { const next = new DraftStore(new DraftPersistence(storage, hasher), io, { now: () => 101 }); await next.restore(); return next; };
-    return { files, set, folders, writes, trash,
+    return { files, set, folders, writes, trash, trashCalls,
         atDestructive: (fn: () => Promise<void>) => { atDestructiveOperation = fn; }, disk, storage, io, persistence, store, review, client, tool, registry, call, make, decision,
         agent, previews, approvals, restart, text: (path = 'x.md') => decode(files.get(path)!.bytes),
         approval: (fn: typeof approve) => { approve = fn; }, general: (fn: typeof approveGeneral) => { approveGeneral = fn; },
@@ -121,6 +125,18 @@ async function fixture() {
         onPublish: (fn: () => void) => { beforePublish = fn; }, failDisk: () => { failPublish = true; }, failRead: () => { failRead = true; },
     };
 }
+
+test('indexed deletion acceptance uses file manager and preserves recovery bytes', async t => {
+    const f = await fixture();
+    const draft = await f.make('delete-indexed', [['x.md', { kind: 'deleted', disposition: 'trash' }, 'delete']]);
+    const result = await f.call(f.decision(draft)) as Result;
+    t.is(result.kind, 'accepted');
+    t.deepEqual(f.trashCalls, ['fileManager:x.md']);
+    t.deepEqual([...f.trash.get('x.md')!], [...encode('Baza')]);
+    t.deepEqual(await f.io.stat(parseVaultPath('x.md')), { kind: 'missing' });
+    const backup = 'recoveryBlob' in result ? result.recoveryBlob! : undefined;
+    t.is(backup && decode(await f.persistence.readBlob(draft.draftId, backup.blob, backup.hash, backup.bytes)), 'Baza');
+});
 
 test('P4 public list → accept X → reject Y persists independent decisions', async t => {
     const f = await fixture();
