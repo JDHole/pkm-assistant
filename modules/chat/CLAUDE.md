@@ -236,6 +236,8 @@ dla lintera importów jak deep import w cudzy moduł.
 
 ---
 
+Archiwizacja czyści pole tylko dla niezmienionego szkicu zakładki, która ją rozpoczęła. Reset następuje przed asynchroniczną zmianą zakładki, aby pisanie podczas zapisu wskaźnika nie zostało utracone.
+
 ## Kontrakty i gotchas
 
 ### Fallback sekcji "Na teraz" musi być KLUCZEM API, nie nagłówkiem pliku

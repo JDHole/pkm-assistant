@@ -66,6 +66,7 @@ interface SaveSessionView {
     rollingWindow?: RollingWindowLike;
     tokenTracker?: { clear?(): void };
     resetInputArea?(): void;
+    input_area?: HTMLTextAreaElement;
     _createRollingWindow(): RollingWindowLike;
     render_messages?(): void;
     add_welcome_message?(): void;
@@ -173,128 +174,143 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
     }
 
     const activeTab = view.chatTabs?.find((tab: ChatTabLike) => tab.isActive);
-    const path = activeTab?.sessionPath || agentMemory.activeSessionPath;
-    const messages = view.rollingWindow?.messages || [];
-    if (messages.length === 0) {
-        new Notice(t('modal.save_session.empty'), 3000);
-        view.resetInputArea?.();
-        return;
-    }
-
-    // TS-boundary: `modules/models` czyta agenta własnym, węższym kontraktem
-    // (`ResolverAgentLike`) — to samo zawężenie co w `chat/chat_model.ts`.
-    const activeAgent = (agentManager!.getActiveAgent?.() || null) as ResolverAgentLike;
-    // Memory v3 LLM proposal: hand the workflow the agent + main-role model so it can run
-    // save_session_prompt against transcript+brain.md. Both may be null on cold startup —
-    // workflow falls back to regex proposeNotes() in that case (graceful degradation).
-    let mainModel = null;
-    // /save session (i jego dwaj wolacze - guzik konsolidacji 🧠 oraz SessionCloseModal
-    // "archive") to operacja W TLE wzgledem aktywnej tury czatu tego samego agenta - nie jest
-    // zarejestrowana w StreamingManager jako stream, wiec shouldUseFreshModel(localTurns, globalActiveStreams)
-    // nie ma tu czego policzyc bez dorabiania nowego licznika. Ta sama semantyka co
-    // profile_memory._runArchiveWorkflow: zawsze callerSkipCache=true. Koszt to jedna
-    // konstrukcja adaptera na wywolanie flow (nie per request do API), za to zero ryzyka
-    // dzielenia instancji z aktywna tura czatu w trakcie jej stream().
-    try {
-        mainModel = createModelForRole(plugin, 'main', activeAgent, null, true);
-    } catch {
-        // Model factory may throw when no API key is configured — fall back to regex.
-        mainModel = null;
-    }
-
-    // BEZ `archiveWorkflow` — `applyDecision` zwraca `shouldTriggerArchive`, a przebieg
-    // odpalamy przez `startConsolidationRun`: nieblokujący, z modalem przebiegu i paskiem statusu.
-    // Istnieje jedna droga konsolidacji.
-    const workflow = new SaveSessionWorkflow(agentMemory, {
-        app: view.app,
-        settings: plugin?.settings?.pkmAssistant || {},
-        agent: activeAgent,
-        model: mainModel as unknown as StreamChatModelLike | null,
-    });
-
-    const activeSession = {
-        path,
-        messages,
-        agentName: activeAgent?.name || agentMemory.agentName,
-        artifacts: collectSessionArtifacts(plugin, messages)
+    const input = view.input_area;
+    const initialDraft = input?.value;
+    let draftChanged = false;
+    const onInput = (): void => { draftChanged = true; };
+    input?.addEventListener('input', onInput);
+    const resetOriginalDraft = (): void => {
+        if (view.chatTabs?.find(tab => tab.isActive) === activeTab
+            && view.input_area === input && !draftChanged && input?.value === initialDraft) {
+            view.resetInputArea?.();
+        }
     };
+    try {
+        const path = activeTab?.sessionPath || agentMemory.activeSessionPath;
+        const messages = view.rollingWindow?.messages || [];
+        if (messages.length === 0) {
+            new Notice(t('modal.save_session.empty'), 3000);
+            resetOriginalDraft();
+            return;
+        }
 
-    // UX: modal otwiera się NATYCHMIAST w stanie loading, propozycje dolatują potem.
-    const modal = new SaveSessionModal(view.app, {
-        state: 'loading',
-        agentName: activeSession.agentName,
-        messageCount: messages.length
-    });
-    const decisionPromise = modal.prompt();
+        // TS-boundary: `modules/models` czyta agenta własnym, węższym kontraktem
+        // (`ResolverAgentLike`) — to samo zawężenie co w `chat/chat_model.ts`.
+        const activeAgent = (agentManager!.getActiveAgent?.() || null) as ResolverAgentLike;
+        // Memory v3 LLM proposal: hand the workflow the agent + main-role model so it can run
+        // save_session_prompt against transcript+brain.md. Both may be null on cold startup —
+        // workflow falls back to regex proposeNotes() in that case (graceful degradation).
+        let mainModel = null;
+        // /save session (i jego dwaj wolacze - guzik konsolidacji 🧠 oraz SessionCloseModal
+        // "archive") to operacja W TLE wzgledem aktywnej tury czatu tego samego agenta - nie jest
+        // zarejestrowana w StreamingManager jako stream, wiec shouldUseFreshModel(localTurns, globalActiveStreams)
+        // nie ma tu czego policzyc bez dorabiania nowego licznika. Ta sama semantyka co
+        // profile_memory._runArchiveWorkflow: zawsze callerSkipCache=true. Koszt to jedna
+        // konstrukcja adaptera na wywolanie flow (nie per request do API), za to zero ryzyka
+        // dzielenia instancji z aktywna tura czatu w trakcie jej stream().
+        try {
+            mainModel = createModelForRole(plugin, 'main', activeAgent, null, true);
+        } catch {
+            // Model factory may throw when no API key is configured — fall back to regex.
+            mainModel = null;
+        }
 
-    // „Anuluj" anuluje — wyścig decyzji usera ze strzałem do modelu + AbortSignal.
-    const prepared = await prepareWithCancel({ workflow, activeSession, modal, decisionPromise, plugin });
-    if (prepared.cancelled) {
-        view.resetInputArea?.();
-        return;
-    }
-
-    const prep = prepared.prep;
-    // Koszt strzału propozycji księgujemy TU, zaraz po udanej analizie — tokeny spaliły się
-    // niezależnie od tego, czy user zatwierdzi notatki, czy kliknie „Anuluj" w oknie przeglądu.
-    // Jedno wywołanie LLM = jeden wpis, więc (inaczej niż w konsolidacji) nie ma delty do liczenia.
-    logSaveSessionCost({ agentMemory, agentName: activeSession.agentName, model: mainModel, usage: prep.usage });
-    modal.setProposals({
-        agentName: activeSession.agentName,
-        messageCount: messages.length,
-        notes: prep.notes,
-        brainUpdates: prep.brainUpdates,
-        llmDriven: prep.llmDriven
-    });
-
-    const decision = await decisionPromise;
-    const result = await workflow.applyDecision(activeSession, prep, decision);
-
-    if (result.cancelled) {
-        view.resetInputArea?.();
-        return;
-    }
-
-    if (resetAfterArchive && path) {
-        plugin.subTaskRegistry?.pruneSession?.(path);
-        view._renderSubTaskStrip?.();
-    }
-    await applyPostArchiveAction(view, plugin, agentMemory, result, path, resetAfterArchive);
-    // `applyDecision` (modules/memory) nie przerywa się na padzie
-    // jednej notatki — reszta pętli (rebuildBrainIndex, archiveActiveSession) dochodzi do końca,
-    // a padnięte pozycje wracają w `result.noteFailures`. Bezwarunkowy Notice „gotowe" zamieniałby
-    // tę widoczną awarię w CICHĄ utratę notatki, którą user właśnie zatwierdził w modalu — więc
-    // niepusta lista dostaje WŁASNY, dłuższy Notice zamiast wspólnego „done".
-    if (result.noteFailures && result.noteFailures.length > 0) {
-        const names = result.noteFailures.map(f => f.name || '(bez nazwy)').join(', ');
-        new Notice(t('modal.save_session.notes_failed', { count: result.noteFailures.length, names }), 8000);
-    } else {
-        new Notice(t('modal.save_session.done'), 4000);
-    }
-    if (result.shouldTriggerArchive) {
-        // Zamiast notice'a „Czas na konsolidację pamięci" PO cichej kaskadzie — realny
-        // przebieg z modalem, paskiem statusu i notice'em startowym PRZED pierwszym strzałem.
-        startConsolidationRun({
-            plugin,
+        // BEZ `archiveWorkflow` — `applyDecision` zwraca `shouldTriggerArchive`, a przebieg
+        // odpalamy przez `startConsolidationRun`: nieblokujący, z modalem przebiegu i paskiem statusu.
+        // Istnieje jedna droga konsolidacji.
+        const workflow = new SaveSessionWorkflow(agentMemory, {
             app: view.app,
-            agentMemory: agentMemory as unknown as ConsolidationAgentMemory,
-            agent: activeAgent,
-            model: mainModel,
             settings: plugin?.settings?.pkmAssistant || {},
-            // Trigger automatyczny (próg / idle-scheduler). Pusty plan = cisza, nie notice
-            // po każdym zapisie sesji.
-            source: 'auto',
-            // Konsolidacja opcjonalna: które gałęzie planu wpuścić — polityka DWÓCH wyłączników
-            // usera (`resolveAutoConsolidationPolicy`), policzona razem z `shouldTriggerArchive`
-            // w `SaveSessionWorkflow.applyDecision`. Ręczny guzik w profilu agenta NIE przechodzi
-            // przez to wywołanie — zostaje bez `include`, czyli pełny plan.
-            include: result.consolidationInclude,
-        }).catch((e: unknown) => {
-            log.error('SaveSession', `Start konsolidacji padł: ${(e as ErrLike)?.message || String(e)}`);
-            new Notice(t('memory.consolidation.notice_error', { reason: (e as ErrLike)?.message || String(e) }), 6000);
+            agent: activeAgent,
+            model: mainModel as unknown as StreamChatModelLike | null,
         });
+
+        const activeSession = {
+            path,
+            messages,
+            agentName: activeAgent?.name || agentMemory.agentName,
+            artifacts: collectSessionArtifacts(plugin, messages)
+        };
+
+        // UX: modal otwiera się NATYCHMIAST w stanie loading, propozycje dolatują potem.
+        const modal = new SaveSessionModal(view.app, {
+            state: 'loading',
+            agentName: activeSession.agentName,
+            messageCount: messages.length
+        });
+        const decisionPromise = modal.prompt();
+
+        // „Anuluj" anuluje — wyścig decyzji usera ze strzałem do modelu + AbortSignal.
+        const prepared = await prepareWithCancel({ workflow, activeSession, modal, decisionPromise, plugin });
+        if (prepared.cancelled) {
+            resetOriginalDraft();
+            return;
+        }
+
+        const prep = prepared.prep;
+        // Koszt strzału propozycji księgujemy TU, zaraz po udanej analizie — tokeny spaliły się
+        // niezależnie od tego, czy user zatwierdzi notatki, czy kliknie „Anuluj" w oknie przeglądu.
+        // Jedno wywołanie LLM = jeden wpis, więc (inaczej niż w konsolidacji) nie ma delty do liczenia.
+        logSaveSessionCost({ agentMemory, agentName: activeSession.agentName, model: mainModel, usage: prep.usage });
+        modal.setProposals({
+            agentName: activeSession.agentName,
+            messageCount: messages.length,
+            notes: prep.notes,
+            brainUpdates: prep.brainUpdates,
+            llmDriven: prep.llmDriven
+        });
+
+        const decision = await decisionPromise;
+        const result = await workflow.applyDecision(activeSession, prep, decision);
+
+        if (result.cancelled) {
+            resetOriginalDraft();
+            return;
+        }
+
+        if (resetAfterArchive && path) {
+            plugin.subTaskRegistry?.pruneSession?.(path);
+            view._renderSubTaskStrip?.();
+        }
+        resetOriginalDraft();
+        await applyPostArchiveAction(view, plugin, agentMemory, result, path, resetAfterArchive);
+        // `applyDecision` (modules/memory) nie przerywa się na padzie
+        // jednej notatki — reszta pętli (rebuildBrainIndex, archiveActiveSession) dochodzi do końca,
+        // a padnięte pozycje wracają w `result.noteFailures`. Bezwarunkowy Notice „gotowe" zamieniałby
+        // tę widoczną awarię w CICHĄ utratę notatki, którą user właśnie zatwierdził w modalu — więc
+        // niepusta lista dostaje WŁASNY, dłuższy Notice zamiast wspólnego „done".
+        if (result.noteFailures && result.noteFailures.length > 0) {
+            const names = result.noteFailures.map(f => f.name || '(bez nazwy)').join(', ');
+            new Notice(t('modal.save_session.notes_failed', { count: result.noteFailures.length, names }), 8000);
+        } else {
+            new Notice(t('modal.save_session.done'), 4000);
+        }
+        if (result.shouldTriggerArchive) {
+            // Zamiast notice'a „Czas na konsolidację pamięci" PO cichej kaskadzie — realny
+            // przebieg z modalem, paskiem statusu i notice'em startowym PRZED pierwszym strzałem.
+            startConsolidationRun({
+                plugin,
+                app: view.app,
+                agentMemory: agentMemory as unknown as ConsolidationAgentMemory,
+                agent: activeAgent,
+                model: mainModel,
+                settings: plugin?.settings?.pkmAssistant || {},
+                // Trigger automatyczny (próg / idle-scheduler). Pusty plan = cisza, nie notice
+                // po każdym zapisie sesji.
+                source: 'auto',
+                // Konsolidacja opcjonalna: które gałęzie planu wpuścić — polityka DWÓCH wyłączników
+                // usera (`resolveAutoConsolidationPolicy`), policzona razem z `shouldTriggerArchive`
+                // w `SaveSessionWorkflow.applyDecision`. Ręczny guzik w profilu agenta NIE przechodzi
+                // przez to wywołanie — zostaje bez `include`, czyli pełny plan.
+                include: result.consolidationInclude,
+            }).catch((e: unknown) => {
+                log.error('SaveSession', `Start konsolidacji padł: ${(e as ErrLike)?.message || String(e)}`);
+                new Notice(t('memory.consolidation.notice_error', { reason: (e as ErrLike)?.message || String(e) }), 6000);
+            });
+        }
+    } finally {
+        input?.removeEventListener('input', onInput);
     }
-    view.resetInputArea?.();
 }
 
 /**

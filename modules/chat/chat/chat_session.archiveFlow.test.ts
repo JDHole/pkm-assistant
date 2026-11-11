@@ -70,11 +70,13 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
         showCrystalNotice() {},
     };
     let analysis = false;
-    let cancelAt: false | true | 'model' | 'retry' = false;
+    let cancelAt: false | true | 'model' | 'retry' | 'retry-success' | 'hold-analysis' | 'hold-decision' | 'hold-retry' = false;
     let answer = 'Stara odpowiedź';
+    const paused = deferred<void>(), resume = deferred<void>();
     models.setChatModelFactory(() => ({ providerId: 'openai', stream(_payload: unknown, cb: { done(result: unknown): void; error(error: Error): void }) {
+        if (analysis && cancelAt === 'hold-analysis') { paused.resolve(); void resume.promise.then(() => cb.done({ choices: [{ message: { role: 'assistant', content: '{\"new_notes\":[],\"na_teraz_updates\":[]}' } }] })); return; }
         if (analysis && cancelAt === 'model') { decision.resolve({ action: 'cancel', notes: [], brainUpdates: [] }); return; }
-        if (analysis && cancelAt === 'retry') { cb.error(Object.assign(new Error('test analysis stalled'), { code: 'stream_stalled' })); return; }
+        if (analysis && (cancelAt === 'retry' || cancelAt === 'retry-success' || cancelAt === 'hold-retry')) { if (cancelAt === 'retry-success') cancelAt = false; cb.error(Object.assign(new Error('test analysis stalled'), { code: 'stream_stalled' })); return; }
         cb.done({ choices: [{ message: { role: 'assistant', content: analysis ? '{"new_notes":[],"na_teraz_updates":[]}' : answer } }] });
     } }) as never);
     clearModelCache();
@@ -94,8 +96,14 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
         plugin.mcpClient.sessionWriteConsent.grant(oldPath, 'Note.md');
         const owner = { agentName: 'Mira', sessionPath: oldPath, sessionEpoch: oldEpoch! };
         registry.createThread({ threadId: 'old-thread', name: 'worker', owner, origin: owner, config: {} });
-        registry.create({ id: 'old-run', name: 'worker', agentName: 'Mira', threadId: 'old-thread', origin: owner });
+        const finished = registry.create({ id: 'old-run', name: 'worker', agentName: 'Mira', threadId: 'old-thread', origin: owner });
+        registry.finish(finished, { text: 'Zachowany wynik suba', toolsUsed: [], durationMs: 0, usage: null });
         registry.endRun('old-thread', { successful: true, transcript: [{ role: 'assistant', content: 'Zachowany wynik suba' }] });
+        registry.create({ id: 'running-run', name: 'running', agentName: 'Mira', origin: owner });
+        const otherOwner = { agentName: 'Mira', sessionPath: 'other-session.md', sessionEpoch: 'other-epoch' };
+        const other = registry.create({ id: 'other-run', name: 'other', agentName: 'Mira', origin: otherOwner });
+        registry.finish(other, { text: 'Wynik innej sesji', toolsUsed: [], durationMs: 0, usage: null });
+        view._renderSubTaskStrip();
     }
     if (twoTabs) {
         await memory.startNewSession();
@@ -121,8 +129,13 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
         if (cancelAt === true) decision.resolve({ action: 'cancel', notes: [], brainUpdates: [] });
         return decision.promise;
     };
-    SaveSessionModal.prototype.setProposals = function () { decision.resolve({ action, notes: [], brainUpdates: [] }); };
+    SaveSessionModal.prototype.setProposals = function () {
+        if (cancelAt === 'hold-decision') { paused.resolve(); void resume.promise.then(() => decision.resolve({ action, notes: [], brainUpdates: [] })); return; }
+        decision.resolve({ action, notes: [], brainUpdates: [] });
+    };
     SaveSessionModal.prototype.awaitRetry = function () {
+        if (cancelAt === 'hold-retry') { paused.resolve(); return resume.promise.then(() => { cancelAt = false; }); }
+        if (cancelAt === false) return Promise.resolve();
         decision.resolve({ action: 'cancel', notes: [], brainUpdates: [] });
         return new Promise<void>(() => {});
     };
@@ -140,7 +153,7 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
     let newSession: Promise<void> = Promise.resolve();
     const handleNew = view.handleNewSession.bind(view);
     view.handleNewSession = (...args) => { newSession = handleNew(...args); return newSession; };
-    return { view, memory, adapter, files, first, oldPath, oldEpoch, registry, consent: plugin.mcpClient.sessionWriteConsent,
+    return { view, memory, adapter, files, first, oldPath, oldEpoch, registry, paused, resume, consent: plugin.mcpClient.sessionWriteConsent,
         async send() {
             view.input_area.value = 'Nowe pytanie';
             view.send_button.dispatchEvent(new Event('click'));
@@ -197,10 +210,32 @@ for (const loading of [true, false, 'model', 'retry'] as const) test.serial(`P4:
     t.deepEqual(await f.activeFiles(), [basename]);
     t.is(f.view._activeTodoState?.title, 'Stare zadania');
     t.true(f.consent.has(f.oldPath!, 'Note.md'));
-    t.deepEqual(f.registry.list().map(task => task.id), ['old-run']);
+    t.deepEqual(f.registry.list().map(task => task.id), ['old-run', 'running-run', 'other-run']);
+    t.deepEqual(f.registry.list().map(task => task.status), ['done', 'running', 'done']);
     t.is(f.registry.getThread('old-thread')?.phase, 'idle');
     await assertSelection(t, f, basename);
     t.deepEqual((await f.memory.loadActiveSession(f.oldPath!)).messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
+});
+
+test.serial('F5: zatwierdzona archiwizacja usuwa tylko zakończony bieg tej sesji z rejestru i paska', async t => {
+    const f = await fixture(t);
+    const names = () => {
+        const walk = (el: Element): string[] => [ ...(el.className.split(' ').includes('pkm-substrip__name') ? [el.textContent ?? ''] : []), ...Array.from(el.children).flatMap(walk) ];
+        return walk(f.view._subStripContainer!);
+    };
+    t.deepEqual(names(), ['worker', 'running']);
+    t.deepEqual(f.registry.list().map(task => [task.id, task.status]), [['old-run', 'done'], ['running-run', 'running'], ['other-run', 'done']]);
+    await f.run('archive');
+    t.deepEqual(f.registry.list().map(task => [task.id, task.status]), [['running-run', 'running'], ['other-run', 'done']]);
+    t.deepEqual(names(), ['running']);
+});
+
+test.serial('F5: udane ponowienie analizy archiwizuje sesję', async t => {
+    const f = await fixture(t);
+    await f.run('archive_new', false, 'retry-success');
+    await assertSelection(t, f, basename);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsArchive + '/' + basename)).messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
+    t.deepEqual(f.registry.list().map(task => task.id), ['running-run', 'other-run']);
 });
 
 for (const direct of [false, true]) test.serial(`P4: archive_close direct=${direct} z dwóch zakładek zachowuje drugą rozmowę`, async t => {
@@ -305,7 +340,7 @@ test.serial(`P4: archive_new po await ${stage} zachowuje właściciela`, async t
             : stage === 'archive-state' ? path === f.memory.paths.state && value.includes('"active_sessions": []')
             : stage === 'clear-pointer' ? path === f.memory.paths.activeSessionMeta && value === '{}'
             : stage === 'clear-before-new' ? path === f.memory.paths.activeSessionMeta && value === '{}' && cleared === 2
-            : stage === 'new-file' ? path.startsWith(f.memory.paths.sessionsActive + '/') && value.includes('type: active_session')
+            : stage === 'new-file' ? cleared >= 2 && path.startsWith(f.memory.paths.sessionsActive + '/') && value.includes('type: active_session')
             : stage === 'new-state' ? path === f.memory.paths.state && value.includes(basename)
             : path === f.memory.paths.activeSessionMeta && value.includes(basename);
         if (!held && matches) { held = true; entered.resolve(); await release.promise; }
@@ -314,15 +349,56 @@ test.serial(`P4: archive_new po await ${stage} zachowuje właściciela`, async t
     const run = f.run('archive_new');
     try {
         await Promise.race([entered.promise, run.then(() => { throw new Error(`Nie osiągnięto ${stage}`); })]);
+        f.view.input_area.value = 'Szkic podczas archiwizacji';
+        f.view.input_area.dispatchEvent(new Event('input'));
     } finally { release.resolve(); }
     await run;
+    t.is(f.view.input_area.value, 'Szkic podczas archiwizacji');
     await assertSelection(t, f, basename);
     await f.send();
     await assertSelection(t, f, basename);
     t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
 });
 
-test.serial('P4: archive_close czeka na zapis wyboru następnej zakładki', async t => {
+for (const direct of [false, true])
+for (const stage of ['hold-analysis', 'hold-decision', 'hold-retry'] as const)
+test.serial(`F5: archive direct=${direct} zachowuje szkic podczas ${stage}`, async t => {
+    const f = await fixture(t);
+    const run = f.run('archive', direct, stage);
+    try {
+        await Promise.race([f.paused.promise, run.then(() => { throw new Error(`Nie osiągnięto ${stage}`); })]);
+        f.view.input_area.value = 'Szkic podczas analizy lub decyzji';
+        f.view.input_area.dispatchEvent(new Event('input'));
+    } finally { f.resume.resolve(); }
+    await run;
+    t.is(f.view.input_area.value, 'Szkic podczas analizy lub decyzji');
+});
+
+for (const direct of [false, true])
+for (const stage of ['archive-file', 'archive-state', 'clear-pointer'] as const)
+test.serial(`F5: archive direct=${direct} zachowuje szkic podczas ${stage}`, async t => {
+    const f = await fixture(t);
+    const entered = deferred<void>(), release = deferred<void>();
+    const write = f.adapter.write;
+    let held = false;
+    f.adapter.write = async (path, value) => {
+        const matches = stage === 'archive-file' ? path.startsWith(f.memory.paths.sessionsArchive + '/')
+            : stage === 'archive-state' ? path === f.memory.paths.state && value.includes('"active_sessions": []')
+            : path === f.memory.paths.activeSessionMeta && value === '{}';
+        if (!held && matches) { held = true; entered.resolve(); await release.promise; }
+        await write(path, value);
+    };
+    const run = f.run('archive', direct);
+    try {
+        await Promise.race([entered.promise, run.then(() => { throw new Error(`Nie osiągnięto ${stage}`); })]);
+        f.view.input_area.value = 'Szkic podczas zwykłej archiwizacji';
+        f.view.input_area.dispatchEvent(new Event('input'));
+    } finally { release.resolve(); }
+    await run;
+    t.is(f.view.input_area.value, 'Szkic podczas zwykłej archiwizacji');
+});
+
+for (const direct of [false, true]) test.serial(`F5: archive_close direct=${direct} zachowuje szkic następnej zakładki podczas zapisu`, async t => {
     const f = await fixture(t, true);
     const entered = deferred<void>(), release = deferred<void>();
     const write = f.adapter.write;
@@ -331,13 +407,16 @@ test.serial('P4: archive_close czeka na zapis wyboru następnej zakładki', asyn
         await write(path, value);
     };
     let finished = false;
-    const run = f.run('archive_close').then(() => { finished = true; });
+    const run = f.run('archive_close', direct).then(() => { finished = true; });
     try {
         await Promise.race([entered.promise, run.then(() => { throw new Error('Nie osiągnięto zapisu wyboru'); })]);
         await new Promise<void>(resolve => setImmediate(resolve));
         t.is(finished, false);
+        f.view.input_area.value = 'Szkic wpisany w drugiej zakładce podczas zapisu';
+        f.view.input_area.dispatchEvent(new Event('input'));
     } finally { release.resolve(); }
     await run;
+    t.is(f.view.input_area.value, 'Szkic wpisany w drugiej zakładce podczas zapisu');
     await assertSelection(t, f, 'mira_2026-11-11_06-23_2.md');
     t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie drugiej zakładki', 'Odpowiedź drugiej zakładki']);
 });
