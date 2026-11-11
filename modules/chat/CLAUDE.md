@@ -897,7 +897,7 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
   `workflow.applyDecision()` (czyli przed `archiveActiveSession`, które dla plain `archive` samo
   zeruje `activeSessionPath` - odczyt PO fakcie dawałby już `null`). Powód obu: nazwa pliku sesji
   ma rozdzielczość MINUTOWĄ i po
-  archive/discard WRACA DO PULI - bez czyszczenia druga „nowa rozmowa" tego samego agenta w tej
+  discard WRACA DO PULI (po archive rezerwuje ją archiwum) - bez czyszczenia druga „nowa rozmowa" tego samego agenta w tej
   samej minucie mogłaby dostać tę samą nazwę i odziedziczyć cudzą zgodę „nie pytaj więcej".
   Wątek biegnący dostaje zamknięcie po `endRun`. `_closeActiveTab` zamyka kolejkę `queued` tej zakładki;
   biegi zatrzymuje osobno, a wątków `idle` ani zgody nie zamyka.
@@ -1943,3 +1943,15 @@ Asynchroniczne `/save`, `/memory` i `/compress` czyszczą pole tylko przy tej sa
 aktywnej zakładce i niezmienionej treści komendy. Kontynuacja po narzędziu sprawdza
 aktywną zakładkę przed każdym malowaniem po I/O; kafelek maszyny powstaje poza
 widocznym kontenerem i jest dołączany po ponownej kontroli. Tura nadal pracuje w tle.
+
+
+### F4 — nazwa po archiwizacji
+
+Nowa sesja omija nazwy istniejące również w archiwum. Przy `archive_new` w tej samej
+minucie zwykle dostaje `_2.md`; gdy stare active kolidowało już z archiwum, archiwizacja
+może zająć `_2.md`, a nowa sesja dostaje `_3.md`. Zakładka zawsze przyjmuje zwróconą
+ścieżkę i epokę pamięci. Nie należy zakładać zgodności basename active i archive.
+Testy P4 w `chat_session.archiveFlow.test.ts` nadal sprawdzają pojedynczy nowy plik
+i wszystkie asercje tożsamości; oczekiwana nazwa zmienia się na `_2.md`.
+F4 dokłada dwie kolejne rozmowy, dwa odrzucenia, kolizję zastaną na dysku i kontynuację
+archiwum z sufiksem, z prawdziwymi ChatView, AgentMemory i StateManager.

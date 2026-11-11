@@ -846,7 +846,7 @@ Flow:
     zapisu i "stary dysk z duplikatami").
 - ⚠️ **Kolizja nazw notatek/sesji korzysta z jednej wspólnej pętli.** `findFreeCollisionPath`
   (`collisionSuffix.ts`) jest wołana z każdego miejsca, które tworzy plik pod nazwą, jaka może
-  już istnieć (`startActiveSession`, `discardActiveSession`, `saveSession`, `writeBrainNote`,
+  już istnieć (`startActiveSession`, `archiveActiveSession`, `discardActiveSession`, `saveSession`, `writeBrainNote`,
   `writePendingRescue`, `archiveBrainNote`, dedup w `ArchiveWorkflow`) - dokłada sufiks
   `_2`.._50` przy kolizji i BLOKUJE (rzuca, nie zapisuje) po wyczerpaniu prób, zamiast ciszej
   zapisać nad nazwą, o której właśnie stwierdzono "zajęta". Pętla wchodzi w kolejną iterację
@@ -1103,3 +1103,31 @@ wiadomość była już w RAM. Zapis automatyczny/zamykania bierze snapshot po B.
 API pamięci pozostaje bez zmian. Nie dodano readbacku każdego zapisu ani obsługi
 niepewnego/częściowego I/O; to ograniczenie jest odrębne od odraczania Stopu.
 Dowody: F6 w `../chat/chat/chat_streaming.sendTab.test.ts`, ze świeżym czytnikiem.
+
+
+### F4 — kolizje nazw sesji przy archiwizacji
+
+`archiveActiveSession` wybiera wolny cel przez `findFreeCollisionPath` (`_2`…`_50`;
+niepewny odczyt oznacza zajęte, wyczerpanie rzuca przed zapisem/usunięciem).
+Zwraca rzeczywistą ścieżkę archiwum; nie wolno wyprowadzać jej z basename źródła.
+`SaveSessionWorkflow.archivedPath` przekazuje ten wynik. `markArchived` nadal dostaje
+nazwę ŹRÓDŁA do usunięcia z `active_sessions`, a licznik rośnie po udanym przeniesieniu.
+Nazwa nowej aktywnej sesji (`startActiveSession` ORAZ tworzący `saveSession`) musi być
+wolna w OBU katalogach: `active/` i `archive/`. Wewnętrzny helper przyjmuje dodatkowe
+katalogi do sprawdzenia, bez zmiany kolejności sufiksów ani publicznego API modułu.
+
+Przeniesienia blokują najpierw źródło, potem katalog docelowy we współdzielonej kolejce
+adaptera. Sam lock źródła/basename nie wystarcza: `x.md` po kolizji może wybrać `x_2.md`,
+o które konkuruje inne źródło. Archiwizacja trzyma lock katalogu przez probe, write,
+readback, remove i bookkeeping stanu/wskaźnika. `.discarded/` serializuje dobór nazwy
+oraz kopiowanie/usunięcie. Migracja płaskich `sessions/*.md` dzieli lock archiwum;
+zajęty cel nadal POMIJA, zachowując źródło (stare referencje L1 mogą używać jego nazwy).
+Restore i „kontynuuj” tylko czytają plik, nie przenoszą archiwum pod stałą nazwę.
+Nie jest to blokada między procesami ani różnymi adapterami synchronizacji.
+
+L1 i jego `sessions:`/`covered_by_l1`, retencja, wyszukiwanie oraz profil biorą nazwy
+ze spisu rzeczywistych plików archiwum. Indeks brain i notatki nie generują backlinku
+archiwum z nazwy aktywnej sesji. `.active_session.json` pozostaje `{path, updated}`;
+epoka jest w pliku wskazanym przez `path`, nie w nowym polu wskaźnika czy `.state.json`.
+Testy: `AgentMemory.archiveCollision.test.ts` oraz F4 w
+`../chat/chat/chat_session.archiveFlow.test.ts` (produkcyjne wejścia i nasłuchy).

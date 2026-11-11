@@ -6,6 +6,7 @@ import { TokenTracker, SessionWriteConsent } from '../../../core/index.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
 import { setLocale } from '../../../core/i18n/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
+import { OpenSessionModal } from '../OpenSessionModal.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
 import { __test__ as models, clearModelCache } from '../../models/modelResolver.js';
 import type { ChatViewLike } from './chatViewShape.js';
@@ -123,7 +124,7 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
     type Decision = Awaited<ReturnType<SaveSessionModal['prompt']>>;
     let choice: 'archive' | 'discard' | 'cancel' = 'archive';
     let action: Decision['action'] = 'archive_new';
-    const decision = deferred<Decision>();
+    let decision = deferred<Decision>();
     SessionCloseModal.prototype.prompt = async () => ({ choice });
     SaveSessionModal.prototype.prompt = function () {
         if (cancelAt === true) decision.resolve({ action: 'cancel', notes: [], brainUpdates: [] });
@@ -161,6 +162,7 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
         },
         activeFiles: async () => (await adapter.list(memory.paths.sessionsActive)).files.map(p => p.split('/').pop()).sort(),
         async run(next: Decision['action'], direct: boolean | 'memory' | 'consolidate-button' = false, loading: typeof cancelAt = false, firstChoice: typeof choice = 'archive') {
+            decision = deferred<Decision>();
             action = next; cancelAt = loading; choice = firstChoice; analysis = true;
             if (direct === true || direct === 'memory') {
                 await view.slashCommands.execute(direct === true ? '/save session' : '/memory', { view, plugin: view.plugin });
@@ -179,24 +181,25 @@ async function fixture(t: import('ava').ExecutionContext, twoTabs = false, empty
 }
 
 const basename = 'mira_2026-11-11_06-23.md';
+const nextBasename = 'mira_2026-11-11_06-23_2.md';
 
 for (const direct of [false, true]) test.serial(`P4: archive_new direct=${direct} → pierwsza wiadomość zostaje w jednym pliku`, async t => {
     const f = await fixture(t);
     await f.run('archive_new', direct);
-    t.deepEqual(await f.activeFiles(), [basename]);
-    t.is(f.first.sessionPath, f.memory.paths.sessionsActive + '/' + basename, 'nowa sesja pozostaje przypięta do zakładki');
-    t.is(f.memory.activeSessionPath, f.memory.paths.sessionsActive + '/' + basename);
+    t.deepEqual(await f.activeFiles(), [nextBasename]);
+    t.is(f.first.sessionPath, f.memory.paths.sessionsActive + '/' + nextBasename, 'nowa sesja pozostaje przypięta do zakładki');
+    t.is(f.memory.activeSessionPath, f.memory.paths.sessionsActive + '/' + nextBasename);
     t.is(f.first.sessionEpoch, f.memory.sessionEpoch);
     t.not(f.first.sessionEpoch, f.oldEpoch);
-    await assertSelection(t, f, basename);
+    await assertSelection(t, f, nextBasename);
     t.is(f.view._activeTodoState, null);
     t.is(f.view._bottomBarMode, 'input');
     t.false(f.consent.has(f.oldPath!, 'Note.md'));
     const path = f.first.sessionPath!;
     await f.send();
     t.deepEqual((await f.memory.loadActiveSession(path)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
-    t.deepEqual(await f.activeFiles(), [basename]);
-    await assertSelection(t, f, basename);
+    t.deepEqual(await f.activeFiles(), [nextBasename]);
+    await assertSelection(t, f, nextBasename);
     t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsArchive + '/' + basename)).messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
 });
 
@@ -233,7 +236,7 @@ test.serial('F5: zatwierdzona archiwizacja usuwa tylko zakończony bieg tej sesj
 test.serial('F5: udane ponowienie analizy archiwizuje sesję', async t => {
     const f = await fixture(t);
     await f.run('archive_new', false, 'retry-success');
-    await assertSelection(t, f, basename);
+    await assertSelection(t, f, nextBasename);
     t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsArchive + '/' + basename)).messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
     t.deepEqual(f.registry.list().map(task => task.id), ['running-run', 'other-run']);
 });
@@ -317,12 +320,12 @@ for (const empty of [false, true]) test.serial(`P4: nowa rozmowa empty=${empty},
     t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
 });
 
-test.serial('P4: archive_new → wysłanie nie tworzy pliku _2', async t => {
+test.serial('P4: archive_new → wysłanie zostaje w pliku _2 i nie tworzy _3', async t => {
     const f = await fixture(t);
     await f.run('archive_new');
     await f.send();
-    t.deepEqual(await f.activeFiles(), ['mira_2026-11-11_06-23.md']);
-    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/' + basename)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
+    t.deepEqual(await f.activeFiles(), [nextBasename]);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/' + nextBasename)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
 });
 
 // Delay every storage boundary in the post-decision phase. All go through the same
@@ -341,8 +344,8 @@ test.serial(`P4: archive_new po await ${stage} zachowuje właściciela`, async t
             : stage === 'clear-pointer' ? path === f.memory.paths.activeSessionMeta && value === '{}'
             : stage === 'clear-before-new' ? path === f.memory.paths.activeSessionMeta && value === '{}' && cleared === 2
             : stage === 'new-file' ? cleared >= 2 && path.startsWith(f.memory.paths.sessionsActive + '/') && value.includes('type: active_session')
-            : stage === 'new-state' ? path === f.memory.paths.state && value.includes(basename)
-            : path === f.memory.paths.activeSessionMeta && value.includes(basename);
+            : stage === 'new-state' ? path === f.memory.paths.state && value.includes(nextBasename)
+            : path === f.memory.paths.activeSessionMeta && value.includes(nextBasename);
         if (!held && matches) { held = true; entered.resolve(); await release.promise; }
         await write(path, value);
     };
@@ -354,9 +357,9 @@ test.serial(`P4: archive_new po await ${stage} zachowuje właściciela`, async t
     } finally { release.resolve(); }
     await run;
     t.is(f.view.input_area.value, 'Szkic podczas archiwizacji');
-    await assertSelection(t, f, basename);
+    await assertSelection(t, f, nextBasename);
     await f.send();
-    await assertSelection(t, f, basename);
+    await assertSelection(t, f, nextBasename);
     t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
 });
 
@@ -428,9 +431,9 @@ test.serial(`P4: wejście ${entry} → ${action} respektuje decyzję`, async t =
     await f.run(action, entry);
     switch (action) {
         case 'archive_new':
-            await assertSelection(t, f, basename);
+            await assertSelection(t, f, nextBasename);
             await f.send();
-            await assertSelection(t, f, basename);
+            await assertSelection(t, f, nextBasename);
             t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
             t.is(f.view._activeTodoState, null);
             break;
@@ -457,4 +460,54 @@ test.serial(`P4: wejście ${entry} → ${action} respektuje decyzję`, async t =
             throw new Error(`Unexpected action: ${exhaustive}`);
         }
     }
+});
+
+// F4: the second conversation must survive beside the first in the frozen minute.
+for (const [action, direct] of [['archive', false], ['archive_new', false], ['archive_new', true]] as const)
+test.serial(`F4: two conversations via ${action} direct=${direct} preserve both archives and identity`, async t => {
+    const f = await fixture(t);
+    await f.run(action, direct);
+    await f.send();
+    const secondEpoch = f.memory.sessionEpoch;
+    await f.run('archive', false);
+    const archive = f.memory.paths.sessionsArchive;
+    t.deepEqual((await f.adapter.list(archive)).files.sort(), [
+        archive + '/mira_2026-11-11_06-23.md', archive + '/mira_2026-11-11_06-23_2.md',
+    ], 'Both conversations must have their own archive file');
+    t.deepEqual((await f.memory.loadSession(archive + '/mira_2026-11-11_06-23.md')).messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
+    t.deepEqual((await f.memory.loadSession(archive + '/mira_2026-11-11_06-23_2.md')).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
+    t.like(JSON.parse(await f.adapter.read(f.memory.paths.state)), { active_sessions: [], last_used: null, archived_since_last_consolidation: 2 });
+    await f.send();
+    await assertSelection(t, f, 'mira_2026-11-11_06-23_3.md');
+    t.not(f.memory.sessionEpoch, secondEpoch);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
+});
+
+test.serial('F4: two Discards in one minute preserve both conversations', async t => {
+    const f = await fixture(t);
+    await f.run('cancel', false, false, 'discard');
+    await f.send();
+    await f.run('cancel', false, false, 'discard');
+    const dir = f.memory.paths.sessionsActive + '/.discarded';
+    t.deepEqual((await f.adapter.list(dir)).files.sort(), [dir + '/mira_2026-11-11_06-23.md', dir + '/mira_2026-11-11_06-23_2.md']);
+    t.deepEqual((await f.memory.loadActiveSession(dir + '/mira_2026-11-11_06-23.md')).messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
+    t.deepEqual((await f.memory.loadActiveSession(dir + '/mira_2026-11-11_06-23_2.md')).messages.map(m => m.content), ['Nowe pytanie', 'Nowa odpowiedź']);
+    t.like(JSON.parse(await f.adapter.read(f.memory.paths.state)), { active_sessions: [], archived_since_last_consolidation: 0 });
+});
+
+
+test.serial('F4: legacy collision archive_new binds the real new identity and continues the suffixed archive', async t => {
+    const f = await fixture(t);
+    const original = f.memory.paths.sessionsArchive + '/' + basename;
+    f.files.set(original, 'Starsze archiwum — zachowaj bajty');
+    await f.run('archive_new');
+    t.is(await f.adapter.read(original), 'Starsze archiwum — zachowaj bajty');
+    await assertSelection(t, f, 'mira_2026-11-11_06-23_3.md');
+    t.not(f.first.sessionEpoch, f.oldEpoch);
+    const prompt = OpenSessionModal.prototype.prompt;
+    t.teardown(() => { OpenSessionModal.prototype.prompt = prompt; });
+    OpenSessionModal.prototype.prompt = async () => 'continue';
+    await f.view.handleLoadSession(f.memory.paths.sessionsArchive + '/mira_2026-11-11_06-23_2.md');
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Stare pytanie', 'Stara odpowiedź']);
+    t.is(await f.adapter.read(original), 'Starsze archiwum — zachowaj bajty');
 });

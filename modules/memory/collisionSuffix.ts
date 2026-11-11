@@ -46,6 +46,7 @@ const MAX_SUFFIX = 50;
  * @param errorPrefix - prefiks komunikatu wyjątku po wyczerpaniu prób, np.
  *   `"writeBrainNote: brak wolnej nazwy notatki"` - do niego dokleja się ` w ${dir}`, żeby każde
  *   z sześciu miejsc zachowało DOKŁADNIE swój dawny tekst błędu (niektóre testy go asertują).
+ * @param otherDirs - dodatkowe katalogi rezerwujące te same nazwy (active + archive)
  * @throws gdy wszystkie `MAX_SUFFIX` kandydatów są zajęte (albo `probeFile` nie potrafi
  *   potwierdzić „nie ma" - fail-closed)
  */
@@ -54,15 +55,18 @@ export async function findFreeCollisionPath(
     dir: string,
     baseFilename: string,
     errorPrefix: string,
+    otherDirs: readonly string[] = [],
 ): Promise<FreeCollisionPath> {
-    let filename = baseFilename;
-    let path = `${dir}/${filename}`;
-    for (let suffix = 2; (await probeFile(adapter, path)) !== 'missing'; suffix++) {
-        if (suffix > MAX_SUFFIX) {
-            throw new Error(`${errorPrefix} w ${dir}`);
+    for (let suffix = 1; suffix <= MAX_SUFFIX; suffix++) {
+        const filename = suffix === 1 ? baseFilename : baseFilename.replace(/\.md$/, `_${suffix}.md`);
+        let free = true;
+        for (const folder of [dir, ...otherDirs]) {
+            if ((await probeFile(adapter, `${folder}/${filename}`)) !== 'missing') {
+                free = false;
+                break;
+            }
         }
-        filename = baseFilename.replace(/\.md$/, `_${suffix}.md`);
-        path = `${dir}/${filename}`;
+        if (free) return { path: `${dir}/${filename}`, filename };
     }
-    return { path, filename };
+    throw new Error(`${errorPrefix} w ${dir}`);
 }

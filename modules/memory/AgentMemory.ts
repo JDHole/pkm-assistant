@@ -814,17 +814,16 @@ export class AgentMemory {
                 });
 
             for (const path of rootSessionFiles) {
-                const name = path.split('/').pop() as string;
-                const target = `${this.paths.sessionsArchive}/${name}`;
-                // Ten sam mechanizm co pętle sufiksów — „nie wiem" liczy się
-                // jako ZAJĘTĄ, żeby kłamiący exists() nie kazał nam nadpisać realnej zarchiwizowanej
-                // sesji treścią jej płaskiego, przedmigracyjnego odpowiednika.
-                if ((await probeFile(this.vault.adapter, target)) !== 'missing') continue;
-                const content = await this.vault.adapter.read(path);
-                await this._writeSessionFile(target, content);
-                if (this.vault.adapter.remove) {
-                    await this.vault.adapter.remove(path);
-                }
+                await this._enqueuePathWrite(path, () => this._enqueuePathWrite(this.paths.sessionsArchive, async () => {
+                    const name = path.split('/').pop() as string;
+                    const target = `${this.paths.sessionsArchive}/${name}`;
+                    // Preserve legacy names: existing L1 references may already use them.
+                    // A collision leaves the source in place, without overwriting either file.
+                    if ((await probeFile(this.vault.adapter, target)) !== 'missing') return;
+                    const content = await this.vault.adapter.read(path);
+                    await this._writeSessionFile(target, content);
+                    if (this.vault.adapter.remove) await this.vault.adapter.remove(path);
+                }));
             }
         } catch (e) {
             log.warn(`AgentMemory:${this.agentName}`, `Could not migrate legacy root sessions to archive:`, e);
@@ -887,6 +886,7 @@ export class AgentMemory {
             this.paths.sessionsActive,
             filename,
             'startActiveSession: brak wolnej nazwy pliku sesji',
+            [this.paths.sessionsArchive],
         );
 
         const created = new Date().toISOString();
@@ -1238,12 +1238,15 @@ epoch: ${epoch}
     async archiveActiveSession(path: string | null = this.activeSessionPath): Promise<string | null> {
         if (!path) return null;
         const filename = path.split('/').pop() as string;
-        const archivePath = `${this.paths.sessionsArchive}/${filename}`;
         const now = new Date().toISOString();
         // Serialize against any pending appends to the same active session file so a
         // late append cannot resurrect a half-removed file (or be lost after copy).
-        await this._enqueuePathWrite(path, async () => {
+        return this._enqueuePathWrite(path, () => this._enqueuePathWrite(this.paths.sessionsArchive, async () => {
             const content = await this.vault.adapter.read(path);
+            const { path: archivePath } = await findFreeCollisionPath(
+                this.vault.adapter, this.paths.sessionsArchive, filename,
+                'archiveActiveSession: brak wolnej nazwy pliku sesji',
+            );
             const parsed = parseActiveSession(content);
             let output = content;
             if (parsed.messages.length > 0) {
@@ -1286,14 +1289,16 @@ epoch: ${epoch}
                 );
             }
             if (this.vault.adapter.remove) await this.vault.adapter.remove(path);
-        });
-        this._forgetSessionWriterState(path);
-        await this.stateManager.markArchived(filename);
-        if (this.activeSessionPath === path) {
-            this.activeSessionPath = null;
-            await this._persistActiveSession();
-        }
-        return archivePath;
+            this._forgetSessionWriterState(path);
+            // Remove the SOURCE name from active state; the returned path names the archive.
+            // Keep bookkeeping in the same phase so sibling instances cannot lose a count.
+            await this.stateManager.markArchived(filename);
+            if (this.activeSessionPath === path) {
+                this.activeSessionPath = null;
+                await this._persistActiveSession();
+            }
+            return archivePath;
+        }));
     }
 
     /**
@@ -1335,7 +1340,7 @@ epoch: ${epoch}
         let target: string | null = null;
         try {
             // Serialize against pending appends — jak w archiveActiveSession.
-            await this._enqueuePathWrite(path, async () => {
+            await this._enqueuePathWrite(path, () => this._enqueuePathWrite(discardedDir, async () => {
                 if (!(await this.vault.adapter.exists(path))) return;
                 try {
                     if (!(await this.vault.adapter.exists(discardedDir))) {
@@ -1356,7 +1361,7 @@ epoch: ${epoch}
                 const content = await this.vault.adapter.read(path);
                 await this._writeSessionFile(target, content);
                 if (this.vault.adapter.remove) await this.vault.adapter.remove(path);
-            });
+            }));
         } catch (e) {
             log.warn(`AgentMemory:${this.agentName}`, `Could not discard active session ${filename}:`, e);
             return null;
@@ -1468,6 +1473,7 @@ epoch: ${epoch}
                 this.paths.sessionsActive,
                 filename,
                 'saveSession: brak wolnej nazwy pliku sesji',
+                [this.paths.sessionsArchive],
             )).path;
             this.activeSessionPath = path;
         }
