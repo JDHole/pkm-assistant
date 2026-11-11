@@ -12,6 +12,7 @@
  * Ten plik jest CELOWO wolny od `obsidian` i od DOM-u — dzięki temu ma testy jednostkowe
  * (`turnOwner.test.ts`), a `chat_session.ts` (który importuje `Notice`) tylko go wywołuje.
  */
+import { sendAdmission } from './sendAdmission.js';
 import { resolveWorkPrompt } from '../../../core/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { defaultCompressionPrompt } from './compressionPrompt.js';
@@ -327,9 +328,11 @@ export function isFrozenTurnOwnerCurrent(view: FreezeViewLike, owner: FrozenTurn
 export function publishTurnSessionIdentity(owner: FrozenTurnOwner): void {
     const tab = owner.tab;
     if (!tab) return;
+    const before = owner.acceptedIdentity ?? { id: tab.sessionId, path: tab.sessionPath, epoch: tab.sessionEpoch };
     tab.sessionPath = owner.sessionPath;
     tab.sessionEpoch = owner.sessionEpoch;
     owner.acceptedIdentity = { id: tab.sessionId, path: tab.sessionPath, epoch: tab.sessionEpoch };
+    sendAdmission(owner.rollingWindow)?.recordIdentity(tab, before, owner.acceptedIdentity);
 }
 
 /** Complete the captured session identity without following the selected tab's memory cursor.

@@ -1089,8 +1089,12 @@ przed jednym `_writeSessionFile`. Nie wolno najpierw zapisać samego ucięcia.
 Oczekiwana ścieżka/epoka nadal są kontrolowane pod kolejką pliku.
 Dopiero udany zapis pozwala czatowi zmienić RAM i potwierdzić odbiór.
 
-Migracja epoki i publikacja tożsamości należą do tej samej fazy B. Stop/close/reset
-czekają na jej zakończenie; przełączenie zakładki nie blokuje pisarza starej sesji.
+Migracja epoki i publikacja tożsamości należą do tej samej fazy B. Stop odracza
+przerwanie do jej zakończenia. Czat kolejkuje Zamknij/Nowa/load/restore dla
+przechwyconej zakładki i sesji, sprawdza właściciela po oczekiwaniach i odrzuca
+nieaktualne decyzje modalu. To bramka czatu, nie blokada aktywnego kursora pamięci;
+Discard z tej ścieżki podaje jawny path. Przełączenie zakładki nie blokuje pisarza
+starej sesji.
 Konflikt epok nie uprawnia do pominięcia zapisu pytania legacy. Błąd samej migracji
 zachowuje istniejący kontrakt `SessionEpochPersistenceError`, ale błąd zapisu pytania
 zatrzymuje wysyłkę. Nie ma już startu modelu z niezapisanym pytaniem jako fallbacku.
@@ -1098,7 +1102,13 @@ zatrzymuje wysyłkę. Nie ma już startu modelu z niezapisanym pytaniem jako fal
 Powiadomienia używają stałych ID dostarczenia. Ich ponowienie zawiera każde ID
 raz w planie `saveSession`; wcześniej obecne ID na dysku są pomijane przez
 istniejący mechanizm ogona. ACK notifiera wymaga sukcesu tego zapisu, także gdy
-wiadomość była już w RAM. Zapis automatyczny/zamykania bierze snapshot po B.
+wiadomość była już w RAM. Zapis konkretnego okna bierze snapshot po jego B.
+Listener quit w czacie najpierw czeka na WSZYSTKIE przyjęcia z rejestrów tur,
+także dla okien w tle bez ścieżki, a dopiero potem zbiera zapisy aktywnych sesji.
+Zwykły beforeunload/onunload nie daje gwarancji oczekiwania hosta; kolejność
+wygaszania pluginu w main.ts nie jest zmieniona. Testy F7 w
+`../chat/chat/chat_streaming.sendTab.test.ts` sprawdzają zadania rzeczywistego
+nasłuchu quit i świeży odczyt pierwszego pytania z pliku.
 
 API pamięci pozostaje bez zmian. Nie dodano readbacku każdego zapisu ani obsługi
 niepewnego/częściowego I/O; to ograniczenie jest odrębne od odraczania Stopu.

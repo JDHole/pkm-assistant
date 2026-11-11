@@ -1,4 +1,4 @@
-import { sendAdmission } from './sendAdmission.js';
+import { captureSessionLifecycle, requestSessionLifecycle, serializeSessionLifecycle } from './sessionLifecycle.js';
 import { restoreSendDraft } from './sendDraft.js';
 import { cancelMessageEdit } from './messageEdit.js';
 /**
@@ -356,46 +356,41 @@ export function _resetTodoPanelState(this: ChatViewLike) {
  * suby), a dopiero potem zapisuje i kasuje stan - ta sama kolejność co w `onClose`.
  */
 export async function _closeActiveTab(this: ChatViewLike) {
-    const activeIndex = this.chatTabs.findIndex((t: ChatTab) => t.isActive);
-    if (activeIndex === -1) return;
-
-    cancelMessageEdit(this.rollingWindow);
-    const activeTab = this.chatTabs[activeIndex];
-    const activeKey = _tabKey(activeTab);
-
-    const closingWindow = this.rollingWindow;
-    _stopTabWork.call(this, activeTab, activeKey);
-    const committing = sendAdmission(closingWindow);
-    if (committing) {
-        await committing.done;
-        if (!this.chatTabs.includes(activeTab)) return;
-        if (!activeTab.isActive) await this._switchTab(_tabKey(activeTab));
-        if (this.rollingWindow !== closingWindow) return;
-    }
-
-    if (this.rollingWindow?.messages?.length > 0 || this.rollingWindow?.removedMessageIds?.length > 0 || this.rollingWindow?.removedMessageRanges?.length > 0) {
-        try {
-            await this.handleSaveSession();
-        } catch (e) {
-            log.warn('Chat', `Save on tab close failed (non-fatal): ${(e as Error)?.message || String(e)}`);
-        }
-    }
-
-    this._agentStates.delete(activeKey);
-
-    if (this.chatTabs.length <= 1) {
-        this.rollingWindow = this._createRollingWindow();
-        void this.render_messages();
-        this.add_welcome_message();
-        this.updateTokenCounter();
-        this._updateTokenPanel();
-        return;
-    }
-
-    const closingIndex = this.chatTabs.indexOf(activeTab);
-    this.chatTabs.splice(closingIndex, 1);
-    const newActiveIndex = Math.min(closingIndex, this.chatTabs.length - 1);
-    await this._switchTab(_tabKey(this.chatTabs[newActiveIndex]));
+    const owner = captureSessionLifecycle(this);
+    const activeTab = owner.tab;
+    if (!activeTab) return;
+    return requestSessionLifecycle(owner, 'close', async () => {
+        cancelMessageEdit(owner.window);
+        _stopTabWork.call(this, activeTab, _tabKey(activeTab));
+        await serializeSessionLifecycle(owner, async () => {
+            if (owner.window.messages.length || owner.window.removedMessageIds?.length || owner.window.removedMessageRanges?.length) {
+                try {
+                    await this.handleSaveSession(owner.agentName, owner.window,
+                        owner.path ? { path: owner.path, epoch: owner.epoch } : undefined);
+                } catch (e) {
+                    log.warn('Chat', `Save on tab close failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
+                }
+                if (!owner.current()) return;
+            }
+            const closingIndex = this.chatTabs.indexOf(activeTab);
+            if (closingIndex < 0) return;
+            this._agentStates.delete(_tabKey(activeTab));
+            if (this.chatTabs.length <= 1) {
+                this.rollingWindow = this._createRollingWindow();
+                void this.render_messages();
+                this.add_welcome_message();
+                this.updateTokenCounter();
+                this._updateTokenPanel();
+                return;
+            }
+            const wasActive = activeTab.isActive;
+            this.chatTabs.splice(closingIndex, 1);
+            if (wasActive) {
+                const next = this.chatTabs[Math.min(closingIndex, this.chatTabs.length - 1)];
+                await this._switchTab(_tabKey(next));
+            } else if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);
+        });
+    });
 }
 
 /**

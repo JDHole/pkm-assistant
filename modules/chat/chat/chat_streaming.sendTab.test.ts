@@ -4,10 +4,12 @@ import ts from 'typescript';
 import { RollingWindow } from './RollingWindow.js';
 import { startEditMessage, append_message } from './chat_messages.js';
 import * as streaming from './chat_streaming.js';
-import { handleSaveSession, appendToActiveSession, handleNewSession } from './chat_session.js';
+import { handleSaveSession, appendToActiveSession, handleNewSession, initSessionManager, handleLoadSession, _restoreActiveSession, consolidateSession } from './chat_session.js';
 import { _switchTab, _renderTabBar, _closeActiveTab } from './chat_tabs.js';
 import { AgentMemory } from '../../memory/index.js';
 import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
+import { SaveSessionModal } from '../SaveSessionModal.js';
+import { OpenSessionModal } from '../OpenSessionModal.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { Notice } from 'obsidian';
 import { t as translate } from '../../../core/i18n/index.js';
@@ -99,7 +101,7 @@ function installSendListeners(view: unknown) {
     new Function(ts.transpile(globalCode)).call(view);
 }
 
-async function fixture(newSession = false) {
+async function fixture(newSession = false, tabNames = ['A', 'B']) {
     document.hasFocus = () => true;
     setLocale('pl');
     const files = new Map<string, string>();
@@ -108,15 +110,15 @@ async function fixture(newSession = false) {
         read: async (path: string) => { if (!files.has(path)) throw new Error('missing'); return files.get(path)!; },
         write: async (path: string, text: string) => { files.set(path, text); },
         append: async (path: string, text: string) => { files.set(path, (files.get(path) ?? '') + text); },
-        remove: async (path: string) => { files.delete(path); }, mkdir: async () => {}, list: async () => ({ files: [] }),
+        remove: async (path: string) => { files.delete(path); }, mkdir: async () => {}, list: async (): Promise<{ files: string[] }> => ({ files: [] }),
     };
     const memory = new AgentMemory({ adapter }, 'Mira');
     const seed = new AgentMemory({ adapter: { ...adapter } }, 'Mira');
     const agent = { name: 'Mira' };
-    const tabs = ['A', 'B'].map((id, index) => ({ agentName: 'Mira', sessionId: id,
+    const tabs = tabNames.map((id, index) => ({ agentName: 'Mira', sessionId: id,
         sessionPath: memory.paths.sessionsActive + '/' + id + '.md', sessionEpoch: id.toLowerCase().repeat(32) as string | null, isActive: index === 0 }));
-    const windows = [new RollingWindow(), new RollingWindow()];
-    const trackers = [new TokenTracker(), new TokenTracker()];
+    const windows = tabs.map(() => new RollingWindow());
+    const trackers = tabs.map(() => new TokenTracker());
     for (const [i, tab] of tabs.entries()) {
         if (newSession && i === 0) { tab.sessionPath = ''; tab.sessionEpoch = null; continue; }
         files.set(tab.sessionPath, `---\nagent: Mira\nepoch: ${tab.sessionEpoch}\n---\n`);
@@ -1260,4 +1262,381 @@ test.serial('F6 D: E1 kontra E2 odmawia zapisu i odzyskuje szkic bez zmiany rozm
     t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
     t.is(f.files.get(path), before);
     t.deepEqual(f.modelInputs, []);
+});
+
+
+// F7: actual slim-bar registrations, with EventTarget replacing only the DOM boundary.
+function lifecycleButtons(f: Awaited<ReturnType<typeof fixture>>) {
+    const source = ts.createSourceFile('chat_ui.ts', readFileSync(new URL('./chat_ui.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    const render = source.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === '_renderSlimBar');
+    if (!render || !ts.isFunctionDeclaration(render) || !render.body) throw new Error('_renderSlimBar missing');
+    const registrations = render.body.statements.filter(s => /^(newChatBtn|closeBtn)\.addEventListener/.test(s.getText(source)));
+    const newChatBtn = createDiv(), closeBtn = createDiv();
+    events(newChatBtn); events(closeBtn);
+    const requests: Promise<void>[] = [];
+    Object.assign(f.view, {
+        handleNewSession() { const run = handleNewSession.call(f.view as never); requests.push(run); return run; },
+        _closeActiveTab() { const run = _closeActiveTab.call(f.view as never); requests.push(run); return run; },
+    });
+    new Function('newChatBtn', 'closeBtn', 'log', ts.transpile(registrations.map(s => s.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2022 })).call(f.view, newChatBtn, closeBtn, log);
+    return {
+        requests,
+        newSession() { newChatBtn.dispatchEvent(new Event('click')); return requests.at(-1)!; },
+        close() { closeBtn.dispatchEvent(new Event('click')); return requests.at(-1)!; },
+    };
+}
+
+function disposeFixture(t: import('ava').ExecutionContext, f: Awaited<ReturnType<typeof fixture>>) {
+    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+}
+
+test.serial('F7: dwa kliknięcia Zamknij podczas kompresji A zachowują B i C', async t => {
+    const f = await fixture(false, ['A', 'B', 'C']);
+    disposeFixture(t, f);
+    const buttons = lifecycleButtons(f);
+    startEditMessage.call(f.view as never, 0, 'Pytanie A');
+    f.view.input_area.value = 'Poprawka A';
+    const gate = holdRealCompression(f.windows[0]);
+    const run = f.clickSend();
+    await gate.entered.promise;
+    buttons.close(); buttons.close();
+    gate.release();
+    await Promise.all([run, ...buttons.requests]);
+    t.deepEqual(f.view.chatTabs.map(tab => [tab.sessionId, tab.sessionEpoch]), [['B', 'b'.repeat(32)], ['C', 'c'.repeat(32)]], 'Zamknij A musi pozostawić B i C');
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    for (const id of ['B', 'C']) t.deepEqual((await fresh.loadActiveSession(f.memory.paths.sessionsActive + '/' + id + '.md')).messages.map(m => m.content), [`Pytanie ${id}`, `Odpowiedź ${id}`]);
+    t.deepEqual((await fresh.loadActiveSession(f.memory.paths.sessionsActive + '/A.md')).messages.map(m => m.content), ['Poprawka A']);
+});
+
+for (const choice of ['discard', 'archive', 'cancel'] as const)
+test.serial(`F7: Nowa → Zamknij → ${choice} w oknie A zachowuje sesję B`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f);
+    const buttons = lifecycleButtons(f);
+    const opened = deferred(), decision = deferred();
+    const prompt = SessionCloseModal.prototype.prompt;
+    SessionCloseModal.prototype.prompt = async () => { opened.resolve(); await decision.promise; return { choice }; };
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; decision.resolve(); });
+    // If a stale Archive reaches the real workflow, approve its real proposal and
+    // observe the resulting file/reset, rather than only checking a mock call.
+    const savePrompt = SaveSessionModal.prototype.prompt, proposals = SaveSessionModal.prototype.setProposals;
+    let acceptArchive!: (value: Awaited<ReturnType<SaveSessionModal['prompt']>>) => void;
+    SaveSessionModal.prototype.prompt = () => new Promise(resolve => { acceptArchive = resolve; });
+    SaveSessionModal.prototype.setProposals = () => { acceptArchive({ action: 'archive', notes: [], brainUpdates: [] }); };
+    t.teardown(() => { SaveSessionModal.prototype.prompt = savePrompt; SaveSessionModal.prototype.setProposals = proposals; });
+    Object.assign(f.view, { consolidateSession });
+    startEditMessage.call(f.view as never, 0, 'Pytanie A');
+    f.view.input_area.value = 'Poprawka A';
+    const gate = holdRealCompression(f.windows[0]);
+    const run = f.clickSend();
+    await gate.entered.promise;
+    const newSession = buttons.newSession(), close = buttons.close();
+    gate.release();
+    await Promise.all([run, close, opened.promise]);
+    decision.resolve();
+    await newSession;
+    t.deepEqual(f.view.chatTabs.map(tab => [tab.sessionId, tab.sessionEpoch]), [['B', 'b'.repeat(32)]]);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B'], 'Modal A nie może wyzerować B');
+    t.is(f.memory.activeSessionPath, f.memory.paths.sessionsActive + '/B.md');
+    t.false([...f.files.keys()].some(path => path.includes('/.discarded/B.md')));
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+});
+
+test.serial('F7: quit czeka na pierwsze pytanie A bez ścieżki w tle', async t => {
+    const f = await fixture(true);
+    disposeFixture(t, f);
+    let quit!: (tasks: { addPromise(task: Promise<void>): void }) => void;
+    Object.assign(f.view.app.workspace, { on(event: string, callback: typeof quit) { if (event === 'quit') quit = callback; return {}; } });
+    Object.assign(f.view, { registerEvent() {}, registerInterval(id: number) { window.clearInterval(id); }, async _restoreActiveSession() {} });
+    await initSessionManager.call(f.view as never);
+    f.view.input_area.value = 'Pierwsze pytanie A';
+    const gate = creationGate(f, 'header');
+    const run = f.clickSend();
+    await gate.entered.promise;
+    const switching = f.clickB();
+    const tasks: Promise<void>[] = [];
+    quit({ addPromise(task) { tasks.push(task); } });
+    let settled = false;
+    const quitting = Promise.all(tasks).then(() => { settled = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    const settledBeforeAdmission = settled;
+    gate.release.resolve();
+    await Promise.all([run, switching, quitting]);
+    t.is(settledBeforeAdmission, false, 'Zadania quit muszą czekać na przyjęcie A bez ścieżki');
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pierwsze pytanie A']);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+});
+
+
+for (const stage of ['journal', 'epoch-read', 'epoch-append', 'epoch-readback', 'compression'] as const)
+for (const pair of ['new-new', 'close-new', 'stop-close', 'load-close'] as const)
+test.serial(`F7: ${stage} → ${pair} zachowuje właściciela operacji`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f);
+    if (stage.startsWith('epoch-')) {
+        f.files.set(f.tabs[0].sessionPath, f.files.get(f.tabs[0].sessionPath)!.replace(/epoch: [a-f0-9]+\n/, ''));
+        f.tabs[0].sessionEpoch = null;
+        f.memory.setActiveSessionIdentity(f.tabs[0].sessionPath, null);
+    }
+    const buttons = lifecycleButtons(f), decision = deferred();
+    const prompt = SessionCloseModal.prototype.prompt, open = OpenSessionModal.prototype.prompt;
+    const dialogs: string[] = [];
+    SessionCloseModal.prototype.prompt = async () => { dialogs.push('Nowa A'); await decision.promise; return { choice: 'discard' }; };
+    OpenSessionModal.prototype.prompt = async () => { dialogs.push('Wczytaj A'); await decision.promise; return 'continue'; };
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; OpenSessionModal.prototype.prompt = open; decision.resolve(); });
+    const archive = f.memory.paths.sessionsArchive + '/old.md';
+    f.files.set(archive, '---\nagent: Mira\n---\n\n## User\n\nHistoria z archiwum\n');
+    startEditMessage.call(f.view as never, 0, 'Pytanie A');
+    f.view.input_area.value = 'Poprawione pytanie A';
+    const compression = stage === 'compression' ? holdRealCompression(f.windows[0]) : null;
+    const io = stage === 'compression' ? null : await preparationGate(f, stage);
+    const run = f.clickSend();
+    await (compression?.entered.promise ?? io!.entered.promise);
+    let load: Promise<void> | undefined;
+    switch (pair) {
+        case 'new-new': buttons.newSession(); buttons.newSession(); break;
+        case 'close-new': buttons.close(); buttons.newSession(); break;
+        case 'stop-close': f.clickStop(); buttons.close(); break;
+        case 'load-close': load = handleLoadSession.call(f.view as never, archive); buttons.close(); break;
+        default: { const unreachable: never = pair; throw new Error(unreachable); }
+    }
+    if (compression) compression.release(); else io!.release.resolve();
+    await run;
+    // Allow queued saves and opening the dialog, without resolving the user's choice.
+    await new Promise(resolve => setImmediate(resolve));
+    decision.resolve();
+    await Promise.all([...buttons.requests, load]);
+    t.deepEqual(dialogs, pair === 'new-new' ? ['Nowa A'] : pair === 'load-close' ? ['Wczytaj A'] : []);
+    if (pair === 'new-new') {
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), []);
+        const discarded = [...f.files.keys()].filter(path => path.includes('/.discarded/'));
+        t.deepEqual(discarded, [f.memory.paths.sessionsActive + '/.discarded/A.md']);
+        t.deepEqual((await f.memory.loadActiveSession(discarded[0])).messages.map(m => m.content), ['Poprawione pytanie A']);
+        await f.clickB();
+    } else {
+        t.deepEqual(f.view.chatTabs.map(tab => [tab.sessionId, tab.sessionEpoch]), [['B', 'b'.repeat(32)]]);
+        t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/A.md')).messages.map(m => m.content), ['Poprawione pytanie A']);
+    }
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+    t.deepEqual(f.modelInputs, []);
+});
+
+for (const order of ['restore-close', 'close-restore'] as const)
+test.serial(`F7: kompresja → ${order} nie zamyka zastępczej zakładki`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f);
+    Object.assign(f.view.plugin.agentManager, { getAllAgents: () => [{ name: 'Mira' }] });
+    Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
+    f.adapter.list = async () => ({ files: [f.memory.paths.sessionsActive + '/A.md', f.memory.paths.sessionsActive + '/B.md'] });
+    const buttons = lifecycleButtons(f);
+    startEditMessage.call(f.view as never, 0, 'Pytanie A');
+    f.view.input_area.value = 'Poprawka A';
+    const gate = holdRealCompression(f.windows[0]), run = f.clickSend();
+    await gate.entered.promise;
+    if (order === 'close-restore') buttons.close();
+    const restore = _restoreActiveSession.call(f.view as never);
+    if (order === 'restore-close') buttons.close();
+    gate.release();
+    await Promise.all([run, restore, ...buttons.requests]);
+    t.deepEqual(f.view.chatTabs.map(tab => tab.sessionPath?.split('/').pop()).sort(), order === 'restore-close' ? ['A.md', 'B.md'] : ['B.md']);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/A.md')).messages.map(m => m.content), ['Poprawka A']);
+    const b = f.view.chatTabs.find(tab => tab.sessionPath?.endsWith('/B.md'))!;
+    await f.view._switchTab(b.sessionId!);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+    t.is(b.sessionEpoch, 'b'.repeat(32));
+});
+
+
+for (const boundary of ['close-save', 'new-save', 'new-switch', 'discard', 'todo', 'reset'] as const)
+test.serial(`F7: po await ${boundary} operacja A nie zmienia B`, async t => {
+    const f = await fixture(false, ['A', 'B', 'C']);
+    disposeFixture(t, f);
+    Object.assign(f.view.app.vault, { adapter: f.adapter });
+    const buttons = lifecycleButtons(f), entered = deferred(), release = deferred(), decision = deferred();
+    const prompt = SessionCloseModal.prototype.prompt;
+    SessionCloseModal.prototype.prompt = async () => {
+        if (boundary === 'new-save') await decision.promise;
+        return { choice: 'discard' };
+    };
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; release.resolve(); decision.resolve(); });
+    const gate = holdRealCompression(f.windows[0]);
+    startEditMessage.call(f.view as never, 0, 'Pytanie A');
+    f.view.input_area.value = 'Poprawka A';
+    const run = f.clickSend();
+    await gate.entered.promise;
+    let held = false;
+    const hold = async () => { if (!held) { held = true; entered.resolve(); await release.promise; } };
+    if (boundary === 'close-save' || boundary === 'new-save') {
+        f.view.handleSaveSession = async function(...args) { await handleSaveSession.apply(this as never, args); await hold(); };
+    } else if (boundary === 'new-switch') {
+        const switching = f.view._switchTab;
+        f.view._switchTab = async id => { await switching(id); if (id === 'A') await hold(); };
+    } else if (boundary === 'discard') {
+        const discard = f.memory.discardActiveSession.bind(f.memory);
+        f.memory.discardActiveSession = async path => { const result = await discard(path); await hold(); return result; };
+    } else if (boundary === 'reset') {
+        const reset = f.memory.startNewSession.bind(f.memory);
+        f.memory.startNewSession = async () => { await reset(); await hold(); };
+    } else {
+        f.files.set('.pkm-assistant/artifacts/todo/mira-a.md', '- [ ] Zadanie A');
+        const remove = f.adapter.remove;
+        f.adapter.remove = async path => { await remove(path); if (path.includes('/todo/')) await hold(); };
+    }
+    if (boundary === 'close-save') { buttons.close(); buttons.close(); }
+    else { buttons.newSession(); buttons.newSession(); }
+    let earlySwitch: Promise<void> | undefined;
+    if (boundary === 'new-switch') earlySwitch = f.clickB();
+    gate.release();
+    await Promise.race([entered.promise, Promise.all([run, ...buttons.requests]).then(() => { throw new Error(`Nie osiągnięto ${boundary}`); })]);
+    // A is still visible at the three post-decision boundaries: this Close belongs to A.
+    if (boundary === 'discard' || boundary === 'todo' || boundary === 'reset') buttons.close();
+    const switching = f.clickB();
+    release.resolve();
+    await Promise.all([run, switching, earlySwitch]);
+    if (boundary === 'new-save') {
+        // Close A while its dialog is waiting, through the same production listener.
+        await f.clickA();
+        await buttons.close();
+    }
+    decision.resolve();
+    await Promise.all(buttons.requests);
+    t.deepEqual(f.view.chatTabs.filter(tab => tab.sessionId === 'B' || tab.sessionId === 'C').map(tab => [tab.sessionId, tab.sessionEpoch]), [['B', 'b'.repeat(32)], ['C', 'c'.repeat(32)]]);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+    t.is(f.memory.activeSessionPath, f.memory.paths.sessionsActive + '/B.md');
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+    t.deepEqual((await fresh.loadActiveSession(f.memory.paths.sessionsActive + '/C.md')).messages.map(m => m.content), ['Pytanie C', 'Odpowiedź C']);
+    if (boundary === 'discard' || boundary === 'todo' || boundary === 'reset') {
+        t.deepEqual((await fresh.loadActiveSession(f.memory.paths.sessionsActive + '/.discarded/A.md')).messages.map(m => m.content), ['Poprawka A']);
+        t.is(f.view.chatTabs[0].sessionEpoch, null);
+    }
+});
+
+for (const change of ['epoch', 'path', 'tab'] as const)
+test.serial(`F7: modal Nowa odmawia po zmianie ${change} właściciela`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f);
+    const buttons = lifecycleButtons(f), opened = deferred(), release = deferred();
+    const prompt = SessionCloseModal.prototype.prompt;
+    SessionCloseModal.prototype.prompt = async () => { opened.resolve(); await release.promise; return { choice: 'discard' }; };
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; release.resolve(); });
+    const run = buttons.newSession();
+    await opened.promise;
+    // Boundary event: a new session identity is published while the old dialog is open.
+    const tab = f.tabs[0];
+    if (change === 'epoch') tab.sessionEpoch = 'd'.repeat(32);
+    else if (change === 'path') tab.sessionPath = f.memory.paths.sessionsActive + '/D.md';
+    else f.view.chatTabs[0] = { ...tab };
+    release.resolve();
+    await run;
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/A.md')).messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+});
+
+
+test.serial('F7: quit czeka na oba trwające przyjęcia A i B', async t => {
+    const f = await fixture(true);
+    disposeFixture(t, f);
+    let quit!: (tasks: { addPromise(task: Promise<void>): void }) => void;
+    Object.assign(f.view.app.workspace, { on(event: string, callback: typeof quit) { if (event === 'quit') quit = callback; return {}; } });
+    Object.assign(f.view, { registerEvent() {}, registerInterval(id: number) { window.clearInterval(id); }, async _restoreActiveSession() {} });
+    await initSessionManager.call(f.view as never);
+    const a = creationGate(f, 'header');
+    f.view.input_area.value = 'Pierwsze pytanie A';
+    const runA = f.clickSend();
+    await a.entered.promise;
+    const switching = f.clickB();
+    const b = holdRealCompression(f.windows[1]);
+    f.view.input_area.value = 'Kolejne pytanie B';
+    const runB = f.clickSend();
+    await b.entered.promise;
+    const tasks: Promise<void>[] = [];
+    quit({ addPromise(task) { tasks.push(task); } });
+    let settled = false;
+    const quitting = Promise.all(tasks).then(() => { settled = true; });
+    b.release();
+    await runB;
+    await new Promise(resolve => setImmediate(resolve));
+    const settledWithAStillPending = settled;
+    a.release.resolve();
+    await Promise.all([runA, switching, quitting]);
+    t.is(settledWithAStillPending, false, 'Ukończenie B nie zwalnia quit czekającego na A');
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pierwsze pytanie A']);
+    t.deepEqual((await fresh.loadActiveSession(f.tabs[1].sessionPath)).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B', 'Kolejne pytanie B']);
+});
+
+for (const operation of ['close', 'new'] as const)
+test.serial(`F7: ${operation} po zapisie odmawia zmienionej epoce A`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f);
+    const buttons = lifecycleButtons(f), entered = deferred(), release = deferred();
+    f.view.handleSaveSession = async function(...args) { await handleSaveSession.apply(this as never, args); entered.resolve(); await release.promise; };
+    const prompt = SessionCloseModal.prototype.prompt;
+    SessionCloseModal.prototype.prompt = async () => ({ choice: 'discard' });
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; release.resolve(); });
+    const run = operation === 'close' ? buttons.close() : buttons.newSession();
+    await entered.promise;
+    f.tabs[0].sessionEpoch = 'd'.repeat(32);
+    f.memory.setActiveSessionIdentity(f.tabs[0].sessionPath, 'd'.repeat(32));
+    release.resolve();
+    await run;
+    t.deepEqual(f.view.chatTabs.map(tab => [tab.sessionId, tab.sessionEpoch]), [['A', 'd'.repeat(32)], ['B', 'b'.repeat(32)]]);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.deepEqual((await f.memory.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+});
+
+
+test.serial('F7: Nowa podczas tworzenia sesji bez ID kończy przyjęcie przed resetem', async t => {
+    const f = await fixture(true);
+    disposeFixture(t, f);
+    Object.assign(f.tabs[0], { sessionId: undefined });
+    const state = f.view._agentStates.get('A');
+    if (!state) throw new Error('Brak stanu świeżej zakładki A');
+    f.view._agentStates.delete('A');
+    f.view._agentStates.set('Mira', state);
+    const buttons = lifecycleButtons(f), gate = creationGate(f, 'header');
+    const prompt = SessionCloseModal.prototype.prompt;
+    SessionCloseModal.prototype.prompt = async () => ({ choice: 'discard' });
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; });
+    f.view.input_area.value = 'Pierwsze pytanie A';
+    const run = f.clickSend();
+    await gate.entered.promise;
+    buttons.newSession(); buttons.newSession();
+    gate.release.resolve();
+    await Promise.all([run, ...buttons.requests]);
+    const discarded = [...f.files.keys()].filter(path => path.includes('/.discarded/'));
+    t.is(discarded.length, 1);
+    t.deepEqual((await f.memory.loadActiveSession(discarded[0])).messages.map(m => m.content), ['Pierwsze pytanie A']);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), []);
+    t.deepEqual(f.view.chatTabs.map(tab => tab.sessionEpoch), [null, 'b'.repeat(32)]);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+});
+
+for (const replacement of ['path', 'epoch'] as const)
+test.serial(`F7: tworzenie sesji nie uprawnia lifecycle do przejęcia obcej ${replacement}`, async t => {
+    const f = await fixture(true);
+    disposeFixture(t, f);
+    const buttons = lifecycleButtons(f), gate = creationGate(f, 'header');
+    const prompt = SessionCloseModal.prototype.prompt;
+    SessionCloseModal.prototype.prompt = async () => ({ choice: 'discard' });
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; });
+    f.view.input_area.value = 'Pierwsze pytanie A';
+    const run = f.clickSend();
+    await gate.entered.promise;
+    buttons.newSession();
+    // Another session identity replaces the empty identity while B is pending.
+    // The sender rejects publication to this owner; lifecycle must reject it too.
+    const replacementPath = f.memory.paths.sessionsActive + '/D.md';
+    if (replacement === 'path') f.tabs[0].sessionPath = replacementPath;
+    else f.tabs[0].sessionEpoch = 'd'.repeat(32);
+    gate.release.resolve();
+    await Promise.all([run, ...buttons.requests]);
+    t.deepEqual([f.tabs[0].sessionPath, f.tabs[0].sessionEpoch], replacement === 'path' ? [replacementPath, null] : ['', 'd'.repeat(32)]);
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
 });

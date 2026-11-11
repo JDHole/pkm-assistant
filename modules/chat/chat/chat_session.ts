@@ -1,3 +1,5 @@
+import { captureSessionLifecycle, requestSessionLifecycle, serializeSessionLifecycle, selectSessionLifecycle } from './sessionLifecycle.js';
+import type { SessionLifecycleOwner } from './sessionLifecycle.js';
 import { sendAdmission } from './sendAdmission.js';
 import type { FrozenTurnOwner } from './turnOwner.js';
 import { cancelMessageEdit } from './messageEdit.js';
@@ -52,7 +54,10 @@ export async function initSessionManager(this: ChatViewLike) {
     // Unlike beforeunload, Obsidian's graceful quit lets us contribute awaited tasks.
     this.registerEvent(this.app.workspace.on('quit', tasks => {
         this.stop_all_turns('close');
-        tasks.addPromise(this.handleSaveSession());
+        tasks.addPromise((async () => {
+            await this._waitForSendAdmissions?.();
+            await this.handleSaveSession();
+        })());
     }));
     // registerInterval ties the timer to the view lifecycle (Component clears it on unload),
     // same as the idle tick below — no manual field, no clearInterval in onClose.
@@ -140,10 +145,10 @@ async function _pruneEmptyActiveSessionFromState(agentMemory: AgentMemory, sessi
  * z ewidencji. Best-effort: pad nie może zablokować otwarcia nowej rozmowy.
  * @private
  */
-async function _retireActiveSession(agentMemory: AgentMemory | null | undefined, reason: string) {
+async function _retireActiveSession(agentMemory: AgentMemory | null | undefined, reason: string, path: string) {
     try {
         if (!agentMemory?.discardActiveSession) return;
-        const moved = await agentMemory.discardActiveSession();
+        const moved = await agentMemory.discardActiveSession(path);
         if (moved) log.info('Chat', `Old session retired to .discarded/ (${reason}): ${moved}`);
     } catch (e) {
         log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || String(e)}`);
@@ -207,10 +212,21 @@ function restoreSubTaskHistory(view: ChatViewLike, parsed: Awaited<ReturnType<Ag
 
 /** Restore the last active session from disk. */
 export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
+    if (!this.rollingWindow) return _restoreSessions.call(this);
+    const owner = captureSessionLifecycle(this);
+    return requestSessionLifecycle(owner, 'restore', async () => {
+        for (const key of new Set([...(this._preparingTurns?.keys() ?? []), ...(this._streamCtxMap?.keys() ?? [])])) this.stop_generation(key, 'restore');
+        await serializeSessionLifecycle(owner, () => _restoreSessions.call(this, owner));
+    });
+}
+
+async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwner): Promise<void> {
+    const current = () => !owner || owner.current();
     const pending = [...(this._preparingTurns?.values() ?? []), ...(this._streamCtxMap?.values() ?? [])];
     if (pending.length) {
         for (const key of new Set([...(this._preparingTurns?.keys() ?? []), ...(this._streamCtxMap?.keys() ?? [])])) this.stop_generation(key, 'restore');
         await this._waitForSendAdmissions?.();
+        if (!current()) return;
     }
     try {
         const agentManager = this.plugin?.agentManager;
@@ -227,13 +243,16 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
             if (!agentMemory?.listActiveSessions) continue;
 
             const sessions = await agentMemory.listActiveSessions();
+            if (!current()) return;
             for (const session of sessions) {
                 let parsed = null;
                 try {
                     parsed = await agentMemory.loadActiveSession(session);
+                    if (!current()) return;
                 } catch (e) {
                     log.warn('Chat', `Could not load active session ${session?.name}: ${(e as Error).message}`);
                 }
+                if (!current()) return;
                 const hasHistory = parsed && restoreSubTaskHistory(this, parsed, agentName, session.path);
                 if (!parsed || (!parsed.messages.length && !hasHistory)) {
                     // Memory v3: do NOT delete the underlying file. We previously called
@@ -241,12 +260,14 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
                     // the parser returned 0 messages. Only prune the .state.json pointer; the file
                     // stays on disk as a recovery anchor.
                     await _pruneEmptyActiveSessionFromState(agentMemory, session);
+                    if (!current()) return;
                     continue;
                 }
 
                 const rollingWindow = this._createRollingWindow(agentName);
                 for (const msg of parsed.messages) {
                     await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
+                    if (!current()) return;
                 }
 
                 restored.push({
@@ -262,6 +283,7 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
         if (restored.length === 0) {
             const agentMemory = agentManager.getActiveMemory?.();
             const restoredPath = await agentMemory?.restoreActiveSession?.();
+            if (!current()) return;
             if (!restoredPath) return;
             // `restoreActiveSession` zwraca ścieżkę pliku z `sessions/active/`, a ten jest
             // event-logiem. `loadSession` (parser transkryptu `## User`) wyciągnąłby z niego
@@ -270,12 +292,14 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
             // rozumie format A, B i pliki MIESZANE).
             // `restoredPath` jest niepuste tylko wtedy, gdy `agentMemory` istnieje (linia wyżej).
             const parsed = await agentMemory!.loadActiveSession(restoredPath);
+            if (!current()) return;
             const hasHistory = restoreSubTaskHistory(this, parsed, activeAgentName, restoredPath);
             if (!parsed.messages.length && !hasHistory) return;
 
             const rollingWindow = this._createRollingWindow(activeAgentName);
             for (const msg of parsed.messages) {
                 await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
+                if (!current()) return;
             }
             restored.push({
                 agentName: activeAgentName,
@@ -305,8 +329,10 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
         if ([...(this._preparingTurns?.values() ?? []), ...(this._streamCtxMap?.values() ?? [])]
             .some(ctx => sendAdmission(ctx.rollingWindow))) {
             await this._waitForSendAdmissions();
-            return this._restoreActiveSession();
+            if (!current()) return;
+            return _restoreSessions.call(this, owner);
         }
+        if (!current()) return;
         this.chatTabs = restored.map((item, index) => ({
             agentName: item.agentName,
             sessionId: item.session.path,
@@ -343,7 +369,6 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
         if (activeMemory && active.session.path) {
             activeMemory.setActiveSessionIdentity?.(active.session.path, active.sessionEpoch);
             if (!activeMemory.setActiveSessionIdentity) activeMemory.activeSessionPath = active.session.path;
-            await activeMemory._persistActiveSession?.();
         }
         this.rollingWindow = active.rollingWindow;
         this.tokenTracker = active.tokenTracker;
@@ -353,6 +378,7 @@ export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
         if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);
         this._renderSubTaskStrip?.();
         log.info('Chat', `Restored ${restored.length} active session(s)`);
+        await activeMemory?._persistActiveSession?.();
     } catch (e) {
         log.warn('Chat', `Session restore failed: ${(e as Error).message}`);
     }
@@ -431,135 +457,87 @@ async function persistSendEvent(this: ChatViewLike, event: ActiveSessionEventInp
  * Handle new session — save, optionally compress, reset.
  */
 export async function handleNewSession(this: ChatViewLike) {
-    const admissionWindow = this.rollingWindow;
-    const admissionTab = this.chatTabs?.find(tab => tab.isActive);
-    cancelMessageEdit(this.rollingWindow);
-    // Nowa sesja NIE może zostawić trwającej tury jako zombie. Porzucona tura wisiałaby w tle
-    // z uzbrojonym watchdogiem, który strzela „po agencie" i ubijałby requesty KOLEJNEJ tury
-    // tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
-    if (this.is_generating) this.stop_generation();
-    const committing = sendAdmission(admissionWindow);
-    if (committing) {
-        await committing.done;
-        if (admissionTab && !this.chatTabs.includes(admissionTab)) return;
-        if (admissionTab && !admissionTab.isActive) await this._switchTab(_tabKey(admissionTab));
-        if (this.rollingWindow !== admissionWindow) return;
-    }
-
-
-    // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
-    // (`core/security/SessionWriteConsent.ts`, `modules/tools/MCPClient.ts`) jest kluczowana
-    // `origin.sessionPath` — NAZWA PLIKU aktywnej sesji ma rozdzielczość MINUTOWĄ
-    // (`AgentMemory._generateActiveSessionFilename`), a po archiwizacji/odrzuceniu (niżej) ta
-    // ścieżka WRACA DO PULI - plik jest PRZENOSZONY (`sessions/active/` → `sessions/archive/`
-    // albo `.discarded/`), nie kasowany z miejsca. „Nowa rozmowa" i zaraz po niej DRUGA „nowa
-    // rozmowa" TEGO SAMEGO agenta w tej samej minucie mogłyby dostać DOKŁADNIE tę samą nazwę
-    // pliku - bez jawnego czyszczenia tutaj stara zgoda „wracałaby" razem z reużytą nazwą.
-    // Unikalność nazwy jest więc PIERWSZĄ linią obrony (rzadko przebijaną), to czyszczenie -
-    // DRUGĄ, jawną. Ścieżkę łapiemy TERAZ, przed jakąkolwiek zmianą tożsamości sesji niżej
-    // (archive/discard/`startNewSession`), żeby czyścić TĘ, która faktycznie się kończy.
-    //
-    // Zamknięcie POJEDYNCZEJ zakładki (`_closeActiveTab`, `chat_tabs.ts`) świadomie NIE robi
-    // tego samego: zapisuje sesję na miejscu (`handleSaveSession`) i albo przełącza na inną
-    // zakładkę, albo (ostatnia zakładka) zakłada świeży `RollingWindow` w pamięci - w OBU
-    // przypadkach plik aktywnej sesji zostaje na swojej ścieżce w `sessions/active/`, NIE jest
-    // przenoszony. Ścieżka nie wraca więc do puli i nie ma kolizji do obrony przed - zamknięcie
-    // zakładki to schowanie rozmowy z oczu, nie zakończenie sesji.
-    const closingSessionMemory = this.plugin?.agentManager?.getActiveMemory();
-    const closingSessionTab = this.chatTabs?.find((tab) => tab.isActive);
-    const closingSessionAgentName = closingSessionMemory?.agentName
-        || closingSessionTab?.agentName
-        || '';
-    const closingConsentSessionPath = closingSessionMemory?.activeSessionPath || '';
-
-    const msgCount = this.rollingWindow.messages.length;
-    log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
-
-    if (this.rollingWindow.removedMessageIds?.length || this.rollingWindow.removedMessageRanges?.length) await this.handleSaveSession();
-
-    if (msgCount > 0) {
-        await this.handleSaveSession();
-
-        const agent = this.plugin?.agentManager?.getActiveAgent();
-        const modal = new SessionCloseModal(this.app, {
-            agentName: agent?.name || 'Agent',
-            agentColor: agent?.color || '',
-            messageCount: msgCount
-        });
-        // prompt() returns { choice }. SessionCloseModal nie ma kanału `options` - byłby
-        // strukturalnie pusty i nieczytany.
-        const { choice } = await modal.prompt() || { choice: 'cancel' };
-
-        if (choice === 'cancel') return;
-
-        if (choice === 'archive') {
-            new Notice(t('chat.session.compressing'));
-            // The review owns every outcome, including cancellation and switching tabs.
-            // A second reset here would detach the session it has just created.
-            await this.consolidateSession({ resetAfterArchive: true });
-            return;
-        } else if (choice === 'discard') {
-            // Modal już potwierdził z window.confirm. Plik NIE jest kasowany — ląduje
-            // w sessions/active/.discarded/ i znika z .state.json, żeby nie wisiał jako
-            // zombie-wpis do najbliższego restore.
-            log.info('Chat', `Session discarded by user (${msgCount} msgs)`);
-            const closingSessionPath = closingConsentSessionPath;
-            if (closingSessionPath) {
-                this.plugin?.subTaskRegistry?.pruneSession?.(closingSessionPath);
-                this._renderSubTaskStrip?.();
+    const owner = captureSessionLifecycle(this);
+    return requestSessionLifecycle(owner, 'new', async () => {
+        cancelMessageEdit(owner.window);
+        if (this.is_generating) this.stop_generation();
+        const prepared = await serializeSessionLifecycle(owner, async () => {
+            if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+            const msgCount = owner.window.messages.length;
+            log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
+            if (msgCount || owner.window.removedMessageIds?.length || owner.window.removedMessageRanges?.length) {
+                await this.handleSaveSession(owner.agentName, owner.window,
+                    owner.path ? { path: owner.path, epoch: owner.epoch } : undefined);
+                if (!owner.current()) return;
             }
-            await _retireActiveSession(closingSessionMemory, 'discard');
-            // Plik jednorazowy `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` NIE idzie
-            // do `.discarded/` z sesją - żyje osobno (adapter, nie Vault API). Bez tego
-            // sprzątania zostaje sierotą na dysku (harmless, ale się kumuluje - BUG C3, drugi
-            // ogon). Best-effort: pad sprzątania nie może zablokować odrzucenia sesji.
-            await _retireTodoFileFor(this, agent?.name, closingSessionPath);
-        }
-
-        // SessionCloseModal ma tylko dwie gałęzie: „archiwizuj" i „odrzuć". Nie ma checkboxa
-        // createContextArtifact ani gałęzi „draft" - propozycje „Na teraz" w brain.md (żywe
-        // w /save session) przejęły rolę „nie zostawiamy nic z tyłu" bez osobnego artefaktu
-        // kontekstu sesji czy pliku szkicu.
-    }
-
-    // Discard/puste okno kończy sesję tutaj; archiwizacja i cancel wróciły wyżej.
-    if (closingConsentSessionPath) {
-        this.plugin?.mcpClient?.sessionWriteConsent.clearSession(closingConsentSessionPath);
-        this.plugin?.subTaskRegistry?.closeSessionThreads?.(closingSessionAgentName, closingConsentSessionPath);
-    }
-
-    const agentMemory = closingSessionMemory;
-    if (agentMemory) {
-        await agentMemory.startNewSession();
-    }
-
-    const activeTab = this.chatTabs?.find((tab) => tab.isActive);
-    if (activeTab) {
-        const previousKey = _tabKey(activeTab);
-        activeTab.sessionPath = undefined;
-        activeTab.sessionEpoch = null;
-        activeTab.sessionId = undefined;
-        activeTab.sessionName = undefined;
-        activeTab.sessionLabel = undefined;
-        const state = this._agentStates?.get(previousKey);
-        if (state && this._agentStates) {
-            this._agentStates.delete(previousKey);
-            this._agentStates.set(_tabKey(activeTab), state);
-        }
-    }
-
-    this.rollingWindow = this._createRollingWindow();
-    this.tokenTracker.clear();
-    void this.render_messages();
-    this.add_welcome_message();
-    this.updateTokenCounter();
-    this._updateTokenPanel();
-    // Lista `todo` jest per rozmowa - bez tego panel dalej pokazywał listę sesji, która
-    // WŁAŚNIE odeszła (archive/discard), mimo że plik sesji już był w `.discarded/`/
-    // zarchiwizowany (BUG C3). Ta sama funkcja co przy przełączeniu zakładki (`_switchTab`,
-    // `chat_tabs.ts`) - jedno miejsce prawdy dla discard i `msgCount === 0`.
-    // Archiwizacja resetuje panel w swoim przepływie tylko przy wymianie rozmowy.
-    this._resetTodoPanelState?.();
+            if (!msgCount) return { hasMessages: false, decision: Promise.resolve({ choice: 'discard' as const }) };
+            const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');
+            const modal = new SessionCloseModal(this.app, {
+                agentName: owner.agentName || 'Agent', agentColor: agent?.color || '', messageCount: msgCount,
+            });
+            // Do not hold the queue while a dialog waits: Close can invalidate its owner.
+            return { hasMessages: true, decision: modal.prompt() };
+        });
+        if (!prepared || !owner.current()) return;
+        const { choice } = await prepared.decision || { choice: 'cancel' };
+        if (!owner.current() || choice === 'cancel') return;
+        await serializeSessionLifecycle(owner, async () => {
+            if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+            if (choice === 'archive') {
+                new Notice(t('chat.session.compressing'));
+                // The existing review owns every outcome; never reset again here.
+                await this.consolidateSession({ resetAfterArchive: true });
+                return;
+            }
+            const path = owner.path || '';
+            if (path && prepared.hasMessages) {
+                this.plugin?.subTaskRegistry?.pruneSession?.(path);
+                this._renderSubTaskStrip?.();
+                // Explicit path: selecting another tab during I/O must not retire its file.
+                await _retireActiveSession(owner.memory, 'discard', path);
+                if (!owner.current()) return;
+                await _retireTodoFileFor(this, owner.agentName, path);
+                if (!owner.current()) return;
+            }
+            if (path) {
+                // Unlike closing a tab, ending a session frees its path for reuse.
+                // Consent and threads must be cleared for that captured path only.
+                this.plugin?.mcpClient?.sessionWriteConsent.clearSession(path);
+                this.plugin?.subTaskRegistry?.closeSessionThreads?.(owner.agentName || '', path);
+            }
+            // Only reset the shared memory cursor when it still points to this conversation.
+            if (owner.memory && (!owner.memory.activeSessionPath || owner.memory.activeSessionPath === path)
+                && (!owner.tab || owner.tab.isActive)) {
+                await owner.memory.startNewSession();
+                if (!owner.current()) return;
+            }
+            const tab = owner.tab;
+            const previousKey = tab ? _tabKey(tab) : undefined;
+            const state = previousKey ? this._agentStates?.get(previousKey) : undefined;
+            const fresh = this._createRollingWindow(owner.agentName);
+            if (tab) {
+                tab.sessionPath = undefined;
+                tab.sessionEpoch = null;
+                tab.sessionId = undefined;
+                tab.sessionName = undefined;
+                tab.sessionLabel = undefined;
+                if (state && previousKey) {
+                    this._agentStates.delete(previousKey);
+                    state.rollingWindow = fresh;
+                    this._agentStates.set(_tabKey(tab), state);
+                }
+            }
+            if (!tab || tab.isActive) {
+                this.rollingWindow = fresh;
+                this.tokenTracker.clear();
+                void this.render_messages();
+                this.add_welcome_message();
+                this.updateTokenCounter();
+                this._updateTokenPanel();
+                this._resetTodoPanelState?.();
+            } else state?.tokenTracker.clear();
+        });
+    });
 }
 
 /**
@@ -641,69 +619,84 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
  */
 export async function handleLoadSession(this: ChatViewLike, path: string) {
     log.info('Chat', `handleLoadSession: ${path}`);
-    const ownerWindow = this.rollingWindow;
-    const ownerTab = this.chatTabs?.find(tab => tab.isActive);
-    if (this.is_generating) this.stop_generation();
-    await this._waitForSendAdmissions?.(ownerWindow);
-    if (ownerTab && !ownerTab.isActive) await this._switchTab(_tabKey(ownerTab));
-    if (this.rollingWindow !== ownerWindow) return;
+    const owner = captureSessionLifecycle(this);
+    return requestSessionLifecycle(owner, `load:${path}`, async () => {
+        if (this.is_generating) this.stop_generation();
+        try {
+            const prepared = await serializeSessionLifecycle(owner, async () => {
+                if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+                const agentMemory = owner.memory;
+                if (!agentMemory) return;
+                const filename = path.split('/').pop() || path;
+                const parsed = await agentMemory.loadSession(path);
+                if (!owner.current() || !parsed?.messages) return;
+                const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');
+                const modal = new OpenSessionModal(this.app, {
+                    agentName: owner.agentName || 'Agent', agentColor: agent?.color || '',
+                    sessionTitle: filename.replace(/\.md$/, ''),
+                    sessionDate: typeof parsed.metadata?.created === 'string' ? parsed.metadata.created : filename,
+                });
+                return { agentMemory, filename, parsed, decision: modal.prompt() };
+            });
+            if (!prepared || !owner.current()) return;
+            const choice = await prepared.decision;
+            if (!owner.current() || choice === 'cancel') return;
+            const { agentMemory, filename, parsed } = prepared;
+            await serializeSessionLifecycle(owner, async () => {
+                if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+                cancelMessageEdit(owner.window);
+                await this.handleSaveSession(owner.agentName, owner.window,
+                    owner.path ? { path: owner.path, epoch: owner.epoch } : undefined);
+                if (!owner.current()) return;
+                const loadedWindow = this._createRollingWindow(owner.agentName);
+                if (choice === 'continue') {
+                    // Pełen load
+                    for (const msg of parsed.messages) {
+                        await loadedWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
+                        if (!owner.current()) return;
+                    }
+                    new Notice(t('chat.session.loaded_full', { count: parsed.messages.length }), 4000);
+                } else if (choice === 'compress') {
+                    // Załaduj L1 summary który includes tę sesję — przez frontmatter `included_in: [[l1_xxx]]`
+                    const summaryText = await _findCoveringL1Summary.call(this, agentMemory, filename);
+                    if (!owner.current()) return;
+                    if (summaryText) {
+                        await loadedWindow.addMessage('system', `Kontekst poprzedniej sesji (L1 summary):\n\n${summaryText}`);
+                        if (!owner.current()) return;
+                        new Notice(t('chat.session.loaded_compressed'), 4000);
+                    } else {
+                        // Fallback: brak L1 jeszcze (sesja niezaczęta przez consolidateLevel1) — załaduj summary z pliku jeśli jest
+                        const fallback = parsed.summary || `${parsed.messages.length} wiadomości - pełen kontekst niedostępny w skompresowanej formie.`;
+                        await loadedWindow.addMessage('system', `Kontekst poprzedniej sesji:\n\n${fallback}`);
+                        if (!owner.current()) return;
+                        new Notice(t('chat.session.compressed_fallback'), 4000);
+                    }
+                } else if (choice === 'fresh') {
+                    // Brain + ostatnie 3 L1 jako kontekst, fresh start
+                    const fresh = await _buildFreshAgentContext.call(this, agentMemory);
+                    if (!owner.current()) return;
+                    if (fresh) {
+                        await loadedWindow.addMessage('system', fresh);
+                        if (!owner.current()) return;
+                    }
+                    new Notice(t('chat.session.loaded_fresh'), 4000);
+                }
 
-    try {
-        const agentMemory = this.plugin?.agentManager?.getActiveMemory();
-        if (!agentMemory) return;
-        const filename = path.split('/').pop() as string;
-        const parsed = await agentMemory.loadSession(path);
-        if (!parsed?.messages) return;
-
-        // Modal otwórz starą sesję - 3 opcje + cancel. Default focus 'compress'.
-        // Cancel → return.
-        const agent = this.plugin?.agentManager?.getActiveAgent();
-        const modal = new OpenSessionModal(this.app, {
-            agentName: agent?.name || 'Agent',
-            agentColor: agent?.color || '',
-            sessionTitle: filename.replace(/\.md$/, ''),
-            sessionDate: (parsed.metadata?.created as string) || filename
-        });
-        const choice = await modal.prompt();
-        if (choice === 'cancel') return;
-
-        cancelMessageEdit(this.rollingWindow);
-        await this.handleSaveSession();
-        this.rollingWindow = this._createRollingWindow();
-
-        if (choice === 'continue') {
-            // Pełen load
-            for (const msg of parsed.messages) {
-                await this.rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
-            }
-            new Notice(t('chat.session.loaded_full', { count: parsed.messages.length }), 4000);
-        } else if (choice === 'compress') {
-            // Załaduj L1 summary który includes tę sesję — przez frontmatter `included_in: [[l1_xxx]]`
-            const summaryText = await _findCoveringL1Summary.call(this, agentMemory, filename);
-            if (summaryText) {
-                await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji (L1 summary):\n\n${summaryText}`);
-                new Notice(t('chat.session.loaded_compressed'), 4000);
-            } else {
-                // Fallback: brak L1 jeszcze (sesja niezaczęta przez consolidateLevel1) — załaduj summary z pliku jeśli jest
-                const fallback = parsed.summary || `${parsed.messages.length} wiadomości - pełen kontekst niedostępny w skompresowanej formie.`;
-                await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji:\n\n${fallback}`);
-                new Notice(t('chat.session.compressed_fallback'), 4000);
-            }
-        } else if (choice === 'fresh') {
-            // Brain + ostatnie 3 L1 jako kontekst, fresh start
-            const fresh = await _buildFreshAgentContext.call(this, agentMemory);
-            if (fresh) {
-                await this.rollingWindow.addMessage('system', fresh);
-            }
-            new Notice(t('chat.session.loaded_fresh'), 4000);
+                if (!owner.current()) return;
+                if (owner.tab && !owner.tab.isActive) {
+                    const state = this._agentStates.get(_tabKey(owner.tab));
+                    if (state) state.rollingWindow = loadedWindow;
+                    return;
+                }
+                this.rollingWindow = loadedWindow;
+                void this.render_messages();
+                this.updateTokenCounter();
+                this._updateTokenPanel?.();
+            });
+        } catch (e) {
+            log.error('Chat', 'Error loading session:', e);
         }
-
-        void this.render_messages();
-        this.updateTokenCounter();
-        this._updateTokenPanel?.();
-    } catch (e) {
-        log.error('Chat', 'Error loading session:', e);
-    }
+    });
 }
 
 /**

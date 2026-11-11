@@ -60,6 +60,7 @@ modules/chat/
     ├── turnOwner.js                # kto jest WŁAŚCICIELEM okna/tury: resolvery + providery RollingWindow + `freezeTurnOwner(view)`; pure, testowalny
     ├── turnAbort.js                # uchwyt przerwania tury (zatrzask); pure, testowalny
     ├── sendAdmission.ts            # nieprzerywalne przyjęcie per RollingWindow, odroczenie Stopu i Promise dla lifecycle
+    ├── sessionLifecycle.ts         # kolejka i deduplikacja lifecycle przechwyconej zakładki/sesji
     ├── compressionPrompt.js        # czysty re-export z `config/default_prompts.js` (tam mieszka `defaultCompressionPrompt()`) - lokalne drzwi dla wnętrza czatu
     ├── memoryCandidates.js         # parser bloku MEMORY_CANDIDATES z odpowiedzi Summarizera
     ├── subTaskNotification.js      # treść powiadomienia o wyniku suba z tła + matchTabForOrigin (pure, testowalny)
@@ -1880,8 +1881,25 @@ F6 wprowadza dwie fazy przyjęcia:
 `finish()` wykonuje odroczony Stop przed budową promptu i startem prowadzącego.
 `handleSaveSession` pobiera snapshot po oczekiwaniu. Zamknięcie, Nowa sesja,
 load/restore czekają tylko na przyjęcie, nigdy na całą odpowiedź modelu.
-Odroczone operacje zachowują właściciela; przed wejściem do istniejącego modalu
-przywracają jego zakładkę. Zmiana wybranej zakładki pozostaje natychmiastowa.
+`sessionLifecycle.ts` przechwytuje obiekt zakładki, okno, ścieżkę i epokę przy
+kliknięciu. Zamknij, Nowa sesja, load i restore istniejącego widoku serializują
+kroki dla tego właściciela; powtórne żądanie tej samej operacji współdzieli trwającą
+Promise (load również rozróżnia ścieżkę pliku do otwarcia). Po zakończeniu żądania
+można je ponowić. Każdy powrót z oczekiwania przed następnym skutkiem sprawdza
+obecność zakładki, tożsamość sesji i okno. B może uzupełnić pustą ścieżkę/epokę
+swojej świeżej lub legacy sesji wyłącznie przez publikacje zapisane przez
+`publishTurnSessionIdentity` w konkretnym `SendAdmission`. Samo zakończenie B
+nie uprawnia do przyjęcia wartości zastanej w zakładce (również przy początkowym
+null); istniejącej ścieżki/epoki nie zastępujemy cudzą.
+
+Modal Nowej sesji i modal load zwalniają kolejkę na czas decyzji człowieka,
+pozostając objęte deduplikacją. Wybór wraca do tej samej kolejki: po zamknięciu
+lub wymianie A jest bez skutku, także Archive/Discard/Cancel. Przed wejściem do
+istniejącego workflow archiwizacji przywracamy A i ponownie sprawdzamy właściciela;
+wnętrze tego workflow nie jest zmienione. Discard podaje przechwyconą ścieżkę,
+a reset okna trafia do A także po przełączeniu podczas I/O. Zamknięcie sprawdza
+właściciela po zapisie i indeks przed splice; zamknięcie A w tle nie wybiera B.
+Zmiana wybranej zakładki pozostaje natychmiastowa.
 Nie wolno omijać tej bramki bezpośrednim abortem `_preparingTurns`.
 
 `_deliverSubTaskResult` zwraca `false` przy zaplanowaniu auto-tury; pobiera claim
@@ -1893,6 +1911,19 @@ ani `_consumeUserStoppedSubTasks`. Stałe ID `sub-result:<taskId>` i
 plan zapisu zawiera każde ID tylko raz. Pytania zachowują własną kontrolę ważności.
 Licznik auto-tur ma generację per agent: człowiek zeruje licznik i zwiększa generację;
 opóźniony odbiór wyniku rozlicza tylko generację, z której wystartował.
+
+Listener `quit` rejestrowany przez `initSessionManager` przekazuje hostowi jedną
+Promise: najpierw wszystkie przyjęcia z rejestrów przygotowania/streamingu, również
+bez ścieżki i w tle, potem zbieranie zapisów sesji. Sam Stop w B nie jest zadaniem
+hosta; nie wolno zastąpić tego oczekiwania filtrowaniem zakładek po `sessionPath`.
+Kolejność wygaszania w `src/main.ts` pozostaje poza tym kontraktem.
+
+Testy F7 w `chat_streaming.sendTab.test.ts` używają produkcyjnych rejestracji
+przycisków i quit. Obejmują podwójne Zamknij, Nowa→Zamknij→każdą decyzję,
+Nowa+Nowa, Zamknij+Nowa, Stop+Zamknij, load+Zamknij przy zapisie, trzech awaitach
+migracji i rzeczywistej kompresji; restore+Zamknij w obu kolejnościach; zapisy,
+przełączenie, discard, todo i reset wskaźnika po B; zmianę ścieżki/epoki/obiektu
+zakładki oraz quit z jedną i dwiema trwającymi wysyłkami.
 
 Testy F6 w `chat_streaming.sendTab.test.ts` obejmują A/B ze Stopem, Escape,
 Nowa→Cancel, zamknięciem zakładki/widoku, pojedynczy write poprawki, EACCES,
