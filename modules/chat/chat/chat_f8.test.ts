@@ -9,8 +9,8 @@ import { handleSaveSession, handleNewSession, initSessionManager, _restoreActive
 import { _switchTab } from './chat_tabs.js';
 import { hasPendingMessageEdit } from './messageEdit.js';
 import * as edit from './messageEdit.js';
-import { MentionAutocomplete } from '../../ui-components/index.js';
-import { TriggerPopup } from './TriggerPopup.js';
+import { register } from 'node:module';
+import type { ChatViewLike } from './chatViewShape.js';
 import { getLocale, setLocale } from '../../../core/i18n/index.js';
 import { AgentMemory } from '../../memory/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
@@ -275,31 +275,105 @@ test.serial('F8-3: zmiana historii podczas zapisu nie jest scalana z poprzednim 
     t.deepEqual(parseActiveSession(f.files.get(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Nowa po usunięciu']);
 });
 
-for (const kind of ['@', '/', 'none'] as const) test.serial(`Escape edycji: ${kind} i wysłanie`, async t => {
+// The harness DOM has no event dispatch or parent links. Keep listener ordering and
+// stopImmediatePropagation native while renderView creates and wires the field.
+function browserEvents(el: HTMLElement, parent?: HTMLElement): void {
+    const target = new EventTarget();
+    el.addEventListener = target.addEventListener.bind(target);
+    el.removeEventListener = target.removeEventListener.bind(target);
+    el.dispatchEvent = target.dispatchEvent.bind(target);
+    if (parent) Object.defineProperty(el, 'parentElement', { value: parent });
+    const div = el.createDiv.bind(el), span = el.createSpan.bind(el), create = el.createEl.bind(el);
+    el.createDiv = options => { const child = div(options); browserEvents(child, el); child.remove = () => { el.removeChild(child); }; return child; };
+    el.createSpan = options => { const child = span(options); browserEvents(child, el); return child; };
+    el.createEl = ((tag, options) => { const child = create(tag, options); browserEvents(child, el); return child; }) as typeof el.createEl;
+    el.insertBefore = ((child: Node, before: Node) => {
+        const children = el.children as unknown as Node[];
+        const index = children.indexOf(child);
+        if (index >= 0) children.splice(index, 1);
+        children.splice(children.indexOf(before), 0, child);
+        return child;
+    }) as typeof el.insertBefore;
+}
+
+register('data:text/javascript,' + encodeURIComponent(`export async function load(url, context, next) {
+    if (url.endsWith('.css')) return { format: 'module', source: 'export default {}', shortCircuit: true };
+    return next(url, context);
+}`));
+const { ChatView } = await import('../chat_view.js');
+
+async function escapeFixture(t: import('ava').ExecutionContext) {
     const f = await fixture();
-    const trigger = new TriggerPopup(null, null, f.view.input_area);
-    const popupView = { _triggerPopup: trigger, input_area: f.view.input_area };
-    f.view.input_area.addEventListener('keydown', event => uiFunction('_handleTriggerKeyDown').call(popupView, event));
-    const mention = new MentionAutocomplete(f.view.input_area, { app: { vault: {} } } as never);
-    Object.assign(f.view, { mentionAutocomplete: mention });
-    f.view.input_area.addEventListener('keydown', event => uiFunction('handle_input_keydown').call(f.view, event));
-    startEditMessage.call(f.view as never, 0, 'Historia A');
-    if (kind === '@') {
-        f.view.input_area.value = '@';
-        f.view.input_area.selectionStart = 1;
-        f.dispatch('input');
-        t.is(mention.isOpen, true);
-    } else if (kind === '/') {
-        trigger.open();
-        t.is(trigger.isOpen(), true);
-    }
-    f.dispatch('keydown', 'Escape');
-    t.is(mention.isOpen, false);
-    t.is(trigger.isOpen(), false);
-    t.is(hasPendingMessageEdit(f.windows[0]), kind !== 'none', 'stan edycji po Escape');
-    f.view.input_area.value = 'Poprawka';
-    await send_message.call(f.view as never, { meta: { origin: 'human' } });
-    t.deepEqual(f.windows[0].messages.filter(m => m.role === 'user').map(m => m.content),
-        kind === 'none' ? ['Historia A', 'Poprawka'] : ['Poprawka']);
-    mention.destroy();
+    const windowEvents = new EventTarget();
+    window.addEventListener = windowEvents.addEventListener.bind(windowEvents);
+    window.removeEventListener = windowEvents.removeEventListener.bind(windowEvents);
+    const app = { vault: { adapter: f.adapter, getMarkdownFiles: () => [] }, workspace: { getActiveFile: () => null }, metadataCache: { getFirstLinkpathDest: () => null } };
+    const agent = { name: 'Mira', model: 'openai/test', color: '#123456', enabled: true };
+    const settings = { pkmAssistant: { enableOczko: false, chat: { platform: 'openai', apiKeys: { openai: 'test' } }, limits: { chat_stream_stall_timeout_ms: 0 } } };
+    const plugin = { app, settings, manifest: { id: 'pkm-assistant' }, env: { settings, config: { chat: { providers: { openai: {} }, http: {}, transport: {} } } },
+        agentManager: { getActiveAgent: () => agent, getActiveAgentSkills: () => [], getAgent: () => agent, getAllAgents: () => [agent], getActiveMemory: () => f.memory, getAgentMemory: () => f.memory, getActiveSystemPromptWithMemory: async () => 'system' }, showCrystalNotice() {} };
+    const view = new ChatView({ app, id: 'escape-f8' }, plugin as never) as ChatViewLike;
+    browserEvents(view.container);
+    await view.renderView();
+    // Reuse the established in-memory send/session fixture, keeping the actual rendered field.
+    const input = view.input_area;
+    const { env: _env, plugin: _plugin, leaf: _leaf, ...sendFixture } = f.view;
+    Object.assign(view, sendFixture, { input_area: input });
+    t.teardown(() => {
+        view.mentionAutocomplete?.destroy();
+        view._closeTriggerPopup();
+        if (view.handleGlobalKeydownBound) document.removeEventListener('keydown', view.handleGlobalKeydownBound);
+        if (view.handleBeforeUnloadBound) window.removeEventListener('beforeunload', view.handleBeforeUnloadBound);
+        view._selectionMenuDetach?.();
+        view._connectorActivityDetach?.();
+    });
+    const key = (name: string) => { const event = new Event('keydown', { cancelable: true }); Object.defineProperty(event, 'key', { value: name }); input.dispatchEvent(event); };
+    const open = async (kind: '@' | '/') => {
+        if (kind === '@') { input.value = '@'; input.selectionStart = 1; input.dispatchEvent(new Event('input')); }
+        else { input.value = ''; input.selectionStart = 0; key('/'); input.value = '/'; input.selectionStart = 1; await new Promise<void>(resolve => window.setTimeout(resolve, 5)); }
+    };
+    return { f, view, input, key, open };
+}
+
+for (const kind of ['@', '/'] as const) for (const timing of ['przed edycją', 'po rozpoczęciu edycji', 'po ponownym wejściu'] as const) {
+    test.serial(`Escape edycji: ${kind}, podpowiedź ${timing}, drugi Escape`, async t => {
+        const { f, view, input, key, open } = await escapeFixture(t);
+        if (timing === 'przed edycją') await open(kind);
+        if (timing === 'po ponownym wejściu') { startEditMessage.call(view, 0, 'Historia A'); key('Escape'); t.is(hasPendingMessageEdit(f.windows[0]), false); }
+        startEditMessage.call(view, 0, 'Historia A');
+        if (timing !== 'przed edycją') await open(kind);
+        t.is(kind === '@' ? view.mentionAutocomplete!.isOpen : view._triggerPopup!.isOpen(), true);
+        key('Escape');
+        t.is(view.mentionAutocomplete!.isOpen, false);
+        t.is(view._triggerPopup?.isOpen() ?? false, false);
+        t.is(hasPendingMessageEdit(f.windows[0]), true, 'pierwszy Escape zachowuje edycję');
+        key('Escape');
+        t.is(hasPendingMessageEdit(f.windows[0]), false, 'drugi Escape anuluje edycję');
+        input.value = 'Poprawka';
+        await send_message.call(view, { meta: { origin: 'human' } });
+        t.deepEqual(f.windows[0].messages.filter(m => m.role === 'user').map(m => m.content), ['Historia A', 'Poprawka']);
+    });
+}
+
+test.serial('Escape edycji: bez podpowiedzi anuluje edycję i wysyła nową wiadomość', async t => {
+    const { f, view, input, key } = await escapeFixture(t);
+    startEditMessage.call(view, 0, 'Historia A');
+    key('Escape');
+    t.is(hasPendingMessageEdit(f.windows[0]), false);
+    input.value = 'Poprawka';
+    await send_message.call(view, { meta: { origin: 'human' } });
+    t.deepEqual(f.windows[0].messages.filter(m => m.role === 'user').map(m => m.content), ['Historia A', 'Poprawka']);
+});
+
+for (const kind of ['@', '/'] as const) test.serial(`Escape edycji: ${kind} i wysłanie poprawki`, async t => {
+    const { f, view, input, key, open } = await escapeFixture(t);
+    startEditMessage.call(view, 0, 'Historia A');
+    await open(kind);
+    key('Escape');
+    t.is(view.mentionAutocomplete!.isOpen, false);
+    t.is(view._triggerPopup?.isOpen() ?? false, false);
+    t.is(hasPendingMessageEdit(f.windows[0]), true);
+    input.value = 'Poprawka';
+    await send_message.call(view, { meta: { origin: 'human' } });
+    t.deepEqual(f.windows[0].messages.filter(m => m.role === 'user').map(m => m.content), ['Poprawka']);
 });
