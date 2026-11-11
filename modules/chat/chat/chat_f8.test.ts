@@ -9,6 +9,8 @@ import { handleSaveSession, handleNewSession, initSessionManager, _restoreActive
 import { _switchTab } from './chat_tabs.js';
 import { hasPendingMessageEdit } from './messageEdit.js';
 import * as edit from './messageEdit.js';
+import { MentionAutocomplete } from '../../ui-components/index.js';
+import { TriggerPopup } from './TriggerPopup.js';
 import { getLocale, setLocale } from '../../../core/i18n/index.js';
 import { AgentMemory } from '../../memory/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
@@ -62,11 +64,14 @@ async function fixture(otherAgent = false) {
         return child;
     }) as typeof host.insertBefore;
 
-    const listeners = new Map<string, Set<EventListener>>();
-    input.addEventListener = ((event: string, cb: EventListener) => {
-        const set = listeners.get(event) ?? new Set(); set.add(cb); listeners.set(event, set);
+    const listeners: { type: string; cb: EventListener; capture: boolean }[] = [];
+    input.addEventListener = ((type: string, cb: EventListener, capture = false) => {
+        listeners.push({ type, cb, capture: capture === true });
     }) as typeof input.addEventListener;
-    input.removeEventListener = ((event: string, cb: EventListener) => { listeners.get(event)?.delete(cb); }) as typeof input.removeEventListener;
+    input.removeEventListener = ((type: string, cb: EventListener, capture = false) => {
+        const index = listeners.findIndex(item => item.type === type && item.cb === cb && item.capture === (capture === true));
+        if (index >= 0) listeners.splice(index, 1);
+    }) as typeof input.removeEventListener;
     const view = {
         leaf: { id: 'f8' }, rollingWindow: windows[0], input_area: input, inputHistory: [] as string[],
         tokenTracker: { record() {}, clear() {} }, chatTabs: tabs,
@@ -87,7 +92,15 @@ async function fixture(otherAgent = false) {
         _finalizeTurn() { this.is_generating = false; }, handle_error(error: unknown) { throw error; },
     };
     return { files, writes, adapter, memory, view, windows, tabs, host, indicator: () => [...host.children].find(child => child.className === 'cs-message-edit-indicator') ?? null,
-        dispatch(type: string, key = '') { for (const listener of [...listeners.get(type) ?? []]) listener({ key, preventDefault() {}, stopPropagation() {} } as unknown as Event); },
+        dispatch(type: string, key = '') {
+            const event = { key, defaultPrevented: false, stopped: false, immediate: false,
+                preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.stopped = true; },
+                stopImmediatePropagation() { this.immediate = true; this.stopped = true; } };
+            for (const capture of [true, false]) for (const listener of [...listeners]) {
+                if (listener.type === type && listener.capture === capture && !event.immediate) listener.cb(event as unknown as Event);
+            }
+            if (type === 'keydown' && !event.stopped) uiFunction('handleGlobalKeydown').call(view, event);
+        },
     };
 }
 
@@ -260,4 +273,33 @@ test.serial('F8-3: zmiana historii podczas zapisu nie jest scalana z poprzednim 
     const second = handleSaveSession.call(f.view as never);
     await Promise.all([first, second]);
     t.deepEqual(parseActiveSession(f.files.get(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Nowa po usunięciu']);
+});
+
+for (const kind of ['@', '/', 'none'] as const) test.serial(`Escape edycji: ${kind} i wysłanie`, async t => {
+    const f = await fixture();
+    const trigger = new TriggerPopup(null, null, f.view.input_area);
+    const popupView = { _triggerPopup: trigger, input_area: f.view.input_area };
+    f.view.input_area.addEventListener('keydown', event => uiFunction('_handleTriggerKeyDown').call(popupView, event));
+    const mention = new MentionAutocomplete(f.view.input_area, { app: { vault: {} } } as never);
+    Object.assign(f.view, { mentionAutocomplete: mention });
+    f.view.input_area.addEventListener('keydown', event => uiFunction('handle_input_keydown').call(f.view, event));
+    startEditMessage.call(f.view as never, 0, 'Historia A');
+    if (kind === '@') {
+        f.view.input_area.value = '@';
+        f.view.input_area.selectionStart = 1;
+        f.dispatch('input');
+        t.is(mention.isOpen, true);
+    } else if (kind === '/') {
+        trigger.open();
+        t.is(trigger.isOpen(), true);
+    }
+    f.dispatch('keydown', 'Escape');
+    t.is(mention.isOpen, false);
+    t.is(trigger.isOpen(), false);
+    t.is(hasPendingMessageEdit(f.windows[0]), kind !== 'none', 'stan edycji po Escape');
+    f.view.input_area.value = 'Poprawka';
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    t.deepEqual(f.windows[0].messages.filter(m => m.role === 'user').map(m => m.content),
+        kind === 'none' ? ['Historia A', 'Poprawka'] : ['Poprawka']);
+    mention.destroy();
 });

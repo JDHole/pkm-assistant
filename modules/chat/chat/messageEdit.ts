@@ -14,18 +14,18 @@ export function beginMessageEdit(window: RollingWindow, message: RollingMessage,
     if (indicator) row?.parentElement?.insertBefore(indicator, row);
     const onInput = () => { if (!input?.value.trim()) cancelMessageEdit(window); };
     const onKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' && !event.defaultPrevented) {
             event.preventDefault();
             cancelMessageEdit(window);
         }
     };
-    // Capture Escape before autocomplete/popups can consume it.
+    // Popup listeners run first and may consume Escape before the edit is cancelled.
     input?.addEventListener?.('input', onInput);
-    input?.addEventListener?.('keydown', onKey, true);
+    input?.addEventListener?.('keydown', onKey);
     pending.set(window, { message, isCurrent, cleanup() {
         indicator?.remove();
         input?.removeEventListener?.('input', onInput);
-        input?.removeEventListener?.('keydown', onKey, true);
+        input?.removeEventListener?.('keydown', onKey);
     } });
 }
 export function hasPendingMessageEdit(window: RollingWindow): boolean {

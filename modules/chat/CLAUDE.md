@@ -108,6 +108,8 @@ też nie wychodzą przez barrel - żyją i są używane wewnątrz `chat/`.
 
 ---
 
+Edycja wiadomości rejestruje Escape w fazie bubble po nasłuchach podpowiedzi; respektuje `defaultPrevented`, a podpowiedzi zatrzymują propagację do globalnego anulowania edycji. Zachowaj tę kolejność przy zmianie pola.
+
 ## Wyzwalacze pola czatu: `/` i `@` to DWA NIEZALEŻNE mechanizmy (2.3.0)
 
 Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`TriggerPopup` i
