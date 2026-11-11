@@ -1910,3 +1910,10 @@ Przegląd czytelników `is_generating` / `_preparingTurns` (F1):
 - `chat_view`: deklaracje/inicjalizacja i komentarze, bez dodatkowej bramki;
   `subTaskDelivery` i `autoTurnChain`: wzmianki w kontraktach/komentarzach,
   bez samodzielnego odczytu stanu widoku. Bez zmian.
+
+### F2 — właściciel po asynchronicznej komendzie i wyniku narzędzia
+
+Asynchroniczne `/save`, `/memory` i `/compress` czyszczą pole tylko przy tej samej
+aktywnej zakładce i niezmienionej treści komendy. Kontynuacja po narzędziu sprawdza
+aktywną zakładkę przed każdym malowaniem po I/O; kafelek maszyny powstaje poza
+widocznym kontenerem i jest dołączany po ponownej kontroli. Tura nadal pracuje w tle.

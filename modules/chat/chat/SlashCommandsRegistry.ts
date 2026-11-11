@@ -48,6 +48,15 @@ export class SlashCommandsRegistry {
     }
 }
 
+function guardedInputReset(view: SlashCommandContext['view'], raw: string): () => void {
+    const tab = view.chatTabs.find(item => item.isActive);
+    const value = view.input_area.value;
+    return () => {
+        if (tab && view.chatTabs.find(item => item.isActive) === tab
+            && value.trim() === raw && view.input_area.value === value) view.resetInputArea();
+    };
+}
+
 export function createDefaultSlashCommands(): SlashCommandsRegistry {
     const registry = new SlashCommandsRegistry();
 
@@ -63,9 +72,10 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
     registry.register({
         name: '/save',
         description: 'Save current session.',
-        handler: async ({ view }) => {
+        handler: async ({ view }, raw) => {
+            const reset = guardedInputReset(view, raw);
             await view.handleSaveSession();
-            view.resetInputArea();
+            reset();
         }
     });
     registry.register(createSaveSessionCommand());
@@ -73,7 +83,8 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
     registry.register({
         name: '/memory',
         description: 'Consolidate current session into memory.',
-        handler: async ({ view }) => {
+        handler: async ({ view }, raw) => {
+            const reset = guardedInputReset(view, raw);
             const agentMem = view.plugin?.agentManager?.getActiveMemory();
             const hasMsg = view.rollingWindow.messages.length >= 2;
             let hasDisk = false;
@@ -96,18 +107,19 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
             } else {
                 new Notice(t('chat.no_sessions'));
             }
-            view.resetInputArea();
+            reset();
         }
     });
 
     registry.register({
         name: '/compress',
         description: 'Compress current chat context.',
-        handler: async ({ view }) => {
+        handler: async ({ view }, raw) => {
+            const reset = guardedInputReset(view, raw);
             // Rdzeń dzielony z guzikiem 🗜️ w chat_ui.ts (_renderSlimBar) - patrz komentarz przy
             // `runManualCompression` tam.
             await runManualCompression(view);
-            view.resetInputArea();
+            reset();
         }
     });
 

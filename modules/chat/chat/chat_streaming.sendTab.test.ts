@@ -9,6 +9,9 @@ import { _switchTab, _renderTabBar, _closeActiveTab } from './chat_tabs.js';
 import { AgentMemory } from '../../memory/index.js';
 import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
+import { Notice } from 'obsidian';
+import { t as translate } from '../../../core/i18n/index.js';
+import { log } from '../../../core/utils/Logger.js';
 import { cancelMessageEdit } from './messageEdit.js';
 import { _resolveMentions } from './chat_model.js';
 import { AttachmentManager, MentionAutocomplete } from '../../ui-components/index.js';
@@ -325,6 +328,155 @@ for (const editing of [true, false]) for (const stage of ['stopped-message', 'st
     });
 }
 
+function installSaveCommand(view: Awaited<ReturnType<typeof fixture>>['view'], name = '/save') {
+    const source = ts.createSourceFile('SlashCommandsRegistry.ts', readFileSync(new URL('./SlashCommandsRegistry.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    const registryClass = source.statements.find(s => ts.isClassDeclaration(s) && s.name?.text === 'SlashCommandsRegistry');
+    const factory = source.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === 'createDefaultSlashCommands');
+    if (!registryClass || !factory || !ts.isFunctionDeclaration(factory) || !factory.body) throw new Error('Missing registry');
+    const save = factory.body.statements.find(s => s.getText(source).includes(`name: '${name}'`));
+    if (!save) throw new Error(`Missing ${name}`);
+    const guard = source.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === 'guardedInputReset');
+    if (!guard) throw new Error('Missing input guard');
+    const code = ts.transpile(guard.getText(source) + '\n' + registryClass.getText(source).replace(/^export /, '')
+        + '\nconst registry = new SlashCommandsRegistry();\n' + save.getText(source) + '\nreturn registry;', { target: ts.ScriptTarget.ES2022 });
+    const ui = ts.createSourceFile('chat_ui.ts', readFileSync(new URL('./chat_ui.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    const compression = ui.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === 'runManualCompression');
+    if (!compression) throw new Error('Missing compression');
+    const compressionCode = ts.transpile(compression.getText(ui).replace(/^export /, '') + '\nreturn runManualCompression;', { target: ts.ScriptTarget.ES2022 });
+    const runManualCompression = new Function('Notice', 't', compressionCode)(Notice, translate);
+    view.slashCommands = new Function('Notice', 't', 'log', 'runManualCompression', code)(Notice, translate, log, runManualCompression);
+}
+
+test.serial('F2: /save po przełączeniu zachowuje szkic B', async t => {
+    const f = await fixture();
+    t.teardown(() => f.view.attachmentManager.destroy());
+    installSaveCommand(f.view);
+    const entered = deferred(), release = deferred();
+    const save = f.view.handleSaveSession;
+    f.view.handleSaveSession = async function (...args) {
+        await save.apply(this, args);
+        entered.resolve();
+        await release.promise;
+    };
+    f.view.input_area.value = '/save';
+    const run = f.clickSend();
+    await entered.promise;
+    await f.clickB();
+    f.view.input_area.value = 'Szkic B';
+    release.resolve();
+    await run;
+    t.is(f.view.input_area.value, 'Szkic B');
+});
+
+test.serial('F2: /save nie usuwa nowej treści w tej samej zakładce', async t => {
+    const f = await fixture();
+    t.teardown(() => f.view.attachmentManager.destroy());
+    installSaveCommand(f.view);
+    const entered = deferred(), release = deferred();
+    const save = f.view.handleSaveSession;
+    f.view.handleSaveSession = async function (...args) {
+        await save.apply(this, args);
+        entered.resolve();
+        await release.promise;
+    };
+    f.view.input_area.value = '/save';
+    const run = f.clickSend();
+    await entered.promise;
+    f.view.input_area.value = 'Nowy szkic A';
+    release.resolve();
+    await run;
+    t.is(f.view.input_area.value, 'Nowy szkic A');
+});
+
+for (const stage of ['memory-read', 'memory-consolidate', 'compress'] as const) test.serial(`F2: /${stage} po przełączeniu zachowuje szkic B`, async t => {
+    const f = await fixture();
+    t.teardown(() => f.view.attachmentManager.destroy());
+    const entered = deferred(), release = deferred();
+    const hold = async () => { entered.resolve(); await release.promise; };
+    if (stage === 'memory-read') {
+        f.memory.getUnconsolidatedSessions = async () => { await hold(); return []; };
+        Object.assign(f.view, { consolidateSession: async () => {} });
+    }
+    if (stage === 'memory-consolidate') Object.assign(f.view, { consolidateSession: hold });
+    if (stage === 'compress') {
+        await f.windows[0].addMessage('user', 'Dodatkowe pytanie A');
+        await f.windows[0].addMessage('assistant', 'Dodatkowa odpowiedź A');
+        f.windows[0].performTwoPhaseCompression = async () => { await hold(); return { phase: 0, trimmed: 0, trimDetails: [], savedChars: 0, summarized: false, summaryFailed: false }; };
+    }
+    installSaveCommand(f.view, stage === 'compress' ? '/compress' : '/memory');
+    f.view.input_area.value = stage === 'compress' ? '/compress' : '/memory';
+    const run = f.clickSend();
+    await Promise.race([entered.promise, run.then(() => { throw new Error('Nie osiągnięto oczekiwania komendy'); })]);
+    await f.clickB();
+    f.view.input_area.value = 'Szkic B';
+    release.resolve();
+    await run;
+    t.is(f.view.input_area.value, 'Szkic B');
+});
+
+for (const stage of ['agent_message', 'tool_result', 'compression', 'skill_nudge', 'delegate_nudge', 'queued_add', 'queued_event', 'tile_render'] as const) test.serial(`F2: kontynuacja narzędzia przy ${stage} nie maluje w B`, async t => {
+    const f = await fixture();
+    t.teardown(() => f.view.attachmentManager.destroy());
+    const entered = deferred(), release = deferred();
+    const append = f.memory.appendSessionEvent.bind(f.memory);
+    f.memory.appendSessionEvent = async (...args) => {
+        if ((args[1]?.type === stage && (stage !== 'agent_message' || Array.isArray(args[1].tool_calls))) || (stage === 'queued_event' && args[1]?.type === 'user_message' && args[1].content === 'Kolejka A')) {
+            entered.resolve();
+            await release.promise;
+        }
+        return append(...args);
+    };
+    if (stage === 'compression') {
+        f.windows[0].getCompressionNeeded = () => 'summarize';
+        f.windows[0].performTwoPhaseCompression = async () => { entered.resolve(); await release.promise; return { phase: 0, trimmed: 0, trimDetails: [], savedChars: 0, summarized: false, summaryFailed: false }; };
+    }
+    const add = f.windows[0].addMessage.bind(f.windows[0]);
+    f.windows[0].addMessage = async (role, content, metadata) => {
+        if (role === 'user' && ((stage === 'queued_add' && content === 'Kolejka A')
+            || ((stage === 'skill_nudge' || stage === 'delegate_nudge') && content !== 'Pytanie z narzędziem'))) {
+            entered.resolve(); await release.promise;
+        }
+        return add(role, content, metadata);
+    };
+    if (stage === 'tile_render') Object.assign(f.view.plugin, { artifactStore: { async read() { entered.resolve(); await release.promise; return { path: 'A.md' }; } } });
+    let calls = 0;
+    Object.assign(f.view, {
+        async _chatBeforeContinue(turn: Parameters<typeof streaming._chatBeforeContinue>[0], i: number) {
+            if (stage === 'skill_nudge') turn.skillActiveAt = -2;
+            if (stage === 'delegate_nudge' && turn.agent) { Object.assign(turn.agent, { getActiveDelegates: () => ['worker'] }); i = 1; }
+            if (stage === 'queued_add' || stage === 'queued_event' || stage === 'tile_render') Object.assign(f.view, {
+                _queuedMessage: { text: stage === 'tile_render' ? 'Artefakt A\n\n```json\n{"id":"art-a"}\n```' : 'Kolejka A', meta: stage === 'tile_render' ? { origin: 'human', _artifactSummon: true } : { origin: 'human' }, owner: { tabKey: 'A', agentName: 'Mira' } },
+            });
+            await streaming._chatBeforeContinue.call(f.view as never, turn, i);
+        },
+        get_chat_model: () => ({ providerId: 'openai', stream(_payload: unknown, cb: { done(value: unknown): void }) {
+            calls++;
+            cb.done({ choices: [{ message: calls === 1
+                ? { role: 'assistant', content: 'Praca A', tool_calls: [{ id: `t${calls}`, type: 'function', function: { name: 'list', arguments: JSON.stringify({ iteration: calls }) } }] }
+                : { role: 'assistant', content: 'Gotowe A' } }] });
+        } }),
+        _chatResolveTools: () => [{ type: 'function', function: { name: 'list', parameters: {} } }],
+        _chatExecuteToolCall: async () => ({ success: true }),
+        _chatOnToolCallsParsed() {},
+        render_messages() { f.view.messages_container.empty(); f.view.messages_container.textContent = 'Rozmowa B'; f.view.messages_container.createDiv({ text: 'Wiadomość B' }); },
+        showTypingIndicator(text: string) { f.view.messages_container.textContent = text; },
+    });
+    f.view.input_area.value = 'Pytanie z narzędziem';
+    const run = f.clickSend();
+    await Promise.race([entered.promise, run.then(() => { throw new Error('Nie osiągnięto zapisu narzędzia'); })]);
+    await f.clickB();
+    f.view.input_area.value = 'Szkic B';
+    release.resolve();
+    await run;
+    t.is(f.view.input_area.value, 'Szkic B');
+    t.is(f.view.messages_container.textContent, 'Rozmowa B');
+    t.deepEqual([...f.view.messages_container.children].map(el => el.textContent), ['Wiadomość B']);
+    t.is(f.windows[0].messages.at(-1)?.content, 'Gotowe A');
+    t.is((await f.memory.loadActiveSession(f.tabs[0].sessionPath)).messages.at(-1)?.content, 'Gotowe A');
+    await f.clickA();
+    t.is(f.view.rollingWindow.messages.at(-1)?.content, 'Gotowe A');
+});
+
 test.serial('P1: rozpoznane /save zapisuje historię i zachowuje załącznik do wiadomości', async t => {
     const f = await fixture();
     t.teardown(() => f.view.attachmentManager.destroy());
@@ -336,7 +488,9 @@ test.serial('P1: rozpoznane /save zapisuje historię i zachowuje załącznik do 
     if (!registryClass || !factory || !ts.isFunctionDeclaration(factory) || !factory.body) throw new Error('Missing registry');
     const save = factory.body.statements.find(s => s.getText(source).includes("name: '/save'"));
     if (!save) throw new Error('Missing /save');
-    const code = ts.transpile(registryClass.getText(source).replace(/^export /, '')
+    const guard = source.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === 'guardedInputReset');
+    if (!guard) throw new Error('Missing input guard');
+    const code = ts.transpile(guard.getText(source) + '\n' + registryClass.getText(source).replace(/^export /, '')
         + '\nconst registry = new SlashCommandsRegistry();\n' + save.getText(source) + '\nreturn registry;', { target: ts.ScriptTarget.ES2022 });
     f.view.slashCommands = new Function(code)();
     await f.windows[0].addMessage('assistant', 'Dopisek A');

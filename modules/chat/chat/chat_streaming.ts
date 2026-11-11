@@ -1870,7 +1870,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
  */
 export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i: number) {
     turn.watchdog?.disarm(); // defensywnie: kompresja mid-loop może chwilę trwać, nie pilnujemy jej
-    const isActiveTab = this._isTurnActiveTab(turn);
+    const isActiveTab = () => this._isTurnActiveTab(turn);
     const rw = turn.rw;
     const agentName = turn.agentName;
     const streamAgent = turn.agent;
@@ -1897,7 +1897,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         const out = countTokens(assistantContent);
         if (inp > 0 || out > 0) {
             turn.tt.record('main', inp, out, { estimated: true });
-            if (isActiveTab) this._updateTokenPanel();
+            if (isActiveTab()) this._updateTokenPanel();
         }
     }
 
@@ -1965,7 +1965,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     const compressionNeeded = rw.getCompressionNeeded();
     if (compressionNeeded !== 'none') {
         log.info('Chat', `Token Economy: mid-loop compression (${compressionNeeded}) po iteracji ${iterCount}`);
-        if (isActiveTab) this.showTypingIndicator(t('chat.streaming.compressing_context'));
+        if (isActiveTab()) this.showTypingIndicator(t('chat.streaming.compressing_context'));
         if (compressionNeeded === 'summarize') {
             // Sama ścieżka co end-of-turn (_finalizeTurn) - bez tego pierwsze przekroczenie
             // progu 90% wypadające W ŚRODKU pętli (przed jakąkolwiek kompresją end-of-turn
@@ -1979,7 +1979,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     }
 
     // Reset current container before continuing
-    if (isActiveTab) {
+    if (isActiveTab()) {
         // Ostatnia zebrana klatka MUSI trafić na ekran, zanim zerujemy wskaźniki malowania -
         // inaczej ogon tekstu sprzed wywołania narzędzia by zniknął.
         this._renderThrottle?.flush();
@@ -2032,7 +2032,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         });
 
         // Render in UI (only on active tab)
-        if (isActiveTab) {
+        if (isActiveTab()) {
             this._hideQueuedIndicator();
             // Spec A3: wiadomość zakolejkowana może być maszynowa (guzik przywołania artefaktu
             // wypełnia pole wpisywania i woła `send_message` bez `injectedText`, więc trwająca
@@ -2045,7 +2045,11 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
                 const id = getSubTaskNotificationTaskId({ role: 'user', content: injectedText, ...queued.meta });
                 if (id) await renderNotificationWithReceipt(this.messages_container, this.plugin, machineView, id,
                     () => this._scheduleConnectorRedraw?.(), () => this._isTurnActiveTab(turn));
-                else await renderMachineTile(this.messages_container, this.plugin, machineView);
+                else {
+                    const detached = createDiv();
+                    await renderMachineTile(detached, this.plugin, machineView);
+                    if (isActiveTab()) while (detached.firstChild) this.messages_container.appendChild(detached.firstChild);
+                }
             } else {
                 const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
                 const agentColor = SkinManager.getAgentColor(streamAgent || 'default');
@@ -2053,7 +2057,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
                 const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
                 this._renderUserText(textDiv, injectedText);
             }
-            if (!machineView || !getSubTaskNotificationTaskId({ role: 'user', content: injectedText, ...queued.meta })) this.scrollToBottom();
+            if (isActiveTab() && (!machineView || !getSubTaskNotificationTaskId({ role: 'user', content: injectedText, ...queued.meta }))) this.scrollToBottom();
         }
     }
 }
