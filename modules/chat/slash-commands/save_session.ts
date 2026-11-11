@@ -73,7 +73,9 @@ interface SaveSessionView {
     _updateTokenPanel?(): void;
     _tabBarContainer?: HTMLElement | null;
     _renderTabBar(container: HTMLElement): void;
-    _switchTab?(key: string | undefined): void;
+    _switchTab?(key: string | undefined): void | Promise<void>;
+    _resetTodoPanelState?(): void;
+    _renderSubTaskStrip?(): void;
 }
 
 interface AgentManagerLike {
@@ -92,12 +94,14 @@ interface SaveSessionPlugin {
     env?: NonNullable<ResolverPluginLike>['env'];
     showCrystalNotice?(message: string, options?: CrystalNoticeOptions): unknown;
     mcpClient?: MCPClient;
-    subTaskRegistry?: { closeSessionThreads?(agentName: string, sessionPath: string): unknown };
+    subTaskRegistry?: { pruneSession?(sessionPath: string): unknown; closeSessionThreads?(agentName: string, sessionPath: string): unknown };
 }
 
 interface SaveSessionCommandContext {
     view: SaveSessionView;
     plugin: SaveSessionPlugin;
+    /** New-chat entry keeps plain archive's visible reset inside this flow. */
+    resetAfterArchive?: boolean;
 }
 
 interface SaveSessionCommand {
@@ -160,7 +164,7 @@ export function createSaveSessionCommand(): SaveSessionCommand {
  * reroutes to.
  * @param {{view: Object, plugin: Object}} ctx
  */
-export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandContext): Promise<void> {
+export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = false }: SaveSessionCommandContext): Promise<void> {
     const agentManager = plugin?.agentManager;
     const agentMemory = agentManager?.getActiveMemory?.();
     if (!agentMemory) {
@@ -251,7 +255,11 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
         return;
     }
 
-    await applyPostArchiveAction(view, plugin, agentMemory, result, path);
+    if (resetAfterArchive && path) {
+        plugin.subTaskRegistry?.pruneSession?.(path);
+        view._renderSubTaskStrip?.();
+    }
+    await applyPostArchiveAction(view, plugin, agentMemory, result, path, resetAfterArchive);
     // `applyDecision` (modules/memory) nie przerywa się na padzie
     // jednej notatki — reszta pętli (rebuildBrainIndex, archiveActiveSession) dochodzi do końca,
     // a padnięte pozycje wracają w `result.noteFailures`. Bezwarunkowy Notice „gotowe" zamieniałby
@@ -369,6 +377,7 @@ export async function applyPostArchiveAction(
     agentMemory: AgentMemoryLike,
     result: SaveSessionOutcome,
     closingSessionPath: string | null | undefined,
+    resetAfterArchive = false,
 ): Promise<void> {
     // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
     // (`core/security/SessionWriteConsent.ts`) jest kluczowana `origin.sessionPath` - WSZYSTKIE
@@ -404,7 +413,7 @@ export async function applyPostArchiveAction(
     }
 
     if (action === 'archive_close') {
-        closeArchivedTab(view);
+        await closeArchivedTab(view);
         return;
     }
 
@@ -429,11 +438,13 @@ export async function applyPostArchiveAction(
         activeTab.sessionName = undefined;
         activeTab.sessionLabel = undefined;
     }
+    if (resetAfterArchive) resetVisibleChat(view);
 }
 
 function resetVisibleChat(view: SaveSessionView): void {
     view.rollingWindow = view._createRollingWindow();
     view.tokenTracker?.clear?.();
+    view._resetTodoPanelState?.();
     view.render_messages?.();
     view.add_welcome_message?.();
     view.updateTokenCounter?.();
@@ -441,7 +452,7 @@ function resetVisibleChat(view: SaveSessionView): void {
     if (view._tabBarContainer) view._renderTabBar(view._tabBarContainer);
 }
 
-function closeArchivedTab(view: SaveSessionView): void {
+async function closeArchivedTab(view: SaveSessionView): Promise<void> {
     const activeIndex = view.chatTabs?.findIndex((tab: ChatTabLike) => tab.isActive) ?? -1;
     if (activeIndex < 0) return;
     view.chatTabs.splice(activeIndex, 1);
@@ -450,5 +461,5 @@ function closeArchivedTab(view: SaveSessionView): void {
         return;
     }
     const next = view.chatTabs[Math.min(activeIndex, view.chatTabs.length - 1)];
-    view._switchTab?.(next.sessionId || next.agentName);
+    await view._switchTab?.(next.sessionId || next.agentName);
 }

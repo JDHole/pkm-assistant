@@ -453,26 +453,23 @@ export async function handleNewSession(this: ChatViewLike) {
 
         if (choice === 'cancel') return;
 
-        const agentMemoryForOpts = closingSessionMemory;
-
-        // Biegi subów należą do SESJI - zamknięcie (archive/discard) wymiata jej zakończone
-        // biegi z rejestru, żeby chipy nie przeżywały do nowej rozmowy (inaczej klucz zakładki
-        // nie odróżnia starej sesji od nowej). `running` zostają.
-        const closingSessionPath = closingConsentSessionPath;
-        if (closingSessionPath) {
-            this.plugin?.subTaskRegistry?.pruneSession?.(closingSessionPath);
-            this._renderSubTaskStrip?.();
-        }
-
         if (choice === 'archive') {
             new Notice(t('chat.session.compressing'));
-            await this.consolidateSession();
+            // The review owns every outcome, including cancellation and switching tabs.
+            // A second reset here would detach the session it has just created.
+            await this.consolidateSession({ resetAfterArchive: true });
+            return;
         } else if (choice === 'discard') {
             // Modal już potwierdził z window.confirm. Plik NIE jest kasowany — ląduje
             // w sessions/active/.discarded/ i znika z .state.json, żeby nie wisiał jako
             // zombie-wpis do najbliższego restore.
             log.info('Chat', `Session discarded by user (${msgCount} msgs)`);
-            await _retireActiveSession(agentMemoryForOpts, 'discard');
+            const closingSessionPath = closingConsentSessionPath;
+            if (closingSessionPath) {
+                this.plugin?.subTaskRegistry?.pruneSession?.(closingSessionPath);
+                this._renderSubTaskStrip?.();
+            }
+            await _retireActiveSession(closingSessionMemory, 'discard');
             // Plik jednorazowy `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` NIE idzie
             // do `.discarded/` z sesją - żyje osobno (adapter, nie Vault API). Bez tego
             // sprzątania zostaje sierotą na dysku (harmless, ale się kumuluje - BUG C3, drugi
@@ -486,7 +483,7 @@ export async function handleNewSession(this: ChatViewLike) {
         // kontekstu sesji czy pliku szkicu.
     }
 
-    // Sesja się KOŃCZY tutaj (cancel już zwrócił wyżej) - gaś jej zgodę PRZED wymianą tożsamości.
+    // Discard/puste okno kończy sesję tutaj; archiwizacja i cancel wróciły wyżej.
     if (closingConsentSessionPath) {
         this.plugin?.mcpClient?.sessionWriteConsent.clearSession(closingConsentSessionPath);
         this.plugin?.subTaskRegistry?.closeSessionThreads?.(closingSessionAgentName, closingConsentSessionPath);
@@ -521,8 +518,8 @@ export async function handleNewSession(this: ChatViewLike) {
     // Lista `todo` jest per rozmowa - bez tego panel dalej pokazywał listę sesji, która
     // WŁAŚNIE odeszła (archive/discard), mimo że plik sesji już był w `.discarded/`/
     // zarchiwizowany (BUG C3). Ta sama funkcja co przy przełączeniu zakładki (`_switchTab`,
-    // `chat_tabs.ts`) - jedno miejsce prawdy, wołane na KAŻDYM wyjściu tej funkcji (także
-    // wczesnym, `msgCount === 0`), nie tylko po modalu.
+    // `chat_tabs.ts`) - jedno miejsce prawdy dla discard i `msgCount === 0`.
+    // Archiwizacja resetuje panel w swoim przepływie tylko przy wymianie rozmowy.
     this._resetTodoPanelState?.();
 }
 
@@ -719,8 +716,8 @@ async function _buildFreshAgentContext(agentMemory: AgentMemory) {
  * These entry points open the save-session review modal - they do not silently consolidate.
  * See modules/memory/CLAUDE.md.
  */
-export async function consolidateSession(this: ChatViewLike) {
-    await runSaveSessionFlow({ view: this, plugin: this.plugin });
+export async function consolidateSession(this: ChatViewLike, { resetAfterArchive = false }: { resetAfterArchive?: boolean } = {}) {
+    await runSaveSessionFlow({ view: this, plugin: this.plugin, resetAfterArchive });
 }
 
 /**

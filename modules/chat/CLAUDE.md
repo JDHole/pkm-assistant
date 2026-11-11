@@ -823,11 +823,12 @@ zakolejkowaniu (`_draftAfterSend`) i oddaje go w `send_message` zaraz po zreseto
 restore musi być tam, nie w oddzielnym `setTimeout`, bo `resetInputArea` leci dopiero po
 awaitach `send_message` i zjadłby wcześniejszy restore.
 
-**Reset panelu jest JEDNĄ funkcją, wołaną z DWÓCH miejsc.** `_resetTodoPanelState()`
+**Reset panelu jest JEDNĄ funkcją, wołaną przy wymianie rozmowy.** `_resetTodoPanelState()`
 (`chat_tabs.ts`, eksportowana - nie w barrelu, wewnętrzna dla modułu jak reszta mixinów) zeruje
-`_activeTodoState`/`_prevTodoModel`/`_bottomBarMode` i przemalowuje pasek. Wołają ją `_switchTab`
-(zmiana agenta - lista jest per agent) i `handleNewSession` (`chat_session.ts`, KAŻDE wyjście
-funkcji, nie tylko po modalu - BUG C3: `handleNewSession` kiedyś w ogóle nie czyścił panelu,
+`_activeTodoState`/`_prevTodoModel`/`_bottomBarMode` i przemalowuje pasek. Wołają ją `_switchTab`,
+`handleNewSession` przy odrzuceniu/pustym oknie oraz `resetVisibleChat` w `save_session.ts`
+przy wymianie rozmowy po archiwizacji. Anulowanie i bezpośrednie plain `/save session`
+zachowują panel (BUG C3: `handleNewSession` kiedyś w ogóle nie czyścił panelu,
 więc nowa rozmowa TEGO SAMEGO agenta pokazywała listę zadań sesji, która już poszła do
 archiwum/`.discarded/`). Drugi ogon tego samego buga: jednorazowy plik
 `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` (silnik: `modules/tools`,
@@ -861,6 +862,20 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
   `AgentMemory.discardActiveSession()`: plik idzie do `sessions/active/.discarded/`, wpis znika
   z aktywnych sesji. Bez twardej kasacji. `handleNewSession` ma dziś dwie gałęzie: `archive`
   (-> konsolidacja) i `discard`.
+- **Archiwizację kończy wyłącznie przepływ drugiego okna.** `handleNewSession` woła
+  `consolidateSession({resetAfterArchive: true})` i wraca. Opcja przechodzi do
+  `runSaveSessionFlow` / `applyPostArchiveAction`: tylko dla plain `archive` wybiera reset
+  widocznego okna (z przycisku nowej rozmowy); domyślne `/save session`, `/memory` i guzik
+  konsolidacji zachowują historię. `archive_new` tworzy i przypina dokładnie jedną sesję
+  z nową epoką, `archive_close` czeka na `_switchTab` i zapis wyboru kolejnej zakładki.
+  Nie dopisuj resetu po `await consolidateSession`: odpina on nowy plik, kasuje rozmowę
+  po anulowaniu albo czyści następną zakładkę. Pruning subów przy nowej rozmowie następuje
+  dopiero po zatwierdzeniu drugiego okna; anulowanie zachowuje biegi i zgodę sesyjną.
+  Test `chat/chat_session.archiveFlow.test.ts` składa rzeczywisty ChatView z rejestracją
+  przycisków, AgentMemory/StateManager i adapterem testowym; zegar stoi w jednej minucie.
+  Sprawdza wybór sesji na dysku, epokę w pliku i zakładce oraz pierwsze pytanie/odpowiedź.
+  `.active_session.json` zachowuje format `{path, updated}`; epokę odczytujemy z pliku,
+  na który wskazuje, bez zmiany kontraktu pamięci.
 - **Akcja `archive` (bez sufiksu) czyści WSZYSTKIE cztery pola tożsamości sesji zakładki**
   (`sessionPath`/`sessionId`/`sessionName`/`sessionLabel`), nie tylko `sessionPath` - bo
   `_tabKey` sprawdza `sessionId || sessionPath || sessionName || agentName` i wiszące pole
@@ -870,10 +885,10 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
   zakładkę) mają własną, jawną obsługę tych samych pól.
 - ⚠️ **DWIE drogi kończą sesję i obie sprzątają zgodę oraz wątki tej sesji** -
   `handleNewSession` (ten plik) łapie nazwę agenta i `activeMemory.activeSessionPath` PRZED
-  archive/discard/`startNewSession()` i tuż przed wymianą tożsamości woła
+  discard/`startNewSession()` i tuż przed własną wymianą tożsamości woła
   `sessionWriteConsent.clearSession(path)` oraz `subTaskRegistry.closeSessionThreads(agentName, path)`;
-  `modules/chat/slash-commands/save_session.ts`'s `applyPostArchiveAction()` (`/save session`)
-  robi to samo dla WSZYSTKICH trzech wariantów (`archive`/`archive_new`/`archive_close`) - jedno
+  `modules/chat/slash-commands/save_session.ts`'s `applyPostArchiveAction()` (`/save session`
+  oraz archiwizacja z `handleNewSession`) robi to samo dla WSZYSTKICH trzech wariantów (`archive`/`archive_new`/`archive_close`) - jedno
   wołanie na wejściu funkcji, z `agentMemory.agentName` i ścieżką złapaną PRZED
   `workflow.applyDecision()` (czyli przed `archiveActiveSession`, które dla plain `archive` samo
   zeruje `activeSessionPath` - odczyt PO fakcie dawałby już `null`). Powód obu: nazwa pliku sesji

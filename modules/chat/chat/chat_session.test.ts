@@ -4,6 +4,7 @@ import { RollingWindow } from './RollingWindow.js';
 import { _restoreActiveSession, handleNewSession } from './chat_session.js';
 import { SessionWriteConsent } from '../../../core/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
+import { applyPostArchiveAction } from '../slash-commands/save_session.js';
 import { SubTaskRegistry, buildStripModel } from '../../sub-agents/index.js';
 import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
 
@@ -206,7 +207,8 @@ test('handleNewSession: brak aktywnej ścieżki sesji (świeża zakładka) - nic
 // podmienioną metodę.
 
 function buildFakeThisForModalBranch(activeSessionPath: string, sessionWriteConsent: SessionWriteConsent): TestDynamic {
-    const fakeAgentMemory: { activeSessionPath: string | null; startNewSession: () => Promise<void> } = {
+    const fakeAgentMemory: { agentName: string; activeSessionPath: string | null; startNewSession: () => Promise<void> } = {
+        agentName: 'Jaskier',
         activeSessionPath,
         startNewSession: async () => {},
     };
@@ -222,7 +224,12 @@ function buildFakeThisForModalBranch(activeSessionPath: string, sessionWriteCons
         tokenTracker: { clear: () => {} },
         app: {},
         handleSaveSession: async () => {},
-        consolidateSession: async () => {},
+        // The archive branch now delegates completion to the save flow. Keep these
+        // focused consent/thread assertions, but execute its real completion helper.
+        async consolidateSession(this: TestDynamic) {
+            await applyPostArchiveAction(this, this.plugin, fakeAgentMemory as never,
+                { cancelled: false, action: 'archive' } as never, fakeAgentMemory.activeSessionPath, true);
+        },
         plugin: {
             agentManager: {
                 getActiveAgent: () => ({ name: 'Jaskier', color: '' }),
