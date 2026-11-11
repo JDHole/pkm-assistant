@@ -1093,7 +1093,11 @@ Migracja epoki i publikacja tożsamości należą do tej samej fazy B. Stop odra
 przerwanie do jej zakończenia. Czat kolejkuje Zamknij/Nowa/load/restore dla
 przechwyconej zakładki i sesji, sprawdza właściciela po oczekiwaniach i odrzuca
 nieaktualne decyzje modalu. To bramka czatu, nie blokada aktywnego kursora pamięci;
-Discard z tej ścieżki podaje jawny path. Przełączenie zakładki nie blokuje pisarza
+Discard z tej ścieżki podaje jawny path, również gdy utworzył go dopiero własny
+zapis wstępny Nowej sesji po zwykłym Archive albo dla transkryptu bez pliku.
+Czat przyjmuje ścieżkę i epokę z niezależnego pisarza po udanym zapisie i kontroli
+właściciela; używa ich do odrzucenia, archiwizacji i resetu. Bieżący wspólny kursor
+nie jest dowodem tożsamości tego zapisu. Przełączenie zakładki nie blokuje pisarza
 starej sesji.
 Konflikt epok nie uprawnia do pominięcia zapisu pytania legacy. Błąd samej migracji
 zachowuje istniejący kontrakt `SessionEpochPersistenceError`, ale błąd zapisu pytania

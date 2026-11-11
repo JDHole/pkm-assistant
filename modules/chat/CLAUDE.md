@@ -1884,13 +1884,28 @@ load/restore czekają tylko na przyjęcie, nigdy na całą odpowiedź modelu.
 `sessionLifecycle.ts` przechwytuje obiekt zakładki, okno, ścieżkę i epokę przy
 kliknięciu. Zamknij, Nowa sesja, load i restore istniejącego widoku serializują
 kroki dla tego właściciela; powtórne żądanie tej samej operacji współdzieli trwającą
-Promise (load również rozróżnia ścieżkę pliku do otwarcia). Po zakończeniu żądania
+Promise (load również rozróżnia ścieżkę pliku do otwarcia), także gdy własny zapis
+wstępny lub trwające przyjęcie tej zakładki opublikuje ścieżkę/epokę pomiędzy
+kliknięciami. `current()` uzgadnia zapisane publikacje admission przed deduplikacją,
+nie dopiero po `admission.done`. Po zakończeniu żądania
 można je ponowić. Każdy powrót z oczekiwania przed następnym skutkiem sprawdza
 obecność zakładki, tożsamość sesji i okno. B może uzupełnić pustą ścieżkę/epokę
 swojej świeżej lub legacy sesji wyłącznie przez publikacje zapisane przez
 `publishTurnSessionIdentity` w konkretnym `SendAdmission`. Samo zakończenie B
 nie uprawnia do przyjęcia wartości zastanej w zakładce (również przy początkowym
 null); istniejącej ścieżki/epoki nie zastępujemy cudzą.
+
+Zapis wstępny Nowej sesji bez ścieżki (również po zwykłym Archive, które zachowuje
+transkrypt) używa niezależnego `createSessionWriter`. Wewnętrzny czwarty argument
+`handleSaveSession` przekazuje właściciela lifecycle: po udanym zapisie przyjmuje on
+ścieżkę i epokę tego pisarza, tylko jeśli przechwycona zakładka/tożsamość/okno nadal
+pasują. Publikacja aktualizuje również zakładkę i klucz jej stanu; wspólny kursor
+pamięci wymaga dodatkowo aktywnego okna i niezmienionej rewizji. Nie wolno odgadywać
+wyniku zapisu z bieżącego kursora pamięci po await. Archive, Discard i reset używają
+przyjętej tożsamości; Cancel zachowuje zapisany transkrypt. Testy
+`chat/sessionLifecycle.regression.test.ts` przechodzą przez rejestrację slash,
+przyciski paska i modali, odraczają zapis pliku/stanu/wskaźnika i rzeczywistą
+kompresję oraz czytają następny plik świeżą instancją pamięci.
 
 Modal Nowej sesji i modal load zwalniają kolejkę na czas decyzji człowieka,
 pozostając objęte deduplikacją. Wybór wraca do tej samej kolejki: po zamknięciu

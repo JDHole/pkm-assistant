@@ -18,6 +18,7 @@ export interface SessionLifecycleOwner {
     tail: Promise<void>;
     requests: Map<LifecycleOperation, Promise<void>>;
     current(): boolean;
+    adoptSavedIdentity(path: string, epoch: string | null): boolean;
 }
 
 const owners = new WeakMap<ChatViewLike['rollingWindow'], SessionLifecycleOwner>();
@@ -30,7 +31,7 @@ export function captureSessionLifecycle(view: ChatViewLike): SessionLifecycleOwn
     const manager = view.plugin?.agentManager;
     const memory = manager?.getActiveMemory?.() ?? resolveOwnerMemory(manager, tab?.agentName);
     const admission = sendAdmission(window);
-    const capturedIdentity = { id: tab?.sessionId, path: tab?.sessionPath, epoch: tab?.sessionEpoch };
+    let capturedIdentity = { id: tab?.sessionId, path: tab?.sessionPath, epoch: tab?.sessionEpoch };
     const owner: SessionLifecycleOwner = {
         tab, window, memory, agentName: tab?.agentName ?? memory?.agentName ?? manager?.getActiveAgent?.()?.name,
         path: tab ? tab.sessionPath : memory?.activeSessionPath ?? undefined,
@@ -38,29 +39,43 @@ export function captureSessionLifecycle(view: ChatViewLike): SessionLifecycleOwn
         ready: Promise.resolve(), tail: Promise.resolve(), requests: new Map(),
         current() {
             if (!tab) return view.rollingWindow === window;
-            return view.chatTabs.includes(tab) && tab.sessionId === owner.id
-                && (tab.sessionPath || undefined) === (owner.path || undefined)
-                && (tab.sessionEpoch ?? null) === owner.epoch
+            // Publication happens before admission.done (pointer I/O and compression
+            // can still be pending). Reconcile before deduplicating another click.
+            const published = admission?.resolveIdentity(tab, capturedIdentity) ?? capturedIdentity;
+            const current = view.chatTabs.includes(tab) && tab.sessionId === published.id
+                && (tab.sessionPath || undefined) === (published.path || undefined)
+                && (tab.sessionEpoch ?? null) === (published.epoch ?? null)
                 && (tab.isActive ? view.rollingWindow === window
                     : view._agentStates?.get(_tabKey(tab))?.rollingWindow === window);
-        },
-    };
-    if (admission) {
-        owner.ready = admission.done.then(() => {
-            // Follow only identities actually published by this admission. A null
-            // path/epoch is not permission to adopt an unrelated replacement.
-            if (!tab) return;
-            const published = admission.resolveIdentity(tab, capturedIdentity);
-            if (view.chatTabs.includes(tab) && tab.sessionId === published.id
-                && tab.sessionPath === published.path && tab.sessionEpoch === published.epoch
-                && (tab.isActive ? view.rollingWindow === window
-                    : view._agentStates?.get(_tabKey(tab))?.rollingWindow === window)) {
+            if (current) {
+                capturedIdentity = published;
                 owner.id = published.id;
                 owner.path = published.path;
                 owner.epoch = published.epoch ?? null;
             }
-        });
-    }
+            return current;
+        },
+        adoptSavedIdentity(path, epoch) {
+            // Only the caller's private writer may supply this identity, after a
+            // successful save. Never infer it from the shared memory cursor.
+            if (!owner.current()) return false;
+            if (tab) {
+                const previousKey = _tabKey(tab);
+                const state = view._agentStates?.get(previousKey);
+                tab.sessionPath = path;
+                tab.sessionEpoch = epoch;
+                capturedIdentity = { id: tab.sessionId, path, epoch };
+                if (state && previousKey !== _tabKey(tab)) {
+                    view._agentStates.delete(previousKey);
+                    view._agentStates.set(_tabKey(tab), state);
+                }
+            }
+            owner.path = path;
+            owner.epoch = epoch;
+            return true;
+        },
+    };
+    owner.ready = admission?.done ?? Promise.resolve();
     owners.set(window, owner);
     return owner;
 }

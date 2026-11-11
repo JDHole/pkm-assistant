@@ -467,7 +467,7 @@ export async function handleNewSession(this: ChatViewLike) {
             log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
             if (msgCount || owner.window.removedMessageIds?.length || owner.window.removedMessageRanges?.length) {
                 await this.handleSaveSession(owner.agentName, owner.window,
-                    owner.path ? { path: owner.path, epoch: owner.epoch } : undefined);
+                    owner.path ? { path: owner.path, epoch: owner.epoch } : undefined, owner);
                 if (!owner.current()) return;
             }
             if (!msgCount) return { hasMessages: false, decision: Promise.resolve({ choice: 'discard' as const }) };
@@ -550,8 +550,10 @@ export async function handleNewSession(this: ChatViewLike) {
  *
  * @param agentName - właściciel tury (opcjonalny)
  * @param rollingWindow - okno tury (opcjonalne; brak = okno bieżącej zakładki)
+ * @param lifecycleOwner - internal pre-save owner; receives only its own writer's new identity
  */
-export async function handleSaveSession(this: ChatViewLike, agentName?: string | null, rollingWindow?: RollingWindow | null, expectedSession?: { path: string; epoch: string | null }) {
+export async function handleSaveSession(this: ChatViewLike, agentName?: string | null, rollingWindow?: RollingWindow | null,
+    expectedSession?: { path: string; epoch: string | null }, lifecycleOwner?: SessionLifecycleOwner) {
     log.debug('Chat', 'handleSaveSession');
     if (!rollingWindow && !this.rollingWindow) return;
     // The default save also flushes hidden tabs, using their captured path/epoch.
@@ -593,11 +595,24 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
         };
 
         if (memory?.saveSession) {
+            if (lifecycleOwner && (!lifecycleOwner.current() || lifecycleOwner.memory !== memory)) return;
+            // A pathless lifecycle pre-save owns its new file, even if selection
+            // changes during I/O. Its receipt must not come from shared memory.
+            const writer = lifecycleOwner && !lifecycleOwner.path ? memory.createSessionWriter(null, null) : undefined;
+            const revision = memory.sessionIdentityRevision;
+            const destination = writer ? undefined : expectedSession ?? (memory.activeSessionPath
+                ? { path: memory.activeSessionPath, epoch: memory.sessionEpoch } : undefined);
             const removed = [...(rw.removedMessageIds ?? [])];
             const ranges = [...(rw.removedMessageRanges ?? [])];
-            const savedPath = await memory.saveSession(rw.messages, metadata, { removedMessageIds: removed, removedRanges: ranges,
-                ...(expectedSession ? { expectedSession } : memory.activeSessionPath ? { expectedSession: { path: memory.activeSessionPath, epoch: memory.sessionEpoch } } : {}),
+            const savedPath = await (writer ?? memory).saveSession(rw.messages, metadata, { removedMessageIds: removed, removedRanges: ranges,
+                ...(destination ? { expectedSession: destination } : {}),
             });
+            if (writer && lifecycleOwner?.adoptSavedIdentity(savedPath, writer.sessionEpoch)
+                && (!lifecycleOwner.tab || lifecycleOwner.tab.isActive) && this.rollingWindow === rw
+                && memory.sessionIdentityRevision === revision) {
+                memory.setActiveSessionIdentity(savedPath, writer.sessionEpoch);
+                await memory._persistActiveSession();
+            }
             const acknowledged = new Set(removed);
             rw.removedMessageRanges = (rw.removedMessageRanges ?? []).filter(range => !ranges.includes(range));
             rw.removedMessageIds = (rw.removedMessageIds ?? []).filter(id => !acknowledged.has(id));
