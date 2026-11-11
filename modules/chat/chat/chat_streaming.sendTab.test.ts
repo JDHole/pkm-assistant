@@ -24,6 +24,35 @@ function deferred() {
     return { promise, resolve };
 }
 
+for (const stage of ['mentions', 'note', 'slash', 'session-probe', 'session-read', 'edit-save', 'journal', 'append-message'] as const) for (const action of ['Stop', 'Escape', 'new-cancel', 'close-tab', 'close-view'] as const) {
+    test.serial(`F6: ${stage} → ${action} zachowuje pełną rozmowę na granicy przyjęcia`, async t => {
+        const f = await fixture();
+        const prompt = SessionCloseModal.prototype.prompt;
+        SessionCloseModal.prototype.prompt = async () => ({ choice: 'cancel' });
+        t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+        startEditMessage.call(f.view as never, 0, 'Pytanie A');
+        const phaseA = ['mentions', 'note', 'slash', 'session-probe', 'session-read'].includes(stage);
+        const text = stage === 'slash' ? '/Poprawione pytanie A' : 'Poprawione pytanie A';
+        f.view.input_area.value = text;
+        const path = f.tabs[0].sessionPath;
+        const gate = await preparationGate(f, stage);
+        const run = f.clickSend();
+        await gate.entered.promise;
+        const stopping = action === 'new-cancel' ? f.view.handleNewSession.call(f.view as never)
+            : action === 'close-tab' ? _closeActiveTab.call(f.view as never) : action === 'close-view' ? closeView(f.view)
+            : action === 'Stop' ? f.clickStop() : f.escape();
+        gate.release.resolve();
+        await Promise.all([run, stopping]);
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        const expected = phaseA ? ['Pytanie A', 'Odpowiedź A'] : [text];
+        t.deepEqual(f.windows[0].messages.map(m => m.content), expected, 'RAM zawiera całą starą rozmowę albo przyjętą poprawkę');
+        t.deepEqual(f.windows[0].parentConversation.snapshot().messages.map(m => m.text), expected);
+        t.deepEqual((await fresh.loadActiveSession(path)).messages.map(m => m.content), expected, 'świeży odczyt zawiera całą starą rozmowę albo przyjętą poprawkę');
+        t.is(f.view.input_area.value, phaseA ? text : '');
+        t.deepEqual(f.modelInputs, []);
+    });
+}
+
 for (const stage of ['structure', 'filename', 'header', 'state', 'question', 'selection'] as const) {
     test.serial(`P1: nowa sesja → B przy ${stage}`, async t => {
         const f = await fixture(true);
@@ -114,6 +143,7 @@ async function fixture(newSession = false) {
         app: { workspace: { getActiveFile: () => null }, vault: { getAbstractFileByPath: (path: string) => ({ path, stat: { size: 1024 } }) } }, leaf: { id: 'send-tab-test' }, rollingWindow: windows[0], input_area: input, send_button: button, stop_button: stop, inputHistory: [] as string[],
         tokenTracker: trackers[0], chatTabs: tabs,
         attachmentManager: new AttachmentManager(createDiv(), {} as never),
+        _autoTurnChainCounts: new Map<string, number>(),
         _streamCtxMap: new Map(), _preparingTurns: new Map(), _agentStates: new Map(tabs.map((tab, i) => [tab.sessionId, { rollingWindow: windows[i], tokenTracker: trackers[i], isGenerating: false }])),
         plugin: { agentManager: { getActiveAgent: () => agent, getAgent: () => agent, getAgentMemory: () => memory, getActiveMemory: () => memory,
             switchAgent() {}, getActiveSystemPromptWithMemory: async () => 'system A' }, showCrystalNotice() {} },
@@ -199,8 +229,8 @@ for (const editing of [true, false]) for (const stage of stages) {
             };
         } else if (stage === 'idle-save') {
             f.view.lastMessageTimestamp = Date.now() - 60 * 60 * 1000;
-            const save = f.view.handleSaveSession;
-            f.view.handleSaveSession = async function(...args) { await save.apply(this, args); await hold(); };
+            const read = f.memory.loadActiveSession.bind(f.memory);
+            f.memory.loadActiveSession = async (...args) => { const value = await read(...args); await hold(); return value; };
         } else if (stage === 'slash') {
             f.view.slashCommands.execute = async () => { await hold(); return false; };
         } else if (stage === 'mentions') {
@@ -210,12 +240,14 @@ for (const editing of [true, false]) for (const stage of stages) {
             const add = f.windows[0].addMessage.bind(f.windows[0]);
             f.windows[0].addMessage = async (...args) => { const result = await add(...args); if (args[0] === 'user') await hold(); return result; };
         } else if (stage === 'journal') {
-            const append = f.adapter.append;
             let held = false;
-            f.adapter.append = async (path, text) => {
-                if (!held && path === f.tabs[0].sessionPath && text.includes('Poprawione pytanie A')) { held = true; await hold(); }
-                await append(path, text);
-            };
+            for (const method of ['write', 'append'] as const) {
+                const write = f.adapter[method];
+                f.adapter[method] = async (path, text) => {
+                    if (!held && path === f.tabs[0].sessionPath && text.includes('Poprawione pytanie A')) { held = true; await hold(); }
+                    await write(path, text);
+                };
+            }
         } else if (stage === 'session-probe' || stage === 'session-read') {
             const read = f.adapter.read, exists = f.adapter.exists;
             let held = false;
@@ -297,8 +329,8 @@ for (const editing of [true, false]) for (const stage of ['stopped-message', 'st
             const add = f.windows[0].addMessage.bind(f.windows[0]);
             f.windows[0].addMessage = async (...args) => { await add(...args); if (args[2]?.subTaskId) await hold(); };
         } else if (stage === 'stopped-journal') {
-            const append = f.adapter.append;
-            f.adapter.append = async (path, text) => { if (text.includes('Dorobek A')) await hold(); await append(path, text); };
+            const write = f.adapter.write;
+            f.adapter.write = async (path, text) => { if (text.includes('Dorobek A')) await hold(); await write(path, text); };
         } else {
             // renderNotificationWithReceipt awaits its detached tile after reading the DOM.
             // Resolve the browser event here: the real renderer's await yields to the click.
@@ -517,11 +549,11 @@ function holdRemoval(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 for (const action of ['new-session', 'Stop', 'Escape'] as const) {
-    test.serial(`F1: poprawka podczas zapisu usunięć → ${action} oddaje szkic`, async t => {
+    test.serial(`F1: poprawka podczas wspólnego zapisu → ${action} pozostawia przyjętą poprawkę`, async t => {
         const f = await fixture();
         const prompt = SessionCloseModal.prototype.prompt;
         SessionCloseModal.prototype.prompt = async () => ({ choice: 'discard' });
-        t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+        t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
         startEditMessage.call(f.view as never, 0, 'Pytanie A');
         f.view.input_area.value = 'Poprawka A';
         const gate = holdRemoval(f);
@@ -531,7 +563,8 @@ for (const action of ['new-session', 'Stop', 'Escape'] as const) {
             : action === 'Stop' ? f.clickStop() : f.escape();
         gate.release.resolve();
         await Promise.all([run, stopping]);
-        t.is(f.view.input_area.value, 'Poprawka A');
+        t.is(f.view.input_area.value, '');
+        t.deepEqual(f.windows[0].messages.map(m => m.content), ['Poprawka A']);
         t.deepEqual(f.modelInputs, []);
         if (action === 'new-session') {
             t.is<string | undefined, undefined>(f.tabs[0].sessionPath, undefined);
@@ -543,7 +576,7 @@ for (const action of ['new-session', 'Stop', 'Escape'] as const) {
 
 test.serial('F1: EACCES przy usunięciach przywraca poprawkę, załącznik, wzmiankę i historię', async t => {
     const f = await fixture();
-    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
     startEditMessage.call(f.view as never, 0, 'Pytanie A');
     f.view.input_area.value = 'Poprawka @[Notatka]';
     f.view.attachmentManager.addTextAttachment({ name: 'A.txt', text: 'Materiał A' });
@@ -570,7 +603,7 @@ for (const timing of ['podczas przygotowania', 'przed mikrozadaniem doręczenia'
     const registry = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry });
     Object.assign(f.view.plugin, { subTaskRegistry: registry, subTaskNotifier: notifier });
     f.view._wireSubTaskDeliverer.call(f.view as never);
-    t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
     const task = registry.create({ id: 'worker-A', name: 'worker', agentName: 'Mira', background: true,
         origin: { agentName: 'Mira', tabKey: 'A', sessionPath: f.tabs[0].sessionPath, sessionEpoch: f.tabs[0].sessionEpoch! } });
     startEditMessage.call(f.view as never, 0, 'Pytanie A');
@@ -602,7 +635,7 @@ test.serial('F1: zimne exists → Nowa sesja → Odrzuć → ta sama nazwa nie c
     const prompt = SessionCloseModal.prototype.prompt, filename = AgentMemory.prototype._generateActiveSessionFilename;
     SessionCloseModal.prototype.prompt = async () => ({ choice: 'discard' });
     AgentMemory.prototype._generateActiveSessionFilename = () => 'A.md';
-    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; AgentMemory.prototype._generateActiveSessionFilename = filename; f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; AgentMemory.prototype._generateActiveSessionFilename = filename; f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
     const entered = deferred(), release = deferred();
     const exists = f.adapter.exists;
     let held = false;
@@ -628,7 +661,7 @@ test.serial('F1: zimne exists → Nowa sesja → Odrzuć → ta sama nazwa nie c
 for (const stage of ['edit-save', 'mentions', 'epoch-readback'] as const) {
     test.serial(`F1: A → B → A przy ${stage} zachowuje nowy szkic i rzeczywistą wzmiankę`, async t => {
         const f = await fixture();
-        t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+        t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
         Object.assign(f.view.plugin, { permissionSystem: { checkPermission: () => ({ allowed: true }) } });
         if (stage === 'epoch-readback') {
             f.files.set(f.tabs[0].sessionPath, f.files.get(f.tabs[0].sessionPath)!.replace(/epoch: [a-f0-9]+\n/, ''));
@@ -676,8 +709,8 @@ async function preparationGate(f: Awaited<ReturnType<typeof fixture>>, stage: ty
             };
         } else if (stage === 'idle-save') {
             f.view.lastMessageTimestamp = Date.now() - 60 * 60 * 1000;
-            const save = f.view.handleSaveSession;
-            f.view.handleSaveSession = async function(...args) { await save.apply(this, args); await hold(); };
+            const read = f.memory.loadActiveSession.bind(f.memory);
+            f.memory.loadActiveSession = async (...args) => { const value = await read(...args); await hold(); return value; };
         } else if (stage === 'slash') {
             f.view.slashCommands.execute = async () => { await hold(); return false; };
         } else if (stage === 'mentions') {
@@ -687,12 +720,14 @@ async function preparationGate(f: Awaited<ReturnType<typeof fixture>>, stage: ty
             const add = f.windows[0].addMessage.bind(f.windows[0]);
             f.windows[0].addMessage = async (...args) => { const result = await add(...args); if (args[0] === 'user') await hold(); return result; };
         } else if (stage === 'journal') {
-            const append = f.adapter.append;
             let held = false;
-            f.adapter.append = async (path, text) => {
-                if (!held && path === f.tabs[0].sessionPath && text.includes('Poprawione pytanie A')) { held = true; await hold(); }
-                await append(path, text);
-            };
+            for (const method of ['write', 'append'] as const) {
+                const write = f.adapter[method];
+                f.adapter[method] = async (path, text) => {
+                    if (!held && path === f.tabs[0].sessionPath && text.includes('Poprawione pytanie A')) { held = true; await hold(); }
+                    await write(path, text);
+                };
+            }
         } else if (stage === 'session-probe' || stage === 'session-read') {
             const read = f.adapter.read, exists = f.adapter.exists;
             let held = false;
@@ -724,9 +759,7 @@ async function preparationGate(f: Awaited<ReturnType<typeof fixture>>, stage: ty
             f.view.plugin.agentManager.getActiveSystemPromptWithMemory = async () => { await hold(); return 'system A'; };
         } else {
             f.view.env.settings.pkmAssistant.enableOczko = true;
-            f.view._buildActiveNoteContext = async () => { await release.promise; return { text: '', images: [] }; };
-            const prompt = f.view.plugin.agentManager.getActiveSystemPromptWithMemory;
-            f.view.plugin.agentManager.getActiveSystemPromptWithMemory = async () => { const value = await prompt(); entered.resolve(); return value; };
+            f.view._buildActiveNoteContext = async () => { entered.resolve(); await release.promise; return { text: '', images: [] }; };
         }
     return { entered, release };
 }
@@ -776,7 +809,7 @@ for (const stage of stages) for (const action of ['new-session', 'Stop', 'Escape
         } else if (action === 'close-tab') {
             t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
         } else if (action !== 'close-view') {
-            t.is(f.view.input_area.value, ['edit-save', 'previous-removals', 'idle-save', 'slash', 'mentions'].includes(stage) ? question : '');
+            t.is(f.view.input_area.value, ['idle-save', 'slash', 'mentions', 'note', 'session-probe', 'session-read'].includes(stage) ? question : '');
         }
     });
 }
@@ -852,7 +885,7 @@ for (const stage of ['structure', 'filename', 'header', 'state', 'question', 'se
 
 for (const route of ['A → B → A', 'błąd w tle A → B'] as const) test.serial(`F1: EACCES ${route} zachowuje nowy szkic i chipy`, async t => {
     const f = await fixture();
-    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
     startEditMessage.call(f.view as never, 0, 'Pytanie A');
     f.view.input_area.value = 'Poprawka @[Notatka]';
     f.view.attachmentManager.addTextAttachment({ name: 'A.txt', text: 'Materiał A' });
@@ -886,7 +919,7 @@ for (const route of ['A → B → A', 'błąd w tle A → B'] as const) test.ser
 
 test.serial('F1: Stop podczas slash-fallback oddaje tekst bez duplikowania zachowanych chipów', async t => {
     const f = await fixture();
-    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
     startEditMessage.call(f.view as never, 0, 'Pytanie A');
     f.view.input_area.value = '/poprawka @[Notatka]';
     f.view.attachmentManager.addTextAttachment({ name: 'A.txt', text: 'Materiał A' });
@@ -901,5 +934,330 @@ test.serial('F1: Stop podczas slash-fallback oddaje tekst bez duplikowania zacho
     t.is(f.view.attachmentManager.buildMessageContent('tekst').content, '📎 Załącznik: A.txt\n```\nMateriał A\n```\n\ntekst');
     t.deepEqual(f.view.mentionAutocomplete.getMentions().map(m => m.path), ['Notatka.md']);
     t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.deepEqual(f.modelInputs, []);
+});
+
+for (const stage of ['mentions', 'note', 'slash', 'session-probe', 'session-read'] as const) {
+    test.serial(`F6 A: ${stage} → Stop oddaje chipy i szkic bez żadnego zapisu`, async t => {
+        const f = await fixture();
+        t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+        startEditMessage.call(f.view as never, 0, 'Pytanie A');
+        const text = stage === 'slash' ? '/Poprawka @[Notatka]' : 'Poprawka @[Notatka]';
+        f.view.input_area.value = text;
+        f.view.attachmentManager.addTextAttachment({ name: 'A.txt', text: 'Materiał A' });
+        f.view.mentionAutocomplete.restoreMentions([{ type: 'note', name: 'Notatka', path: 'Notatka.md', icon: '' }]);
+        const path = f.tabs[0].sessionPath, before = f.files.get(path);
+        const gate = await preparationGate(f, stage);
+        let writes = 0;
+        for (const method of ['write', 'append'] as const) {
+            const write = f.adapter[method];
+            f.adapter[method] = async (...args) => { writes++; await write(...args); };
+        }
+        const run = f.clickSend();
+        await gate.entered.promise;
+        f.clickStop();
+        gate.release.resolve();
+        await run;
+        t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await fresh.loadActiveSession(path)).messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+        t.is(f.files.get(path), before);
+        t.is(f.view.input_area.value, text);
+        t.is(f.view.attachmentManager.buildMessageContent('tekst').content, '📎 Załącznik: A.txt\n```\nMateriał A\n```\n\ntekst');
+        t.deepEqual(f.view.mentionAutocomplete.getMentions().map(m => m.path), ['Notatka.md']);
+        t.deepEqual({ writes, requests: f.modelInputs }, { writes: 0, requests: [] });
+    });
+}
+
+for (const stage of ['epoch-read', 'epoch-append', 'epoch-readback'] as const) {
+    test.serial(`F6 D: ${stage} → Stop → następna pełna tura zachowuje jedną epokę`, async t => {
+        const f = await fixture();
+        t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+        const path = f.tabs[0].sessionPath;
+        f.files.set(path, f.files.get(path)!.replace(/epoch: [a-f0-9]+\n/, ''));
+        f.tabs[0].sessionEpoch = null;
+        f.memory.setActiveSessionIdentity(path, null);
+        startEditMessage.call(f.view as never, 0, 'Pytanie A');
+        f.view.input_area.value = 'Poprawione pytanie A';
+        const gate = await preparationGate(f, stage);
+        const run = f.clickSend();
+        await gate.entered.promise;
+        f.clickStop();
+        gate.release.resolve();
+        await run;
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        const parsed = await fresh.loadActiveSession(path);
+        t.deepEqual(parsed.messages.map(m => m.content), ['Poprawione pytanie A']);
+        t.regex(String(parsed.metadata.epoch), /^[0-9a-f]{32}$/);
+        t.is<string | null, string>(f.tabs[0].sessionEpoch, String(parsed.metadata.epoch));
+        t.is(f.memory.sessionEpoch, String(parsed.metadata.epoch));
+        t.deepEqual(f.modelInputs, []);
+        t.is(f.view.input_area.value, '');
+        f.view.input_area.value = 'Następne pytanie';
+        await f.clickSend();
+        const expected = ['Poprawione pytanie A', 'Następne pytanie', 'Odpowiedź na poprawkę A'];
+        t.deepEqual(f.windows[0].messages.map(m => m.content), expected);
+        const newest = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await newest.loadActiveSession(path)).messages.map(m => m.content), expected);
+        t.is(f.modelInputs.length, 1);
+        t.is((f.files.get(path)!.match(/— session epoch/g) ?? []).length, 1);
+    });
+}
+
+function holdRealCompression(rw: RollingWindow) {
+    const entered = deferred();
+    let finish!: () => void;
+    rw.maxTokens = 1;
+    rw._modelProvider = () => ({ stream(_payload: unknown, handlers: { done(response: unknown): void }) {
+        finish = () => {
+            rw.maxTokens = 100000;
+            handlers.done({ choices: [{ message: { content: 'Zachowane streszczenie' } }] });
+        };
+        entered.resolve();
+    } });
+    return { entered, release: () => finish() };
+}
+
+for (const action of ['Stop', 'Escape', 'new-cancel'] as const) {
+    test.serial(`F6 B: prawdziwa kompresja addMessage → ${action} kończy przyjęcie`, async t => {
+        const f = await fixture();
+        const prompt = SessionCloseModal.prototype.prompt;
+        SessionCloseModal.prototype.prompt = async () => ({ choice: 'cancel' });
+        t.teardown(() => { SessionCloseModal.prototype.prompt = prompt; f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+        startEditMessage.call(f.view as never, 0, 'Pytanie A');
+        f.view.input_area.value = 'Poprawka A';
+        const gate = holdRealCompression(f.windows[0]);
+        let cancelledCompression = 0;
+        Object.assign(f.view.env, { chatModel: { stopStream() { cancelledCompression++; } } });
+        const run = f.clickSend();
+        await gate.entered.promise;
+        const stopping = action === 'new-cancel' ? f.view.handleNewSession.call(f.view as never)
+            : action === 'Stop' ? f.clickStop() : f.escape();
+        t.is(cancelledCompression, 0);
+        gate.release();
+        await Promise.all([run, stopping]);
+        t.is(f.windows[0].conversationSummary, 'Zachowane streszczenie');
+        t.deepEqual(f.windows[0].messages.map(m => m.content), ['Poprawka A']);
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Poprawka A']);
+        t.deepEqual(f.modelInputs, []);
+        t.is(f.view.input_area.value, '');
+    });
+}
+
+const deliveredResult = '[POWIADOMIENIE SYSTEMU] Sub-agent worker skończył zadanie worker-A, które zleciłeś w tle.\n\n'
+    + 'Stan: zakończone. Czas pracy: 0.0 s.\n\nDorobek A\n\n'
+    + 'Podejmij wątek - wykorzystaj ten wynik do dokończenia zadania. Jeśli zlecałeś więcej zadań, ich wyniki przyjdą osobno; nie zgaduj ich treści.';
+
+for (const afterRam of [false, true]) {
+    test.serial(`F6 C: EACCES powiadomienia, istnieje w RAM=${afterRam} → ponowny dren zapisuje i potwierdza raz`, async t => {
+        const f = await fixture();
+        const registry = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry });
+        Object.assign(f.view.plugin, { subTaskRegistry: registry, subTaskNotifier: notifier });
+        f.view._wireSubTaskDeliverer.call(f.view as never);
+        t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+        const task = registry.create({ id: 'worker-A', name: 'worker', agentName: 'Mira', background: true,
+            origin: { agentName: 'Mira', tabKey: 'A', sessionPath: f.tabs[0].sessionPath, sessionEpoch: f.tabs[0].sessionEpoch! } });
+        // A legacy in-memory receipt is not evidence that the notification reached disk.
+        if (afterRam) await f.windows[0].addMessage('user', deliveredResult, { origin: 'machine', subTaskId: task.id, sessionMessageId: `sub-result:${task.id}` });
+        const write = f.adapter.write, append = f.adapter.append;
+        for (const method of ['write', 'append'] as const) {
+            const persist = f.adapter[method];
+            f.adapter[method] = async (path, text) => { if (text.includes('Dorobek A')) throw new Error('EACCES notification'); await persist(path, text); };
+        }
+        registry.finish(task, { text: 'Dorobek A', toolsUsed: [], durationMs: 1, usage: null });
+        await new Promise(resolve => setImmediate(resolve));
+        t.deepEqual(notifier.pending().map(task => task.id), ['worker-A']);
+        t.is(f.view._autoTurnChainCounts?.get('Mira') ?? 0, 0);
+        t.deepEqual(f.modelInputs, []);
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+        f.adapter.write = write;
+        f.adapter.append = append;
+        notifier.drain();
+        await new Promise(resolve => setImmediate(resolve));
+        t.deepEqual(notifier.pending().map(task => task.id), []);
+        const expected = ['Pytanie A', 'Odpowiedź A', deliveredResult, 'Odpowiedź na poprawkę A'];
+        t.deepEqual(f.windows[0].messages.map(m => m.content), expected);
+        const newest = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await newest.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), expected);
+        t.is(f.view._autoTurnChainCounts?.get('Mira'), 1);
+    });
+}
+
+test.serial('F6 E: opóźnione przyjęcie suba nie nadpisuje późniejszego resetu człowieka w B', async t => {
+    const f = await fixture();
+    const registry = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry });
+    Object.assign(f.view.plugin, { subTaskRegistry: registry, subTaskNotifier: notifier });
+    f.view._wireSubTaskDeliverer.call(f.view as never);
+    Object.assign(f.view, { _autoTurnChainCounts: new Map([['Mira', 2]]) });
+    t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+    const task = registry.create({ id: 'worker-A', name: 'worker', agentName: 'Mira', background: true,
+        origin: { agentName: 'Mira', tabKey: 'A', sessionPath: f.tabs[0].sessionPath, sessionEpoch: f.tabs[0].sessionEpoch! } });
+    const gate = holdRealCompression(f.windows[0]);
+    registry.finish(task, { text: 'Dorobek A', toolsUsed: [], durationMs: 1, usage: null });
+    await gate.entered.promise;
+    f.clickStop();
+    await f.clickB();
+    f.view.input_area.value = 'Nowe pytanie człowieka';
+    await f.clickSend();
+    t.is(f.view._autoTurnChainCounts?.get('Mira'), 0);
+    gate.release();
+    await new Promise(resolve => setImmediate(resolve));
+    t.is(f.view._autoTurnChainCounts?.get('Mira'), 0);
+    t.deepEqual(notifier.pending().map(task => task.id), []);
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A', deliveredResult]);
+    t.deepEqual(f.windows[1].messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B', 'Nowe pytanie człowieka', 'Odpowiedź na poprawkę A']);
+    const next = registry.create({ id: 'worker-B', name: 'worker', agentName: 'Mira', background: true,
+        origin: { agentName: 'Mira', tabKey: 'B', sessionPath: f.tabs[1].sessionPath, sessionEpoch: f.tabs[1].sessionEpoch! } });
+    registry.finish(next, { text: 'Dorobek B', toolsUsed: [], durationMs: 1, usage: null });
+    await new Promise(resolve => setImmediate(resolve));
+    t.is(f.view._autoTurnChainCounts.get('Mira'), 1);
+    t.deepEqual(notifier.pending(), []);
+    t.is(f.modelInputs.length, 2);
+});
+
+for (const afterRam of [false, true]) {
+    test.serial(`F6 C consume: nieudany zapis zatrzymanego wyniku, RAM=${afterRam} zachowuje kolejkę do następnej tury`, async t => {
+        const f = await fixture();
+        const registry = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry });
+        Object.assign(f.view.plugin, { subTaskRegistry: registry, subTaskNotifier: notifier });
+        t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+        const task = registry.create({ id: 'worker-A', name: 'worker', agentName: 'Mira', background: true,
+            origin: { agentName: 'Mira', tabKey: 'A', sessionPath: f.tabs[0].sessionPath, sessionEpoch: f.tabs[0].sessionEpoch! } });
+        registry.attachAbort(task.id, () => {});
+        registry.requestStop(task.id, 'user');
+        registry.finish(task, { text: 'Dorobek A', toolsUsed: [], durationMs: 1, usage: null, stoppedBy: 'abort',
+            outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+        const result = '[POWIADOMIENIE SYSTEMU] Sub-agent worker skończył zadanie worker-A, które zleciłeś w tle.\n\n'
+            + 'Stan: zatrzymany przez użytkownika · wynik częściowy. Czas pracy: 0.0 s.\n\n'
+            + 'Sub nie dokończył zadania. Nie wolno go raportować jako wykonanego.\n\nDorobek A\n\n'
+            + 'Podejmij wątek - wykorzystaj ten wynik do dokończenia zadania. Jeśli zlecałeś więcej zadań, ich wyniki przyjdą osobno; nie zgaduj ich treści.';
+        if (afterRam) await f.windows[0].addMessage('user', result, { origin: 'machine', subTaskId: task.id });
+        const write = f.adapter.write, append = f.adapter.append;
+        for (const method of ['write', 'append'] as const) {
+            const persist = f.adapter[method];
+            f.adapter[method] = async (path, text) => { if (text.includes('Dorobek A')) throw new Error('EACCES stopped result'); await persist(path, text); };
+        }
+        f.view.input_area.value = 'Kontynuuj';
+        await f.clickSend();
+        t.deepEqual(notifier.pending().map(task => task.id), ['worker-A']);
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content),
+            ['Pytanie A', 'Odpowiedź A', 'Kontynuuj', 'Odpowiedź na poprawkę A']);
+        f.adapter.write = write;
+        f.adapter.append = append;
+        f.view.input_area.value = 'Ponów odbiór';
+        await f.clickSend();
+        t.deepEqual(notifier.pending().map(task => task.id), []);
+        t.deepEqual(f.windows[0].messages.filter(m => m.subTaskId === task.id).map(m => m.content), [result]);
+        const newest = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+        t.deepEqual((await newest.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content).filter(content => content.includes('Dorobek A')), [result]);
+        t.is(f.modelInputs.length, 2);
+    });
+}
+
+test.serial('F6 B: poprawka i usunięcia mają jeden zapis i nie odsłaniają pustej historii', async t => {
+    const f = await fixture();
+    t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+    startEditMessage.call(f.view as never, 0, 'Pytanie A');
+    f.view.input_area.value = 'Poprawka A';
+    const path = f.tabs[0].sessionPath, before = f.files.get(path);
+    const gate = holdRemoval(f);
+    const writes: string[] = [];
+    for (const method of ['write', 'append'] as const) {
+        const write = f.adapter[method];
+        f.adapter[method] = async (target, content) => {
+            if (target === path) writes.push(content);
+            await write(target, content);
+        };
+    }
+    const run = f.clickSend();
+    await gate.entered.promise;
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.is(f.files.get(path), before);
+    f.clickStop();
+    gate.release.resolve();
+    await run;
+    t.is(writes.length, 1);
+    t.true(writes[0].includes('— messages removed'));
+    t.true(writes[0].includes('Poprawka A'));
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(path)).messages.map(m => m.content), ['Poprawka A']);
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Poprawka A']);
+    t.deepEqual(f.modelInputs, []);
+});
+
+test.serial('F6 C: zapis pytania suba musi się udać przed ACK i ponowny dren nie duplikuje pytania', async t => {
+    const f = await fixture();
+    const registry = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry });
+    Object.assign(f.view.plugin, { subTaskRegistry: registry, subTaskNotifier: notifier });
+    f.view._wireSubTaskDeliverer.call(f.view as never);
+    t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+    registry.create({ id: 'worker-A', threadId: 'thread-A', name: 'worker', agentName: 'Mira', background: true,
+        origin: { agentName: 'Mira', tabKey: 'A', sessionPath: f.tabs[0].sessionPath, sessionEpoch: f.tabs[0].sessionEpoch! } });
+    const write = f.adapter.write, append = f.adapter.append;
+    for (const method of ['write', 'append'] as const) {
+        const persist = f.adapter[method];
+        f.adapter[method] = async (path, text) => { if (text.includes('Jaki zakres?')) throw new Error('EACCES question'); await persist(path, text); };
+    }
+    const opened = registry.openParentQuestion('worker-A', 'Jaki zakres?');
+    if (opened.kind !== 'opened') throw new Error('Question did not open');
+    const question = `[POWIADOMIENIE SYSTEMU] Sub-agent worker pyta w zadaniu worker-A: Jaki zakres?\n\nOdpowiedz przez sub_agent message, podając sub_id=thread-A i question_id=${opened.question.id}.`;
+    await new Promise(resolve => setImmediate(resolve));
+    t.deepEqual(notifier.pendingNotices().map(notice => notice.kind), ['question']);
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.deepEqual(f.modelInputs, []);
+    t.is(f.view._autoTurnChainCounts.get('Mira') ?? 0, 0);
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    f.adapter.write = write; f.adapter.append = append;
+    notifier.drain();
+    await new Promise(resolve => setImmediate(resolve));
+    t.deepEqual(notifier.pendingNotices(), []);
+    const expected = ['Pytanie A', 'Odpowiedź A', question, 'Odpowiedź na poprawkę A'];
+    t.deepEqual(f.windows[0].messages.map(m => m.content), expected);
+    const newest = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await newest.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), expected);
+    t.is(f.view._autoTurnChainCounts.get('Mira'), 1);
+});
+
+test.serial('F6 C: rzeczywista kompresja wyniku → Stop przyjmuje wynik bez żądania prowadzącego', async t => {
+    const f = await fixture();
+    const registry = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry });
+    Object.assign(f.view.plugin, { subTaskRegistry: registry, subTaskNotifier: notifier });
+    f.view._wireSubTaskDeliverer.call(f.view as never);
+    t.teardown(() => { registry.dispose(); notifier.dispose(); f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+    const task = registry.create({ id: 'worker-A', name: 'worker', agentName: 'Mira', background: true,
+        origin: { agentName: 'Mira', tabKey: 'A', sessionPath: f.tabs[0].sessionPath, sessionEpoch: f.tabs[0].sessionEpoch! } });
+    const gate = holdRealCompression(f.windows[0]);
+    registry.finish(task, { text: 'Dorobek A', toolsUsed: [], durationMs: 1, usage: null });
+    await gate.entered.promise;
+    f.clickStop();
+    t.deepEqual(notifier.pending().map(task => task.id), ['worker-A']);
+    gate.release();
+    await new Promise(resolve => setImmediate(resolve));
+    t.deepEqual(notifier.pending(), []);
+    t.deepEqual(f.modelInputs, []);
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A', deliveredResult]);
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A', deliveredResult]);
+    t.is(f.view._autoTurnChainCounts.get('Mira'), 1);
+});
+
+test.serial('F6 D: E1 kontra E2 odmawia zapisu i odzyskuje szkic bez zmiany rozmowy', async t => {
+    const f = await fixture();
+    t.teardown(() => { f.view.attachmentManager?.destroy(); f.view.mentionAutocomplete?.destroy(); });
+    const path = f.tabs[0].sessionPath;
+    f.files.set(path, f.files.get(path)!.replace('epoch: ' + 'a'.repeat(32), 'epoch: ' + 'c'.repeat(32)));
+    const before = f.files.get(path);
+    let failure: unknown;
+    Object.assign(f.view, { handle_error(error: unknown) { failure = error; } });
+    f.view.input_area.value = 'Pytanie do E1';
+    await f.clickSend();
+    t.is(failure && typeof failure === 'object' && 'kind' in failure ? failure.kind : undefined, 'identity-conflict');
+    t.is(f.view.input_area.value, 'Pytanie do E1');
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.is(f.files.get(path), before);
     t.deepEqual(f.modelInputs, []);
 });

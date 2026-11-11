@@ -16,7 +16,8 @@ function fixture() {
     const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
     const tab = { ...owner, sessionId: 'tab', isActive: true };
     const window = { messages: [] as Array<Record<string, unknown>> };
-    const agentManager = { getActiveAgent: () => ({ name: 'Jaskier' }), getAgentMemory: () => ({ activeSessionPath: 's.md', sessionEpoch: 'e1' }) };
+    const memory = { activeSessionPath: 's.md', sessionEpoch: 'e1', async appendSessionEvent() {} };
+    const agentManager = { getActiveAgent: () => ({ name: 'Jaskier' }), getAgentMemory: () => memory };
     const sent: Array<Record<string, unknown>> = [];
     const view = {
         _preparingTurns: new Map(), _streamCtxMap: new Map(), _agentStates: new Map(),
@@ -217,17 +218,19 @@ function concurrentFixture() {
             getAgentMemory: () => memory, getActiveSystemPromptWithMemory: async () => 'system' },
             mcpClient: { async executeToolCall(_call: unknown, _agent: string, options: { origin: unknown }) { toolOwners.push(options.origin); return { success: true }; } } },
         env: { settings: { pkmAssistant: { enableOczko: false, limits: { chat_stream_stall_timeout_ms: 0 } } } },
-        append_message(role: 'user', content: string, _display: unknown, meta: object) { return this.rollingWindow.addMessage(role, content, meta); },
+        append_message(role: 'user', content: string, _display: unknown, meta: object, owner?: { rollingWindow: RollingWindow }) { return (owner?.rollingWindow ?? this.rollingWindow).addMessage(role, content, meta); },
         async appendToActiveSession(event: unknown) { events.push({ path: memory.activeSessionPath, event }); },
         async _resolveMentions(text: string) { return { displayText: text, contextText: '' }; },
         resetInputArea() { this.input_area.value = ''; }, set_generating(value: boolean) { f.view.is_generating = value; },
-        showTypingIndicator() {}, hideTypingIndicator() {}, _hideQueuedIndicator() {}, _clearQueuedDrainTimer() {}, stop_generation() {},
+        showTypingIndicator() {}, hideTypingIndicator() {}, _hideQueuedIndicator() {}, _clearQueuedDrainTimer() {}, stop_generation, _releaseStreamCtx, _resetPaintTargets() {},
         get_chat_model: () => model, _chatResolveTools: () => [{ type: 'function', function: { name: 'list', parameters: {} } }],
         _chatExecuteToolCall, _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {},
         _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {}, _isTurnActiveTab: () => false,
         _finalizeTurn() {}, handle_error(error: unknown) { throw error; },
         send_message(opts: unknown) { return send_message.call(this as never, opts as never); },
     });
+    view._agentStates.set('tab', { rollingWindow: a });
+    view._agentStates.set('tab-b', { rollingWindow: b });
     return { ...f, view, a, b, tabB, memory, saving, release, events, toolOwners, modelCalls: () => modelCalls };
 }
 
@@ -378,7 +381,7 @@ test.serial('zamknięcie podczas zapisu przyjętego pytania nie uruchamia modelu
     t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
     f.registry.openParentQuestion('r1', 'Jaki zakres?');
     await f.saving;
-    t.is(f.a.messages.filter(message => message.questionId).length, 1);
+    t.is(f.a.messages.filter(message => message.questionId).length, 0);
     stop_all_turns.call(f.view as never);
     f.release();
     for (let i = 0; i < 30; i++) await Promise.resolve();
@@ -415,9 +418,9 @@ test.serial('zamknięcie zakładki po zmianie klucza zatrzymuje starą i przygot
     t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); });
     const stopped: string[] = [];
     let aborted = false;
-    f.view._streamCtxMap.set('stary-klucz', { tab: f.tab });
+    f.view._streamCtxMap.set('stary-klucz', { tab: f.tab, abort: { abort() {} } });
     f.view._preparingTurns.set('tab', { tab: f.tab, abort: { abort() { aborted = true; } } });
-    Object.assign(f.view, { stop_generation: (key: string) => { stopped.push(key); },
+    Object.assign(f.view, { stop_generation: (key: string) => { stopped.push(key); stop_generation.call(f.view as never, key); },
         handleSaveSession: async () => {}, _switchTab: async () => {} });
     await _closeActiveTab.call(f.view as never);
     t.true(aborted);
@@ -442,7 +445,9 @@ test.serial('zamknięcie przygotowywanej zakładki nie przerywa drugiej sesji ag
             f.view.is_generating = false;
         },
     });
-    await _closeActiveTab.call(f.view as never);
+    const closing = _closeActiveTab.call(f.view as never);
+    f.release();
+    await closing;
     t.false(stoppedOther);
     t.is(f.view._streamCtxMap.get('Jaskier'), otherStream);
     f.view._streamCtxMap.delete('Jaskier');
@@ -468,4 +473,26 @@ test.serial('wynik z tła zapisuje terminalne pytanie czytelne bez rejestru', as
     t.teardown(() => emptyRegistry.dispose());
     t.deepEqual({ question: parseActiveSession(file).messages[0]?.question, tasks: emptyRegistry.list() },
         { question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } }, tasks: [] });
+});
+
+test.serial('F6 C: pytanie wygasłe podczas Oczka nie przekracza granicy przyjęcia', async t => {
+    const f = concurrentFixture();
+    let releaseNote!: () => void;
+    let noteEntered!: () => void;
+    const note = new Promise<void>(resolve => { releaseNote = resolve; });
+    const entered = new Promise<void>(resolve => { noteEntered = resolve; });
+    f.view.env.settings.pkmAssistant.enableOczko = true;
+    Object.assign(f.view, { async _buildActiveNoteContext() { noteEntered(); await note; return { text: '', images: [] }; } });
+    f.release();
+    t.teardown(() => { releaseNote(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
+    f.registry.openParentQuestion('r1', 'Jaki zakres?');
+    await entered;
+    await new Promise(resolve => setImmediate(resolve));
+    f.clock.advance(300000);
+    f.registry.finish(f.task, { text: 'Dorobek po wygaśnięciu', toolsUsed: [], durationMs: 1, usage: null });
+    releaseNote();
+    await new Promise(resolve => setImmediate(resolve));
+    t.deepEqual(f.a.messages.map(message => message.content), []);
+    t.deepEqual({ modelCalls: f.modelCalls(), events: f.events }, { modelCalls: 0, events: [] });
+    t.deepEqual(f.notifier.pending().map(task => task.result?.text), ['Dorobek po wygaśnięciu']);
 });

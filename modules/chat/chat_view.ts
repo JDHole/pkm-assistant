@@ -212,82 +212,86 @@ export class ChatView extends PluginItemView {
         this._wireSubTaskStrip();
     }
 
-    // Obsidian deklaruje `View.onClose(): Promise<void>`, a sprzątanie czatu jest w całości
-    // synchroniczne do zatrzymania tur. Zwracamy Promise zapisu wszystkich zakładek,
-    // aby zamknięcie widoku mogło poczekać także na usunięcia w pustym oknie.
+    // Obsidian deklaruje `View.onClose(): Promise<void>`. Najpierw kończymy przyjęcia
+    // wiadomości; dopiero potem niszczymy UI i zapisujemy wszystkie zakładki.
     onClose(this: ChatViewLike): Promise<void>;
     onClose(this: ChatViewLike): Promise<void> | void {
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
         // Odpinamy dostawcę — wyniki zostają w kolejce notifiera do następnego otwarcia.
         this.plugin?.subTaskNotifier?.setDeliverer?.(null);
         this.plugin?.subTaskNotifier?.setNoticeDeliverer?.(null);
-        this._questionAutoTurn = { kind: 'idle' };
-        this._subTaskTurnPending = false;
-        this._unwireSubTaskStrip?.();
-        this._unsubscribeSkinEvents?.();
-        this._unsubscribeSkinEvents = null;
-        // Menu na zaznaczeniu (jednostka D) trzyma pare nasluchow na document - bez odpiecia
-        // zamkniety widok zostawalby w pamieci.
-        this._selectionMenuDetach?.();
-        this._selectionMenuDetach = null;
-        // Popup / i jego oczekujacy timer nie moga przezyc zamkniecia widoku.
-        this._closeTriggerPopup?.();
-        // Nasluch rozwiniecia/zwiniecia kafelka (przerysowanie lacznika) - ten sam powod co menu
-        // na zaznaczeniu wyzej: bez odpiecia zamkniety widok trzymalby nasluch na starym
-        // messages_container.
-        this._connectorActivityDetach?.();
-        this._connectorActivityDetach = null;
-        if (this.handleGlobalKeydownBound) {
-            document.removeEventListener('keydown', this.handleGlobalKeydownBound);
-        }
-        if (this.handleBeforeUnloadBound) {
-            window.removeEventListener('beforeunload', this.handleBeforeUnloadBound);
-        }
-
-        if (this.mentionAutocomplete) {
-            this.mentionAutocomplete.destroy();
-            this.mentionAutocomplete = null;
-        }
-
-        if (this.attachmentManager) {
-            this.attachmentManager.destroy();
-            this.attachmentManager = null;
-        }
-
-        // Obserwator wysokości pływającego paska (rezerwuje miejsce pod nim w liście
-        // wiadomości) — zamknięty widok nie ma czego mierzyć ani gdzie zapisywać paddingu.
-        if (this._bottomPanelObserver) {
-            this._bottomPanelObserver.disconnect();
-            this._bottomPanelObserver = null;
-        }
-
-        // Closing mid-recording must release the microphone and the 1s tick timer.
-        // cancel() (not stop()) — the take in progress is dropped, no transcription into a dead view.
-        if (this._audioRecorder) {
-            this._audioRecorder.cancel();
-            this._audioRecorder = null;
-        }
-        if (this._agentManagerUnsub) {
-            this._agentManagerUnsub();
-            this._agentManagerUnsub = null;
-        }
-
-        this._cleanupAskUser();
-
-        // Zamknięcie panelu zatrzymuje KAŻDĄ turę tego widoku — także te z zakładek w tle —
-        // i suby z nich zlecone. Pytanie o jedno pole widoku
-        // (`if (this.is_generating) this.stop_generation()`) nie wystarcza: przełączenie
-        // zakładki nadpisuje je stanem zakładki DOCELOWEJ, więc tura z tła przeżyłaby zamknięcie,
-        // a rozbrojenie watchdoga niżej trafiłoby w niewłaściwą turę. Kolejność jest istotna —
-        // najpierw STOP (każdy `stop_generation` rozbraja watchdog SWOJEJ tury), dopiero potem
-        // pas zapasowy na timery, które mogły zostać bez wpisu w mapie.
         this.stop_all_turns('close');
-        for (const ctx of this._streamCtxMap.values()) ctx.watchdog?.disarm();
-        // Pas zapasowy na timery malowania. `stop_all_turns` rozbraja je
-        // przez `stop_generation` → `_resetPaintTargets`, ale tylko dla tur, które BYŁY w mapie.
-        this._renderThrottle?.cancel();
-        this._cancelConnectorRedraw?.();
-        return this.handleSaveSession?.();
+        const finishClose = () => {
+            this._questionAutoTurn = { kind: 'idle' };
+            this._subTaskTurnPending = false;
+            this._unwireSubTaskStrip?.();
+            this._unsubscribeSkinEvents?.();
+            this._unsubscribeSkinEvents = null;
+            // Menu na zaznaczeniu (jednostka D) trzyma pare nasluchow na document - bez odpiecia
+            // zamkniety widok zostawalby w pamieci.
+            this._selectionMenuDetach?.();
+            this._selectionMenuDetach = null;
+            // Popup / i jego oczekujacy timer nie moga przezyc zamkniecia widoku.
+            this._closeTriggerPopup?.();
+            // Nasluch rozwiniecia/zwiniecia kafelka (przerysowanie lacznika) - ten sam powod co menu
+            // na zaznaczeniu wyzej: bez odpiecia zamkniety widok trzymalby nasluch na starym
+            // messages_container.
+            this._connectorActivityDetach?.();
+            this._connectorActivityDetach = null;
+            if (this.handleGlobalKeydownBound) {
+                document.removeEventListener('keydown', this.handleGlobalKeydownBound);
+            }
+            if (this.handleBeforeUnloadBound) {
+                window.removeEventListener('beforeunload', this.handleBeforeUnloadBound);
+            }
+
+            if (this.mentionAutocomplete) {
+                this.mentionAutocomplete.destroy();
+                this.mentionAutocomplete = null;
+            }
+
+            if (this.attachmentManager) {
+                this.attachmentManager.destroy();
+                this.attachmentManager = null;
+            }
+
+            // Obserwator wysokości pływającego paska (rezerwuje miejsce pod nim w liście
+            // wiadomości) — zamknięty widok nie ma czego mierzyć ani gdzie zapisywać paddingu.
+            if (this._bottomPanelObserver) {
+                this._bottomPanelObserver.disconnect();
+                this._bottomPanelObserver = null;
+            }
+
+            // Closing mid-recording must release the microphone and the 1s tick timer.
+            // cancel() (not stop()) — the take in progress is dropped, no transcription into a dead view.
+            if (this._audioRecorder) {
+                this._audioRecorder.cancel();
+                this._audioRecorder = null;
+            }
+            if (this._agentManagerUnsub) {
+                this._agentManagerUnsub();
+                this._agentManagerUnsub = null;
+            }
+
+            this._cleanupAskUser();
+
+            // Zamknięcie panelu zatrzymuje KAŻDĄ turę tego widoku — także te z zakładek w tle —
+            // i suby z nich zlecone. Pytanie o jedno pole widoku
+            // (`if (this.is_generating) this.stop_generation()`) nie wystarcza: przełączenie
+            // zakładki nadpisuje je stanem zakładki DOCELOWEJ, więc tura z tła przeżyłaby zamknięcie,
+            // a rozbrojenie watchdoga niżej trafiłoby w niewłaściwą turę. Kolejność jest istotna —
+            // najpierw STOP (każdy `stop_generation` rozbraja watchdog SWOJEJ tury), dopiero potem
+            // pas zapasowy na timery, które mogły zostać bez wpisu w mapie.
+            this.stop_all_turns('close');
+            for (const ctx of this._streamCtxMap.values()) ctx.watchdog?.disarm();
+            // Pas zapasowy na timery malowania. `stop_all_turns` rozbraja je
+            // przez `stop_generation` → `_resetPaintTargets`, ale tylko dla tur, które BYŁY w mapie.
+            this._renderThrottle?.cancel();
+            this._cancelConnectorRedraw?.();
+            return this.handleSaveSession?.();
+        };
+        const admission = this._waitForSendAdmissions?.();
+        return admission ? admission.then(finishClose) : finishClose();
     }
 
     _subscribeAgentManagerEvents(this: ChatViewLike) {

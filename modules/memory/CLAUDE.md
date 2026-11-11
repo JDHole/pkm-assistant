@@ -1077,3 +1077,29 @@ oraz zgodnej rewizji. Nie należy podłączać tej instancji do selekcji w Agent
 Kontrola migracji dotyczy właściciela sesji, a nie wybranej zakładki. Diagnostyka
 migracji zostaje przy pisarzu i przechwyconej turze. Testy pełnej ścieżki wysyłki:
 `../chat/chat/chat_streaming.sendTab.test.ts` (również tworzenie sesji i trzy fazy epoki).
+
+
+### F6 — trwała granica przyjęcia wiadomości w czacie
+
+Czat przygotowuje poprawkę bez zmian RAM ani zapisów sesji. W nieprzerywalnej
+fazie B wywołuje `saveSession` na niezależnym pisarzu: pozostałe wiadomości,
+nowa wiadomość ze stałym `message_id` i wszystkie usunięcia tworzą jeden plan.
+Istniejące `_saveSession` składa `messages_removed` oraz brakujące wiadomości
+przed jednym `_writeSessionFile`. Nie wolno najpierw zapisać samego ucięcia.
+Oczekiwana ścieżka/epoka nadal są kontrolowane pod kolejką pliku.
+Dopiero udany zapis pozwala czatowi zmienić RAM i potwierdzić odbiór.
+
+Migracja epoki i publikacja tożsamości należą do tej samej fazy B. Stop/close/reset
+czekają na jej zakończenie; przełączenie zakładki nie blokuje pisarza starej sesji.
+Konflikt epok nie uprawnia do pominięcia zapisu pytania legacy. Błąd samej migracji
+zachowuje istniejący kontrakt `SessionEpochPersistenceError`, ale błąd zapisu pytania
+zatrzymuje wysyłkę. Nie ma już startu modelu z niezapisanym pytaniem jako fallbacku.
+
+Powiadomienia używają stałych ID dostarczenia. Ich ponowienie zawiera każde ID
+raz w planie `saveSession`; wcześniej obecne ID na dysku są pomijane przez
+istniejący mechanizm ogona. ACK notifiera wymaga sukcesu tego zapisu, także gdy
+wiadomość była już w RAM. Zapis automatyczny/zamykania bierze snapshot po B.
+
+API pamięci pozostaje bez zmian. Nie dodano readbacku każdego zapisu ani obsługi
+niepewnego/częściowego I/O; to ograniczenie jest odrębne od odraczania Stopu.
+Dowody: F6 w `../chat/chat/chat_streaming.sendTab.test.ts`, ze świeżym czytnikiem.

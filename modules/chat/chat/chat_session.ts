@@ -1,3 +1,4 @@
+import { sendAdmission } from './sendAdmission.js';
 import type { FrozenTurnOwner } from './turnOwner.js';
 import { cancelMessageEdit } from './messageEdit.js';
 /**
@@ -205,7 +206,12 @@ function restoreSubTaskHistory(view: ChatViewLike, parsed: Awaited<ReturnType<Ag
 }
 
 /** Restore the last active session from disk. */
-export async function _restoreActiveSession(this: ChatViewLike) {
+export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
+    const pending = [...(this._preparingTurns?.values() ?? []), ...(this._streamCtxMap?.values() ?? [])];
+    if (pending.length) {
+        for (const key of new Set([...(this._preparingTurns?.keys() ?? []), ...(this._streamCtxMap?.keys() ?? [])])) this.stop_generation(key, 'restore');
+        await this._waitForSendAdmissions?.();
+    }
     try {
         const agentManager = this.plugin?.agentManager;
         if (!agentManager) return;
@@ -296,6 +302,11 @@ export async function _restoreActiveSession(this: ChatViewLike) {
         for (const key of new Set([...(this._streamCtxMap?.keys() || []), ...(this._preparingTurns?.keys() || [])])) {
             this.stop_generation(key, 'restore');
         }
+        if ([...(this._preparingTurns?.values() ?? []), ...(this._streamCtxMap?.values() ?? [])]
+            .some(ctx => sendAdmission(ctx.rollingWindow))) {
+            await this._waitForSendAdmissions();
+            return this._restoreActiveSession();
+        }
         this.chatTabs = restored.map((item, index) => ({
             agentName: item.agentName,
             sessionId: item.session.path,
@@ -365,6 +376,16 @@ export async function startActiveSession(this: ChatViewLike, agentName: string) 
  * `sessions/active/` zupełnie innego agenta, gdyby user przełączył zakładkę w trakcie tury.
  */
 export async function appendToActiveSession(this: ChatViewLike, event: ActiveSessionEventInput, owner?: FrozenTurnOwner) {
+    return persistSendEvent.call(this, event, owner);
+}
+
+export async function saveSendMessage(this: ChatViewLike, event: ActiveSessionEventInput, owner: FrozenTurnOwner,
+    messages: Parameters<AgentMemory['saveSession']>[0], changes: Parameters<AgentMemory['saveSession']>[2]) {
+    return persistSendEvent.call(this, event, owner, { messages, changes });
+}
+
+async function persistSendEvent(this: ChatViewLike, event: ActiveSessionEventInput, owner?: FrozenTurnOwner,
+    plan?: { messages: Parameters<AgentMemory['saveSession']>[0]; changes: Parameters<AgentMemory['saveSession']>[2] }) {
     if (owner?.memory?.createSessionWriter) {
         const memory = owner.memory;
         const writer = memory.createSessionWriter(owner.sessionPath || null, owner.sessionEpoch);
@@ -374,7 +395,10 @@ export async function appendToActiveSession(this: ChatViewLike, event: ActiveSes
         const tabPath = owner.acceptedIdentity?.path ?? tab?.sessionPath;
         const tabKey = _tabKey(tab);
         if (!isFrozenTurnOwnerCurrent(this, owner)) return null;
-        const path = await writer.appendToActiveSession(event);
+        const path = plan
+            ? await writer.saveSession(plan.messages, {}, { ...plan.changes,
+                ...(owner.sessionPath ? { expectedSession: { path: owner.sessionPath, epoch: owner.sessionEpoch } } : {}) })
+            : await writer.appendToActiveSession(event);
         owner.sessionPath = path;
         owner.sessionEpoch = writer.sessionEpoch;
         if (isFrozenTurnOwnerCurrent(this, owner)) {
@@ -388,6 +412,10 @@ export async function appendToActiveSession(this: ChatViewLike, event: ActiveSes
             }
         }
         return path;
+    }
+    if (plan && owner?.memory?.saveSession) {
+        return owner.memory.saveSession(plan.messages, {}, { ...plan.changes,
+            ...(owner.sessionPath ? { expectedSession: { path: owner.sessionPath, epoch: owner.sessionEpoch } } : {}) });
     }
     if (owner?.sessionPath && owner.memory?.appendSessionEvent) {
         return owner.memory.appendSessionEvent(owner.sessionPath, event, owner.sessionEpoch);
@@ -403,11 +431,21 @@ export async function appendToActiveSession(this: ChatViewLike, event: ActiveSes
  * Handle new session — save, optionally compress, reset.
  */
 export async function handleNewSession(this: ChatViewLike) {
+    const admissionWindow = this.rollingWindow;
+    const admissionTab = this.chatTabs?.find(tab => tab.isActive);
     cancelMessageEdit(this.rollingWindow);
     // Nowa sesja NIE może zostawić trwającej tury jako zombie. Porzucona tura wisiałaby w tle
     // z uzbrojonym watchdogiem, który strzela „po agencie" i ubijałby requesty KOLEJNEJ tury
     // tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
     if (this.is_generating) this.stop_generation();
+    const committing = sendAdmission(admissionWindow);
+    if (committing) {
+        await committing.done;
+        if (admissionTab && !this.chatTabs.includes(admissionTab)) return;
+        if (admissionTab && !admissionTab.isActive) await this._switchTab(_tabKey(admissionTab));
+        if (this.rollingWindow !== admissionWindow) return;
+    }
+
 
     // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
     // (`core/security/SessionWriteConsent.ts`, `modules/tools/MCPClient.ts`) jest kluczowana
@@ -555,6 +593,15 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
         return;
     }
     const rw = rollingWindow || this.rollingWindow;
+    const ownerTab = this.chatTabs?.find(tab => tab.isActive && this.rollingWindow === rw
+        || this._agentStates?.get(_tabKey(tab))?.rollingWindow === rw);
+    const capturedMemory = resolveOwnerMemory(this.plugin?.agentManager, agentName);
+    const target = expectedSession ?? (ownerTab?.sessionPath ? { path: ownerTab.sessionPath, epoch: ownerTab.sessionEpoch ?? null }
+        : capturedMemory?.activeSessionPath ? { path: capturedMemory.activeSessionPath, epoch: capturedMemory.sessionEpoch } : undefined);
+    const committing = sendAdmission(rw);
+    if (committing) await committing.done;
+    expectedSession = ownerTab?.sessionPath && committing
+        ? { path: ownerTab.sessionPath, epoch: ownerTab.sessionEpoch ?? null } : target;
     if (!rw?.messages?.length && !rw?.removedMessageIds?.length && !rw?.removedMessageRanges?.length) return;
     try {
         const agentManager = this.plugin?.agentManager;
@@ -594,6 +641,13 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
  */
 export async function handleLoadSession(this: ChatViewLike, path: string) {
     log.info('Chat', `handleLoadSession: ${path}`);
+    const ownerWindow = this.rollingWindow;
+    const ownerTab = this.chatTabs?.find(tab => tab.isActive);
+    if (this.is_generating) this.stop_generation();
+    await this._waitForSendAdmissions?.(ownerWindow);
+    if (ownerTab && !ownerTab.isActive) await this._switchTab(_tabKey(ownerTab));
+    if (this.rollingWindow !== ownerWindow) return;
+
     try {
         const agentMemory = this.plugin?.agentManager?.getActiveMemory();
         if (!agentMemory) return;

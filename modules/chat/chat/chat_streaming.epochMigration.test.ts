@@ -399,18 +399,19 @@ test.serial('P2 filesystem: successful migration preserves history and a fresh r
 });
 
 
-test.serial('P4: read-only legacy session reaches the model with an unsaved question in RAM', async t => {
+test.serial('F6: read-only legacy odmawia niezapisanego pytania przed zmianą RAM', async t => {
     const f = fixture(), chat = f.chat('read-only');
     t.teardown(chat.close);
     f.adapter.append = async () => { throw new Error('EACCES session'); };
     await chat.send();
-    t.deepEqual(f.payloads.get('read-only'), [{ role: 'system', content: 'system' }, { role: 'user', content: 'Pytanie read-only' }]);
-    t.is(f.answers.get('read-only'), 'Odpowiedź read-only');
-    t.deepEqual(f.origins.get('read-only')?.sessionEpochFailure, { kind: 'append-failed', detail: 'EACCES session' });
-    t.deepEqual(f.errors, []);
+    t.is(f.payloads.get('read-only'), undefined);
+    t.is(f.answers.get('read-only'), undefined);
+    t.is(f.origins.get('read-only'), undefined);
+    t.deepEqual(chat.view.rollingWindow.messages, []);
+    t.deepEqual(f.errors, ['Error: EACCES session']);
     t.is(await f.adapter.read(f.path), history);
     t.deepEqual([f.memory.sessionEpoch, chat.tab.sessionEpoch], [null, null]);
-    t.deepEqual(f.memory.getSessionEpochFailure(f.path), { kind: 'append-failed', detail: 'EACCES session' });
+    t.is(f.memory.getSessionEpochFailure(f.path), null);
 });
 
 for (const kind of ['confirmed', 'owner-switch', 'window-error'] as const) {
@@ -424,7 +425,7 @@ for (const kind of ['confirmed', 'owner-switch', 'window-error'] as const) {
             throw new Error('EACCES question');
         };
         await chat.send();
-        t.deepEqual(f.errors, [kind === 'window-error' ? 'Error: window failed' : 'Error: EACCES question']);
+        t.deepEqual(f.errors, [kind === 'confirmed' ? 'Error: Session identity conflict' : 'Error: EACCES question']);
         t.is(await f.adapter.read(f.path), history);
         t.deepEqual(f.requests, []);
     });

@@ -52,11 +52,12 @@ for (const legacy of [false, true]) for (const edit of [false, true]) for (const
         mentions.onChange = list => { mentionChips = list.map(mention => mention.name); };
         const source = edit && !legacy ? 'Pytanie @[notatka]' : 'Pytanie';
         const agent = { name: 'Mira' };
+        const memory = { activeSessionPath: 'a.md', sessionEpoch: 'epoch-a' };
         const tab = { agentName: 'Mira', sessionId: 'retry', sessionPath: 'a.md', sessionEpoch: 'epoch-a', isActive: true };
         const view = {
             leaf: { id: 'retry' }, rollingWindow: rw, input_area: { value: '', focus() {} }, inputHistory: [],
             tokenTracker: { record() {} }, chatTabs: [tab], _streamCtxMap: new Map(), _preparingTurns: new Map(), _agentStates: new Map(),
-            plugin: { agentManager: { getActiveAgent: () => agent, getAgentMemory: () => ({ activeSessionPath: 'a.md', sessionEpoch: 'epoch-a' }),
+            plugin: { agentManager: { getActiveAgent: () => agent, getAgentMemory: () => memory,
                 getActiveSystemPromptWithMemory: async () => 'system' },
                 mcpClient: { async executeToolCall(_call: unknown, _agent: string, opts: ExecuteToolCallOptions) { captured = opts; return { success: true }; } } },
             env: { settings: { pkmAssistant: { enableOczko: false, limits: { chat_max_iterations: 3, chat_stream_stall_timeout_ms: 0 } } } },

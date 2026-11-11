@@ -1,3 +1,4 @@
+import { sendAdmission } from './sendAdmission.js';
 import { restoreSendDraft } from './sendDraft.js';
 import { cancelMessageEdit } from './messageEdit.js';
 /**
@@ -287,7 +288,6 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
             .some(([key, ctx]) => key === queueTabKey && ctx.tab === other)));
     const ownQueue = !queueTabKey || queueTabKey === tabKey || turnKeys.includes(queueTabKey) || !otherLiveOwner;
     if (turnKeys.length === 0 && queued && ownQueue) this.stop_generation(tabKey, 'close_tab');
-    for (const key of turnKeys) this._preparingTurns.get(key)?.abort.abort('close_tab');
     for (const turnKey of turnKeys) {
         try {
             if (!ownQueue) this._queuedMessage = null;
@@ -363,7 +363,15 @@ export async function _closeActiveTab(this: ChatViewLike) {
     const activeTab = this.chatTabs[activeIndex];
     const activeKey = _tabKey(activeTab);
 
+    const closingWindow = this.rollingWindow;
     _stopTabWork.call(this, activeTab, activeKey);
+    const committing = sendAdmission(closingWindow);
+    if (committing) {
+        await committing.done;
+        if (!this.chatTabs.includes(activeTab)) return;
+        if (!activeTab.isActive) await this._switchTab(_tabKey(activeTab));
+        if (this.rollingWindow !== closingWindow) return;
+    }
 
     if (this.rollingWindow?.messages?.length > 0 || this.rollingWindow?.removedMessageIds?.length > 0 || this.rollingWindow?.removedMessageRanges?.length > 0) {
         try {
@@ -384,8 +392,9 @@ export async function _closeActiveTab(this: ChatViewLike) {
         return;
     }
 
-    this.chatTabs.splice(activeIndex, 1);
-    const newActiveIndex = Math.min(activeIndex, this.chatTabs.length - 1);
+    const closingIndex = this.chatTabs.indexOf(activeTab);
+    this.chatTabs.splice(closingIndex, 1);
+    const newActiveIndex = Math.min(closingIndex, this.chatTabs.length - 1);
     await this._switchTab(_tabKey(this.chatTabs[newActiveIndex]));
 }
 

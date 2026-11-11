@@ -221,8 +221,8 @@ test('zapis zatrzymanego wyniku przekazuje zamrożoną epokę sesji', async t =>
     await send_message.call(view as never, { meta: { origin: 'human' } });
     t.deepEqual(attempts, [{ path: 'active.md', expectedEpoch: 'epoch-1' }]);
     t.deepEqual(persisted, []);
-    t.true(rw.messages.some(message => String(message.content).includes('ZACHOWANY DOROBEK')));
-    t.deepEqual(notifier.pending(), []);
+    t.deepEqual(rw.messages.map(message => message.content), ['Kontynuuj']);
+    t.deepEqual(notifier.pending().map(task => task.id), ['run-stopped']);
 });
 
 test('Stop użytkownika po wcześniejszym Stopie prowadzącego nadal zatrzymuje auto-doręczenie', async t => {

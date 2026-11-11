@@ -59,6 +59,7 @@ modules/chat/
     ├── Summarizer.js               # kompresja starych tur + sekcja MEMORY_CANDIDATES
     ├── turnOwner.js                # kto jest WŁAŚCICIELEM okna/tury: resolvery + providery RollingWindow + `freezeTurnOwner(view)`; pure, testowalny
     ├── turnAbort.js                # uchwyt przerwania tury (zatrzask); pure, testowalny
+    ├── sendAdmission.ts            # nieprzerywalne przyjęcie per RollingWindow, odroczenie Stopu i Promise dla lifecycle
     ├── compressionPrompt.js        # czysty re-export z `config/default_prompts.js` (tam mieszka `defaultCompressionPrompt()`) - lokalne drzwi dla wnętrza czatu
     ├── memoryCandidates.js         # parser bloku MEMORY_CANDIDATES z odpowiedzi Summarizera
     ├── subTaskNotification.js      # treść powiadomienia o wyniku suba z tła + matchTabForOrigin (pure, testowalny)
@@ -1822,14 +1823,13 @@ i potwierdza ją readbackiem (kontrakt P3 w `../memory/CLAUDE.md`). Brak rzeczyw
 odmawia piszącemu subowi, bez zapisu live. Testy: `chat_streaming.epochMigration.test.ts`
 (produkcyjne send_message), F1 w `turnOwner.test.ts` i harness 74 (piszący sub po boocie).
 
-P4 migracji: tylko `SessionEpochPersistenceError` pozwala kontynuować bez epoki,
-po ponownej kontroli właściciela i rewizji. FrozenTurnOwner kopiuje zamaskowaną
-przyczynę; turnOrigin przekazuje ją tylko przy braku epoki. Osobny wąski catch
-zapisu pytania legacy sprawdza niezmienionego właściciela i obecność wiadomości
-w jego oknie. Logger ostrzega o niezapisanym pytaniu; model korzysta z RAM.
-Błąd append_message lub zapisu nowej/potwierdzonej sesji zatrzymuje wysyłkę
-i trafia do handle_error; zmiana właściciela nie pozwala uruchomić modelu. Testy P4 w chat_streaming.epochMigration.test.ts sprawdzają odpowiedź
-modelu, origin, dokładne bajty historii oraz granice catcha.
+P4 migracji: tylko `SessionEpochPersistenceError` z samej migracji pozwala
+kontynuować bez epoki po kontroli właściciela. Zapis pytania musi wcześniej się udać.
+Nie ma fail-soft dla niezapisanego pytania legacy: błąd zapisu zatrzymuje wysyłkę,
+oddaje szkic i trafia do `handle_error`. Faza A porównuje odczytaną epokę z zamrożoną;
+`SendIdentityConflictError` odróżnia konflikt tożsamości od awarii migracji.
+Stop podczas migracji jest odroczony do zakończenia fazy B, więc nie rozdziela
+publikacji epoki do pliku, zakładki i pamięci aktywnego właściciela.
 
 P5 migracji: `chat_session.test.ts` odtwarza epokę eventową i dokładne wiadomości
 nową pamięcią i adapterem, zarówno przez listę sesji, jak przez fallback restore.
@@ -1843,7 +1843,7 @@ readbacku (również z błędem) nie publikuje starej epoki ani diagnostyki do n
 Treść, zamiar edycji, załączniki, wzmianki i kontekst Oczka są przechwytywane przed
 pierwszym awaitem. Input jest czyszczony przy przyjęciu wysyłki; kontynuacja nie czyści
 szkicu ani chipów innej zakładki. Rozpoznane komendy slash zachowują oczekujące
-załączniki i wzmianki; zużywa je dopiero wiadomość do modelu. Usunięcia i pytanie są zapisywane kolejno do sesji A,
+załączniki i wzmianki; zużywa je dopiero wiadomość do modelu. Usunięcia i poprawka trafiają jednym zapisem do sesji A,
 a model i finalizacja korzystają z tego samego ownera. `isOwnerActive` bramkuje tylko UI.
 Testy `chat/chat_streaming.sendTab.test.ts` uruchamiają rejestracje klik/Enter i klik
 zakładki z produkcji, prawdziwe okna, pisarza sesji, pętlę oraz finalizację. Kontrolowane
@@ -1861,24 +1861,48 @@ przyjęcia szkicu do końca tury, a nie wyłącznie strumień modelu. Istniejąc
 Nowej sesji, Escape, Stopu, pickerów, kolejki i doręczeń widzą więc przygotowanie.
 Pole tekstowe pozostaje dostępne do pisania kolejnej wiadomości; próba wysłania
 trafia do kolejki. Przełączenie A→B nie anuluje A, a powrót odtwarza zajętość A.
-Zamykanie zakładki/widoku nadal przerywa uchwyty przygotowania i strumienia.
+Zamykanie zakładki/widoku przerywa fazę A i model, a na fazę B czeka.
 
-Zamiar edycji zostaje odpięty od pola przed I/O, ale usunięcia historii najpierw
-zapisujemy do zamrożonej sesji. Dopiero sukces zmienia RollingWindow. Błąd zapisu
-(np. EACCES) zachowuje historię i przechodzi przez zwykły `handle_error` wysyłki.
-`sendDraft.ts` oddaje niewysłaną treść, załączniki i wzmianki oknu właściciela;
-w tle czeka do `_switchTab`. Przywraca tylko wyczyszczone chipy: oczekujący
-slash-fallback nie może zdublować zachowanych załączników. Nowszy szkic jest
-zachowany obok odzyskanego.
-Stop/Nowa sesja przed przyjęciem wiadomości oddaje szkic. Po dodaniu wiadomości
-do okna pozostaje ona w starej rozmowie, jak w dotychczasowej trwającej turze.
+F6 wprowadza dwie fazy przyjęcia:
 
-`_deliverSubTaskResult` zwraca `false` przy samym zaplanowaniu auto-tury. Po zejściu
-ze stosu notifiera pobiera claim i ponownie sprawdza właściciela oraz zajętość.
-Wewnętrzny callback `send_message.onAccepted` potwierdza claim dopiero po przyjęciu
-wiadomości przez uchwycone okno; odmowa zwalnia claim do kolejnej próby. Rezerwacja
-chroni przed równoległymi doręczeniami. Licznik auto-tur rośnie przy przyjęciu.
-Rezerwacja pytania suba sprawdza strumień, nie własne `is_generating` przygotowania.
+- **A, przerywalna:** wzmianki, Oczko, slash-fallback, zimne odczyty i kontrola
+  tożsamości. Nie zapisuje usunięć ani snapshotu bezczynności i nie ucina RAM.
+  `sendDraft.ts` oddaje tekst, załączniki, wzmianki i zamiar edycji właścicielowi;
+  w tle szkic czeka na `_switchTab`. Przywraca tylko wcześniej wyczyszczone chipy.
+- **B, nieprzerywalna:** `sendAdmission.ts` obejmuje zapis, tworzenie sesji i migrację,
+  zmianę RAM/projekcji oraz `addMessage` z awaryjną kompresją, aż do pokwitowania.
+  Poprawka używa `saveSendMessage`: pozostała historia, nowa wiadomość o stałym ID
+  i usunięcia idą do istniejącego `saveSession` jako jeden plan i jeden write.
+  RAM zmienia się po udanym zapisie. Odrzucony zapis zachowuje starą rozmowę,
+  oddaje szkic i nie uruchamia modelu.
+
+`stop_generation` w B zapamiętuje Stop; nie abortuje uchwytu ani kompresji.
+`finish()` wykonuje odroczony Stop przed budową promptu i startem prowadzącego.
+`handleSaveSession` pobiera snapshot po oczekiwaniu. Zamknięcie, Nowa sesja,
+load/restore czekają tylko na przyjęcie, nigdy na całą odpowiedź modelu.
+Odroczone operacje zachowują właściciela; przed wejściem do istniejącego modalu
+przywracają jego zakładkę. Zmiana wybranej zakładki pozostaje natychmiastowa.
+Nie wolno omijać tej bramki bezpośrednim abortem `_preparingTurns`.
+
+`_deliverSubTaskResult` zwraca `false` przy zaplanowaniu auto-tury; pobiera claim
+w mikrozadaniu. `onAccepted`, ack i licznik wymagają udanego zapisu oraz przyjęcia
+przez uchwycone okno. Błąd renderowania po tych dwóch krokach nie cofa pokwitowania.
+Sama obecność wiadomości w RAM nie uprawnia do ack, również w `finally` dostawcy
+ani `_consumeUserStoppedSubTasks`. Stałe ID `sub-result:<taskId>` i
+`sub-question:<questionId>` pozwalają ponowić zapis bez drugiego wstrzyknięcia;
+plan zapisu zawiera każde ID tylko raz. Pytania zachowują własną kontrolę ważności.
+Licznik auto-tur ma generację per agent: człowiek zeruje licznik i zwiększa generację;
+opóźniony odbiór wyniku rozlicza tylko generację, z której wystartował.
+
+Testy F6 w `chat_streaming.sendTab.test.ts` obejmują A/B ze Stopem, Escape,
+Nowa→Cancel, zamknięciem zakładki/widoku, pojedynczy write poprawki, EACCES,
+trzy granice migracji z kolejną pełną turą, rzeczywistą kompresję `addMessage`,
+retry zwykłego/zatrzymanego wyniku oraz reset licznika w drugiej zakładce.
+Odczyty kontrolne używają świeżej instancji pamięci i adaptera.
+
+Granica nie gwarantuje odzyskiwania po częściowym zapisie lub zerwaniu procesu.
+Nie dodaje readbacku każdego zapisu, dziennika ani timeoutu kompresji;
+zawieszona kompresja może więc opóźnić zakończenie B.
 
 Testy F1 w `chat/chat_streaming.sendTab.test.ts` używają produkcyjnych nasłuchów,
 `handleNewSession`, Stopu/zamykania, notifiera i wzmiankowania. Macierz obejmuje
@@ -1886,7 +1910,7 @@ każde zatrzymanie I/O przygotowania oraz tworzenie pliku, wyniki w tle i lukę
 mikrozadania, ponowne użycie nazwy z inną epoką, EACCES oraz A→B→A z nowym szkicem.
 
 
-Przegląd czytelników `is_generating` / `_preparingTurns` (F1):
+Przegląd czytelników `is_generating` / `_preparingTurns` (F1, uzupełniony F6):
 
 - `chat_streaming.send_message`: początkowa bramka kolejki zostaje (uwzględnia
   też konkretne okno). Rejestracja przygotowania teraz od razu ustawia zajętość.
@@ -1904,12 +1928,12 @@ Przegląd czytelników `is_generating` / `_preparingTurns` (F1):
 - `chat_tabs._initTabs`, `_switchTab` (zapis `isGenerating`), `_stopTabWork`: bez
   zmiany czytelników; mapy już obejmują przygotowanie. `_switchTab` dodatkowo
   przywraca odzyskany szkic okna przed odtworzeniem zajętości.
-- `chat_session._restoreActiveSession` i `handleNewSession`: bez zmiany czytelników;
-  restore zatrzymuje obie mapy, Nowa sesja widzi teraz zajętość całej tury.
+- `chat_session._restoreActiveSession` i `handleNewSession`: zatrzymują przygotowanie
+  i czekają na ewentualne przyjęcie B przed wymianą sesji.
 - `chat_ui`: wszystkie sześć bramek bez zmiany: wybór skilla, subagenta, MCP,
   odświeżenie artefaktów, picker artefaktu i globalny Escape. Wczesna zajętość
   blokuje te akcje lub udostępnia Stop. Pole pozostaje dostępne do kolejki.
-- `chat_view`: deklaracje/inicjalizacja i komentarze, bez dodatkowej bramki;
+- `chat_view`: `onClose` czeka na przyjęcia przed zniszczeniem UI;
   `subTaskDelivery` i `autoTurnChain`: wzmianki w kontraktach/komentarzach,
   bez samodzielnego odczytu stanu widoku. Bez zmian.
 

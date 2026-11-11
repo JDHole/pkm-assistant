@@ -309,6 +309,7 @@ export interface ChatViewMixins extends
     _queuedDrainTimer: number | null;
     _queuedIndicatorEl: HTMLElement | null;
     _autoTurnChainCounts?: Map<string, number>;
+    _autoTurnChainGenerations?: Map<string, number>;
     _questionAutoTurn?: import('./subTaskQuestionDelivery.js').AutoTurnReservation;
     _pendingDelegation: DelegationProposal | null;
 
