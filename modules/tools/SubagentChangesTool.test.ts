@@ -62,7 +62,7 @@ async function fixture() {
     const trashCalls: string[] = [];
     const app = { fileManager: { trashFile: async (file: { path: string }) => {
         trashCalls.push(`fileManager:${file.path}`); await atDestructiveOperation?.();
-        trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path);
+        writes.push('permanent'); await remove(file.path);
     } }, vault: {
         on: (name: string, handler: (entry: { path: string }) => void) => {
             if (!events.has(name)) events.set(name, new Set());
@@ -75,7 +75,7 @@ async function fixture() {
         create, createBinary: create,
         modifyBinary: async (file: { path: string }, bytes: ArrayBuffer) => { await atDestructiveOperation?.(); writes.push(`binary:${file.path}`); set(file.path, new Uint8Array(bytes), 10); writeHook?.(); },
         createFolder: async (path: string) => { if (files.has(path) || folders.has(path)) throw new Error('exists'); writes.push(`folder:${path}`); folders.add(path); },
-        trash: async (file: { path: string }) => { trashCalls.push(`vault:${file.path}`); await atDestructiveOperation?.(); trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path); },
+        trash: async (file: { path: string }, system: boolean) => { await atDestructiveOperation?.(); if (system) trash.set(file.path, (await read(file.path)).slice()); writes.push('trash'); await remove(file.path); },
         delete: async (file: { path: string }) => { await atDestructiveOperation?.(); await remove(file.path); },
         adapter: {
             stat: async (path: string) => { const value = files.get(path); return value ? { type: 'file', size: value.bytes.length, mtime: value.mtime }
@@ -126,16 +126,14 @@ async function fixture() {
     };
 }
 
-test('indexed deletion acceptance uses file manager and preserves recovery bytes', async t => {
+for (const disposition of ['trash', 'permanent'] as const) test(`indexed deletion ${disposition} keeps bytes in trash under permanent setting`, async t => {
     const f = await fixture();
-    const draft = await f.make('delete-indexed', [['x.md', { kind: 'deleted', disposition: 'trash' }, 'delete']]);
+    const draft = await f.make('delete-indexed', [['x.md', { kind: 'deleted', disposition }, 'delete']]);
     const result = await f.call(f.decision(draft)) as Result;
     t.is(result.kind, 'accepted');
-    t.deepEqual(f.trashCalls, ['fileManager:x.md']);
-    t.deepEqual([...f.trash.get('x.md')!], [...encode('Baza')]);
-    t.deepEqual(await f.io.stat(parseVaultPath('x.md')), { kind: 'missing' });
-    const backup = 'recoveryBlob' in result ? result.recoveryBlob! : undefined;
-    t.is(backup && decode(await f.persistence.readBlob(draft.draftId, backup.blob, backup.hash, backup.bytes)), 'Baza');
+    t.deepEqual(f.trash.get('x.md'), encode('Baza'));
+    t.deepEqual(f.trashCalls, []);
+    t.deepEqual(f.writes, ['trash', 'delete:x.md']);
 });
 
 test('P4 public list → accept X → reject Y persists independent decisions', async t => {

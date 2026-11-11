@@ -163,7 +163,9 @@ odmową/niepewną decyzją, nigdy niezabezpieczonym fallbackiem.
 
 **Decyzja Kuby 07.11.2026: „Okno + siatka asekuracyjna”.** Obsidian nie oferuje
 warunkowego modifyBinary/trash. Przyjęte usunięcie ZAWSZE trafia do kosza, nawet gdy
-propozycja zawiera permanent; host nie ma tu ścieżki delete/remove. Przed nadpisaniem
+propozycja zawiera permanent; host nie ma tu ścieżki delete/remove. Reguła katalogu Obsidiana
+zgłasza tu ostrzeżenie, które świadomie zostaje: `FileManager.trashFile` przy ustawieniu
+„trwale usuń” pomija kosz. Przed nadpisaniem
 binarium (także przed usunięciem) host odczytuje bieżące bajty i woła checkpoint.
 Ten zapisuje blob trwale i publikuje `applying.recoveryBlob` przed operacją. Manifest
 jest dziennikiem decyzji; pierwotna intencja pozostaje niezmienna. Pokwitowanie accepted
