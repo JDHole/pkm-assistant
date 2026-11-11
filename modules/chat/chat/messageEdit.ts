@@ -33,12 +33,19 @@ export function hasPendingMessageEdit(window: RollingWindow): boolean {
     if (edit && (!edit.isCurrent() || !window.messages.includes(edit.message))) cancelMessageEdit(window);
     return pending.has(window);
 }
-export function commitMessageEdit(window: RollingWindow): void {
+/** Detach a submitted edit from input/tab cancellation; commit only after slash dispatch. */
+export function takeMessageEdit(window: RollingWindow): () => void {
     const message = hasPendingMessageEdit(window) ? pending.get(window)?.message : undefined;
     cancelMessageEdit(window);
-    if (!message) return;
-    const index = window.messages.indexOf(message);
-    if (index >= 0) window.removeMessages(index);
+    return () => {
+        if (!message) return;
+        const index = window.messages.indexOf(message);
+        if (index >= 0) window.removeMessages(index);
+    };
+}
+
+export function commitMessageEdit(window: RollingWindow): void {
+    takeMessageEdit(window)();
 }
 
 /** Legacy plain text stays editable. Only evidence of expanded attachments needs an empty draft. */

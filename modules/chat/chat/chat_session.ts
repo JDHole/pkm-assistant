@@ -1,3 +1,4 @@
+import type { FrozenTurnOwner } from './turnOwner.js';
 import { cancelMessageEdit } from './messageEdit.js';
 /**
  * Session management — save, load, consolidate, rolling window creation.
@@ -363,10 +364,36 @@ export async function startActiveSession(this: ChatViewLike, agentName: string) 
  * aktywnej pamięci wsypywałoby wiadomości, wywołania narzędzi i ich WYNIKI do
  * `sessions/active/` zupełnie innego agenta, gdyby user przełączył zakładkę w trakcie tury.
  */
-export async function appendToActiveSession(this: ChatViewLike, event: ActiveSessionEventInput) {
+export async function appendToActiveSession(this: ChatViewLike, event: ActiveSessionEventInput, owner?: FrozenTurnOwner) {
+    if (owner?.memory?.createSessionWriter) {
+        const memory = owner.memory;
+        const writer = memory.createSessionWriter(owner.sessionPath || null, owner.sessionEpoch);
+        owner.sessionWriter = writer;
+        const revision = memory.sessionIdentityRevision;
+        const tab = owner.tab;
+        const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch;
+        const tabKey = _tabKey(tab);
+        const path = await writer.appendToActiveSession(event);
+        owner.sessionPath = path;
+        owner.sessionEpoch = writer.sessionEpoch;
+        if (!tab || this.chatTabs.includes(tab) && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch) {
+            if (tab) {
+                if (!tab.sessionId) tab.sessionId = tabKey;
+                tab.sessionPath = path; tab.sessionEpoch = owner.sessionEpoch;
+            }
+            if ((!tab || tab.isActive) && this.rollingWindow === owner.rollingWindow && memory.sessionIdentityRevision === revision) {
+                memory.setActiveSessionIdentity(path, owner.sessionEpoch);
+                if (path !== tabPath) await memory._persistActiveSession();
+            }
+        }
+        return path;
+    }
+    if (owner?.sessionPath && owner.memory?.appendSessionEvent) {
+        return owner.memory.appendSessionEvent(owner.sessionPath, event, owner.sessionEpoch);
+    }
     const agentManager = this.plugin?.agentManager;
-    const owner = resolveOwnerAgentName(agentManager, event?.agentName);
-    const agentMemory = resolveOwnerMemory(agentManager, owner);
+    const ownerName = resolveOwnerAgentName(agentManager, event?.agentName);
+    const agentMemory = resolveOwnerMemory(agentManager, ownerName);
     if (!agentMemory?.appendToActiveSession) return null;
     return agentMemory.appendToActiveSession(event);
 }

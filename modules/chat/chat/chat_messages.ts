@@ -1,3 +1,4 @@
+import type { FrozenTurnOwner } from './turnOwner.js';
 import { beginMessageEdit, messageEditText } from './messageEdit.js';
 /**
  * @module chat_messages
@@ -103,11 +104,17 @@ interface TrimInfo {
  *   bezpieczeństwa (rejestr adresów dla `web_read`). Brak = maszyna, patrz
  *   `core/security/messageOrigin.ts`.
  */
-export async function append_message(this: ChatViewLike, role: MessageRole, content: MessageContent, displayText?: string, meta?: Partial<RollingMessage>): Promise<void> {
+export async function append_message(this: ChatViewLike, role: MessageRole, content: MessageContent, displayText?: string, meta?: Partial<RollingMessage>, owner?: FrozenTurnOwner): Promise<void> {
     const timestamp = new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' });
 
     // Add to history with timestamp
-    await this.rollingWindow.addMessage(role, content, { timestamp, ...(meta || {}) });
+    const rw = owner?.rollingWindow ?? this.rollingWindow;
+    await rw.addMessage(role, content, { timestamp, ...(meta || {}) });
+    if (rw !== this.rollingWindow || (owner?.tab && !owner.tab.isActive)) {
+        if (owner?.tab) owner.tab._needsRefresh = true;
+        registerUrlsIfHuman(displayText || (typeof content === 'string' ? content : this._contentBlocksToText(content)), meta, registerUrlsFromText);
+        return;
+    }
     this.updateTokenCounter();
 
     // Determine what to show in UI vs what goes to API

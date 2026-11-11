@@ -491,6 +491,16 @@ export class AgentMemory {
         this._sessionIdentityRevision++;
     }
 
+    /** Independent session cursor for an accepted send. File queues/caches remain shared.
+     * The caller publishes a new identity only to the tab that owns this writer. */
+    createSessionWriter(path: string | null, epoch: string | null): AgentMemory {
+        const writer = new AgentMemory(this.vault, this.agentName, this.settings);
+        writer.setActiveSessionIdentity(path, epoch);
+        writer._structureEnsured = this._structureEnsured;
+        writer._persistActiveSession = async () => { /* A background send must not select a session. */ };
+        return writer;
+    }
+
     /** Upgrade a known legacy owner under the same queue as session appends.
      * No missing-file repair or redirection. RAM identity changes only after readback. */
     async ensureActiveSessionEpoch(path: string, isCurrent: () => boolean): Promise<string> {

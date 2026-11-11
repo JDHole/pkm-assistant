@@ -340,3 +340,12 @@ rzeczywisty runtime/review oraz sprawdza zatrzymanie i odpięcie subskrypcji.
 Prezentacja kopii i podgląd są opcjonalne: publiczne `SubAgentDraftView`,
 `createSubAgentBlock` i `DiffModal` nie podejmują decyzji domenowych. Konflikty oraz
 odtworzone po restarcie propozycje pokazuje projekcja dostarczona przez czat.
+
+
+### P1 — zawartość załączników po przyjęciu wysyłki
+
+`AttachmentManager.buildMessageContent(userText, attachments?)` przyjmuje opcjonalny
+snapshot z `snapshotAttachments()`. Czat przekazuje go po rozwiązaniu wzmianek,
+żeby zmiana chipów podczas await nie podmieniła załączników wysłanej wiadomości.
+Bez drugiego argumentu metoda nadal korzysta z bieżących załączników. Kolejność
+kontekstu i format treści są takie same dla obu wariantów.

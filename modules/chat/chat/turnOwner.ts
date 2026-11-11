@@ -261,6 +261,8 @@ export interface FrozenTurnOwner {
     /** Epoka potwierdzona synchronicznie dla tej ścieżki. */
     sessionEpoch: string | null;
     sessionEpochFailure?: Readonly<SessionEpochFailure>;
+    /** Private cursor used by send preparation; never changed by tab selection. */
+    sessionWriter?: AgentMemory;
     /** Zakładka, z której wyszła tura (adres zwrotny delegacji w tle). */
     tab: OwnerTabLike | null;
     /** Autonomia tej zakładki — polityka „czy pytać" dla egzekutora narzędzi. */
@@ -273,8 +275,7 @@ export interface FrozenTurnOwner {
  * Zamroź właściciela tury. Czyta widok RAZ i SYNCHRONICZNIE — bez `await` w środku, żeby między
  * odczytami nie dało się wcisnąć przełączenia zakładki.
  *
- * Wołane w `send_message` razem z zapaleniem guzika Stop i PRZED pierwszym awaitem przygotowania
- * promptu; od tego miejsca tura nie ma prawa pytać widoku „kto jest teraz aktywny".
+ * Wołane w `send_message` PRZED pierwszym awaitem wysyłki, także zapisem usunięć; od tego miejsca tura nie ma prawa pytać widoku „kto jest teraz aktywny".
  *
  * @param view - odbiorca mixinów ChatView (`rollingWindow`, `tokenTracker`, `chatTabs`, …)
  */
@@ -305,13 +306,41 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
     };
 }
 
-/** Legacy epoch establishment is attempted BEFORE freezeTurnOwner. Every await keeps the
- * original tab/window/agent guard, so another tab cannot inherit this send. */
-export async function ensureTurnSessionEpoch(view: FreezeViewLike): Promise<boolean> {
+/** Complete the captured session identity without following the selected tab's memory cursor.
+ * The no-writer path retains the legacy host contract and its active-owner guards. */
+export async function ensureTurnSessionEpoch(view: FreezeViewLike, owner?: FrozenTurnOwner): Promise<boolean> {
+    if (owner?.sessionWriter) {
+        const writer = owner.sessionWriter;
+        const path = owner.sessionPath;
+        const tab = owner.tab;
+        const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch;
+        const current = () => (!tab || view.chatTabs?.includes(tab) === true
+            && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch)
+            && resolveOwnerMemory(view.plugin?.agentManager, owner.agentName) === owner.memory;
+        const tools = view.plugin?.toolRegistry?.filterByAgent(owner.agent);
+        if (path && !owner.sessionEpoch && (!tools || tools.some(tool => tool.name === 'delegate' || tool.name === 'sub_agent'))) {
+            try { owner.sessionEpoch = await writer.ensureActiveSessionEpoch(path, current); }
+            catch (error: unknown) {
+                if (!(error instanceof SessionEpochPersistenceError) || !current()) throw error;
+                owner.sessionEpochFailure = error.failure;
+            }
+        }
+        if (!current()) return false;
+        if (tab) { tab.sessionPath = path; tab.sessionEpoch = owner.sessionEpoch; }
+        if ((!tab || tab.isActive) && view.rollingWindow === owner.rollingWindow
+            && owner.memory?.activeSessionPath === path) {
+            owner.memory.sessionEpoch = owner.sessionEpoch;
+        }
+        return true;
+    }
     const manager = view.plugin?.agentManager;
     const agent = manager?.getActiveAgent?.();
     const memory = agent?.name ? resolveOwnerMemory(manager, agent.name) : null;
     const path = memory?.activeSessionPath;
+    if (owner && memory === owner.memory && view.rollingWindow === owner.rollingWindow) {
+        owner.sessionPath = path || '';
+        owner.sessionEpoch = memory?.sessionEpoch ?? null;
+    }
     if (!memory || !path || /^[0-9a-f]{32}$/.test(memory.sessionEpoch ?? '')) return true;
     // Only turns capable of delegation need a durable draft owner. Do not rewrite
     // legacy sessions for text/read-only chats with delegation disabled. Unknown
@@ -334,9 +363,11 @@ export async function ensureTurnSessionEpoch(view: FreezeViewLike): Promise<bool
     try { epoch = await memory.ensureActiveSessionEpoch(path, current); }
     catch (error: unknown) {
         if (!(error instanceof SessionEpochPersistenceError)) throw error;
+        if (owner) owner.sessionEpochFailure = memory.getSessionEpochFailure(path) ?? undefined;
         return current();
     }
     if (!current()) return false;
     if (tab) { tab.sessionPath = path; tab.sessionEpoch = epoch; }
+    if (owner) { owner.sessionPath = path; owner.sessionEpoch = epoch; }
     return true;
 }

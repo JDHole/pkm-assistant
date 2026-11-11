@@ -1030,7 +1030,7 @@ Migracja, append/save/archive dzielą kolejkę i cache adaptera; `_sessionSavedC
 pozostaje per instancja. Wywołania jednej rewizji współdzielą Promise i zbiór właścicieli;
 odejście jednego nie anuluje ważnego drugiego. Publikacja RAM wymaga potwierdzenia pliku
 i aktualności właściciela, także po A→B→A. Restore samo nie migruje; send robi to przed
-zamrożeniem ownera, jeśli dostępna jest delegacja (starszy host bez rejestru też próbuje).
+startem modelu, na pisarzu zamrożonej sesji, jeśli dostępna jest delegacja (starszy host bez rejestru też próbuje).
 `chat_streaming.epochMigration.test.ts` oraz F1 w `AgentMemory.test.ts` i `turnOwner.test.ts`
 sprawdzają historię, trwałą tożsamość, dwóch właścicieli i kolejkę. Testy P3 dodatkowo
 porównują stare bajty + literalny blok, zakaz write/rename/remove/mkdir/list oraz świeży
@@ -1055,3 +1055,17 @@ Testy P5: `AgentMemory.test.ts` (archiwum, niezależne adaptery, błąd po pełn
 append, świeży restore, A→B→A) i `ArchiveWorkflow.test.ts` (literalne dokumenty L1
 oraz odpowiedź modelu). Niezależne adaptery mogą dopisać dwa rekordy; czytelnicy
 tych samych końcowych bajtów wybierają pierwszy, bez obietnicy blokady między procesami.
+
+
+### P1 — niezależny pisarz przyjętej wysyłki
+
+`AgentMemory.createSessionWriter(path, epoch)` zwraca instancję z własnym wskaźnikiem
+sesji i rewizją; kolejka pliku, seq i cache adaptera pozostają współdzielone.
+Korzysta z istniejących `appendToActiveSession` (także tworzenie/naprawa brakującego
+pliku) i `ensureActiveSessionEpoch`. Nie zapisuje `.active_session.json`: pisarz
+pracujący w tle nie wybiera aktywnej sesji. Wołacz publikuje wynik do swojej zakładki;
+aktualizacja wskaźnika głównej pamięci i jego zapis wymagają nadal aktywnego okna
+oraz zgodnej rewizji. Nie należy podłączać tej instancji do selekcji w AgentManager.
+Kontrola migracji dotyczy właściciela sesji, a nie wybranej zakładki. Diagnostyka
+migracji zostaje przy pisarzu i przechwyconej turze. Testy pełnej ścieżki wysyłki:
+`../chat/chat/chat_streaming.sendTab.test.ts` (również tworzenie sesji i trzy fazy epoki).

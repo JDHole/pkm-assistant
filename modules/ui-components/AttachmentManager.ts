@@ -678,9 +678,9 @@ export class AttachmentManager {
      * @param {string} userText - The user's text message
      * @returns {{ content: string|Array, displayText: string }}
      */
-    buildMessageContent(userText: string): BuiltMessageContent {
-        const textAttachments = this.attachments.filter((a) => a.type === 'text' || a.type === 'pdf');
-        const imageAttachments = this.attachments.filter((a) => a.type === 'image');
+    buildMessageContent(userText: string, attachments: readonly Attachment[] = this.attachments): BuiltMessageContent {
+        const textAttachments = attachments.filter((a) => a.type === 'text' || a.type === 'pdf');
+        const imageAttachments = attachments.filter((a) => a.type === 'image');
 
         // Build text context from text/PDF attachments
         let contextParts: string[] = [];
@@ -689,7 +689,7 @@ export class AttachmentManager {
         }
 
         // Display text (what user sees in chat)
-        const chipLabels = this.attachments.map((a) => {
+        const chipLabels = attachments.map((a) => {
             const icon = a.type === 'image' ? '🖼️' : a.type === 'pdf' ? '📕' : '📄';
             return `${icon} ${a.name}`;
         });

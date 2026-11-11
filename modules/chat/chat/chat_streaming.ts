@@ -1,4 +1,4 @@
-import { cancelMessageEdit, commitMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
+import { cancelMessageEdit, takeMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
 import { sessionMessageId } from '../../memory/index.js';
 /**
  * @module chat_streaming
@@ -254,11 +254,14 @@ function parseToolCallArgs(toolCall: ParsedToolCall): ChatToolArgs {
         : (toolCall.arguments || {})) as ChatToolArgs;
 }
 
+function isSendWindowActive(view: ChatViewLike, owner: FrozenTurnOwner): boolean {
+    return view.rollingWindow === owner.rollingWindow && (!owner.tab || owner.tab.isActive);
+}
+
 /** Save explicit edits before the next turn; a tab switch cannot retarget the write. */
-async function persistMessageRemovals(view: ChatViewLike): Promise<boolean> {
-    const rw = view.rollingWindow;
-    if (!rw.removedMessageIds?.length) return true;
-    const owner = freezeTurnOwner(view);
+async function persistMessageRemovals(owner: FrozenTurnOwner): Promise<void> {
+    const rw = owner.rollingWindow!;
+    if (!rw.removedMessageIds?.length) return;
     const removed = [...rw.removedMessageIds];
     const ranges = [...rw.removedMessageRanges];
     if (owner.memory?.saveSession) {
@@ -270,7 +273,6 @@ async function persistMessageRemovals(view: ChatViewLike): Promise<boolean> {
         rw.removedMessageIds = rw.removedMessageIds.filter(id => !acknowledged.has(id));
         rw.removedMessageRanges = rw.removedMessageRanges.filter(range => !ranges.includes(range));
     }
-    return view.rollingWindow === rw && (!owner.tab || owner.tab.isActive === true);
 }
 
 /** Licznik tur w procesie - tożsamość tury, żeby watchdog nie ubił cudzej tury po nazwie agenta. */
@@ -318,7 +320,6 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         return;
     }
     const sendWindow = this.rollingWindow;
-    const sendTab = this.chatTabs?.find(tab => tab.isActive);
 
     const reservationOwner = this._questionAutoTurn?.kind === 'reserved' && isQuestionOwnerCurrent(this, this._questionAutoTurn);
     if (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && !this._questionAutoTurn.accepted) {
@@ -327,7 +328,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     // ── MESSAGE QUEUE: if generating, queue message for after completion ──
-    if (this.is_generating || (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
+    if (this.is_generating || [...this._preparingTurns.values()].some(turn => turn.rollingWindow === sendWindow)
+        || (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
         if (isInjected) {
             // Dostawca wyniku sprawdza `is_generating` PRZED wstrzyknięciem, więc tu nie
             // powinniśmy trafić. Jak jednak trafimy - wynik ZOSTAJE w kolejce notifiera
@@ -352,110 +354,98 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         return;
     }
 
-    // Persist edits before any replacement event can enter the append-only journal.
-    if (this.rollingWindow.removedMessageIds?.length && !await persistMessageRemovals(this)) return;
-
+    // Bind the whole submission before the first yield, including edit intent and input data.
+    // Later awaits may change the selected tab, agent and memory cursor. Use this owner for
+    // writes/model context, and isOwnerActive only for painting. Keep the tab key as a value:
+    // archive_new may change the tab's sessionPath in place while this turn is running.
+    const owner = freezeTurnOwner(this);
+    if (questionDelivery) Object.assign(owner, questionDelivery.owner);
+    const ownerTabKey = _tabKey(owner.tab);
+    const rw = owner.rollingWindow!;
+    const turnAbort = createTurnAbort();
+    const isOwnerActive = () => isSendWindowActive(this, owner);
+    const editing = isHuman && !isInjected && hasPendingMessageEdit(sendWindow);
+    const commitEdit = isHuman && !isInjected ? takeMessageEdit(sendWindow) : () => {};
+    const hasAttachments = !isInjected && this.attachmentManager?.hasAttachments();
+    const userAttachments = hasAttachments ? this.attachmentManager?.snapshotAttachments?.() : undefined;
+    const userMentions = !isInjected ? this.mentionAutocomplete?.getMentions().map(mention => ({ ...mention })) : undefined;
+    const attachmentManager = this.attachmentManager;
+    // Start while A still owns the mention chips/permissions. Observe rejection immediately;
+    // persistence below can itself yield or fail before we await this result.
+    const mentions = (isInjected ? Promise.resolve({ displayText: text, contextText: '' }) : this._resolveMentions(text))
+        .then(value => ({ kind: 'ready' as const, value }), (error: unknown) => ({ kind: 'error' as const, error }));
+    // Capture Oczko's file and permission predicate while the submitting tab is selected.
+    const noteContext = (async () => {
+        try {
+            const value = this.env?.settings?.pkmAssistant?.enableOczko !== false ? await this._buildActiveNoteContext() : null;
+            return { kind: 'ready' as const, value };
+        } catch (error: unknown) { return { kind: 'error' as const, error }; }
+    })();
+    const slash = mayRunSlashCommand(messageMeta) && text.startsWith('/');
+    const clearSubmittedChips = () => {
+        if (isInjected || !isOwnerActive()) return;
+        if (hasAttachments) this.attachmentManager!.clear();
+        if (this.mentionAutocomplete?.hasMentions()) this.mentionAutocomplete.clear();
+    };
+    const clearSubmittedInput = () => {
+        if (isInjected || !isOwnerActive() || this.input_area.value.trim() !== rawText) return;
+        this.resetInputArea();
+        if (this._draftAfterSend) {
+            this.input_area.value = this._draftAfterSend;
+            this._draftAfterSend = null;
+            this.handleInputResize();
+        }
+        // Commands such as /save do not consume the attachments waiting for a message.
+        if (!slash) clearSubmittedChips();
+    };
+    clearSubmittedInput();
+    // Stop/close own the preparation from the first I/O, not merely prompt construction.
+    this._preparingTurns.set(ownerTabKey, { tab: owner.tab, rollingWindow: rw, abort: turnAbort });
     const turnStartedSeq = this.plugin?.subTaskRegistry?.issueTurnStartSequence();
-
-    // Tu NIE MA `this._abortedStream = null` („nowa wiadomość = świeży start"): przerwanie jako
-    // JEDNO pole widoku byłoby dziurą - kolejna wiadomość (auto-tura z wynikiem suba, albo drain
-    // przy przełączeniu zakładki) gasiłaby przerwanie tury, która WCIĄŻ biegnie w narzędziu,
-    // i zatrzymana pętla wznawiałaby iteracje. Przerwanie jest stanem TURY (`turn.abort`, niżej):
-    // nowa tura dostaje własny uchwyt i nie ma jak odkręcić przerwania starej. Tu nie ma już
-    // czego zerować.
-
     const sendStart = Date.now();
-    // log.info (flat), nie log.group: console.group jest GLOBAL stack, więc multi-tab
-    // parallel send_message zagnieżdżałby logi Borysa pod grupą Jaskra zamiast osobno.
-    // Agent prefix dodany dla czytelności.
-    const activeAgentName = this.plugin?.agentManager?.getActiveAgent()?.name || '?';
+    const activeAgentName = owner.agentName || '?';
     log.info('Chat', `[${activeAgentName}] send_message → "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`);
-
-    // After long inactivity - just save (session continues, no reset)
-    // Read from settings.pkmAssistant.* (every other pkm setting lives there) - wired to the
-    // Settings → Pamięć control (default 30).
+    // Keep the existing turn body indentation to avoid obscuring its history in this diff.
+    try {
+    if (sendWindow.removedMessageIds?.length) await persistMessageRemovals(owner);
+    if (turnAbort.isAborted()) return;
     const timeoutMs = (this.env?.settings?.pkmAssistant?.sessionTimeoutMinutes || 30) * 60 * 1000;
-    if (this.lastMessageTimestamp && this.rollingWindow.messages.length > 0) {
-        if (Date.now() - this.lastMessageTimestamp > timeoutMs) {
-            await this.handleSaveSession();
-            log.info('Chat', `Kontynuuję sesję po ${Math.round((Date.now() - this.lastMessageTimestamp) / 60000)} min przerwy`);
-        }
+    if (this.lastMessageTimestamp && sendWindow.messages.length > 0 && Date.now() - this.lastMessageTimestamp > timeoutMs) {
+        await this.handleSaveSession(owner.agentName, sendWindow,
+            owner.sessionPath ? { path: owner.sessionPath, epoch: owner.sessionEpoch } : undefined);
     }
+    if (turnAbort.isAborted()) return;
     this.lastMessageTimestamp = Date.now();
-
-    // Handle slash commands through registry.
-    // Komenda `/` to polecenie, więc wykonujemy ją WYŁĄCZNIE z tekstu człowieka - tekst
-    // maszynowy (wynik suba, treść artefaktu, `context_summary`) może zaczynać się od czegokolwiek.
-    if (mayRunSlashCommand(messageMeta) && text.startsWith('/')) {
-        if (await this.slashCommands?.execute(text, { view: this, plugin: this.plugin })) {
-            return;
-        }
-    }
-
-    // A save or slash command above may have yielded while the user switched tabs.
-    if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
-    if (isHuman && !isInjected && hasPendingMessageEdit(sendWindow)) {
-        commitMessageEdit(this.rollingWindow);
-        if (!await persistMessageRemovals(this)) return;
-        void this.render_messages();
-    }
-
-    // Add to history (max 20) - historia to pamięć TEGO, co user wpisał (strzałka w górę).
+    if (slash && await this.slashCommands?.execute(text, { view: this, plugin: this.plugin })) return;
+    if (turnAbort.isAborted()) return;
+    if (slash && !this.input_area.value.trim()) clearSubmittedChips();
+    commitEdit();
+    if (sendWindow.removedMessageIds?.length) await persistMessageRemovals(owner);
+    if (turnAbort.isAborted()) return;
+    if (editing && isOwnerActive()) void this.render_messages();
     if (!isInjected) {
         this.inputHistory.push(rawText);
-        if (this.inputHistory.length > 20) {
-            this.inputHistory.shift();
-        }
+        if (this.inputHistory.length > 20) this.inputHistory.shift();
     }
 
     // Retry preserves the pre-attachment source; null explicitly marks inseparable legacy content.
     const parentConversationText = 'parentConversationText' in rawMeta
         ? (typeof rawMeta.parentConversationText === 'string' ? rawMeta.parentConversationText : undefined)
         : text;
-    // Resolve @ mentions ONCE, before any clearing (fixes bug: mentions lost when no attachments)
-    const { displayText: mentionDisplayText, contextText: mentionContextText } = isInjected
-        ? { displayText: text, contextText: '' }
-        : await this._resolveMentions(text);
-
-    // Capture attachments before clearing.
-    // ⚠️ Przy wstrzykniętej turze załączniki usera zostają NIETKNIĘTE - czekają na jego
-    // własną wiadomość. Podpięcie ich do powiadomienia zjadłoby mu spinacz bez pytania.
-    const hasAttachments = !isInjected && this.attachmentManager?.hasAttachments();
-    const userAttachments = hasAttachments ? this.attachmentManager?.snapshotAttachments?.() : undefined;
-    const userMentions = !isInjected ? this.mentionAutocomplete?.getMentions().map(mention => ({ ...mention })) : undefined;
+    const mentionResult = await mentions;
+    if (turnAbort.isAborted()) return;
+    if (mentionResult.kind === 'error') throw mentionResult.error;
+    const { displayText: mentionDisplayText, contextText: mentionContextText } = mentionResult.value;
     const userMessageId = crypto.randomUUID();
-    let attachmentResult = null;
-    if (hasAttachments) {
-        const textWithMentions = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
-        attachmentResult = this.attachmentManager!.buildMessageContent(textWithMentions);
-        // Warn if sending images to a non-vision model (images will be stripped by adapter)
-        const hasImages = Array.isArray(attachmentResult?.content) && attachmentResult.content.some((b: ContentBlock) => b.type === 'image_url');
-        if (hasImages) {
-            try {
-                if (!this._isCurrentModelVision()) {
-                    const modelName = this.get_chat_model()?.modelKey || 'model';
-                    new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
-                }
-            // `void e;` to no-op: `no-unused-vars` chce użycia `e`, a strażnik w
-            // `stopSemantics.test.ts` (`catch\s*\{\s*\}` po zdjęciu komentarzy) odrzuciłby
-            // gołe `catch {}` - ten catch łyka tylko ostrzeżenie o braku vision, świadomie.
-            } catch (e) { void e; /* ignore - adapter will strip anyway */ }
-        }
-    }
-
-    // Clear input + attachments + mention chips - TYLKO gdy to user wysłał wiadomość.
-    // Wstrzyknięta tura nie ma prawa skasować szkicu, który user właśnie pisze.
-    if (!isInjected) {
-        this.resetInputArea();
-        // Szkic przechwycony przez kolejkę wiadomości (patrz `set_generating`) wraca dokładnie
-        // tutaj - jednorazowo, po wyczyszczeniu pola przez `resetInputArea`.
-        if (this._draftAfterSend) {
-            this.input_area.value = this._draftAfterSend;
-            this._draftAfterSend = null;
-            this.handleInputResize();
-        }
-        if (hasAttachments) this.attachmentManager!.clear();
-        if (this.mentionAutocomplete?.hasMentions()) this.mentionAutocomplete.clear();
+    const combinedText = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
+    const attachmentResult = hasAttachments ? attachmentManager!.buildMessageContent(combinedText, userAttachments) : null;
+    if (Array.isArray(attachmentResult?.content) && attachmentResult.content.some(b => b.type === 'image_url')) {
+        try {
+            if (!this._isCurrentModelVision(owner.agent)) {
+                const modelName = this.get_chat_model({ agent: owner.agent })?.modelKey || 'model';
+                new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
+            }
+        } catch (error) { void error; /* Advisory only; the adapter strips unsupported images. */ }
     }
 
     if (questionDelivery) {
@@ -463,7 +453,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         const reservation = this._questionAutoTurn;
         const activeTab = matchTabForOrigin(this.chatTabs, question.owner, _tabKey);
         const valid = reservation?.kind === 'reserved' && reservation.token === token
-            && activeTab === tab && tab.isActive === true && this.rollingWindow === window
+            && activeTab === tab && tab.isActive === true && isOwnerActive() && sendWindow === window
             && isQuestionOwnerCurrent(this, question)
             && !this.is_generating && !this._drainSuppressed
             && evaluateAutoTurnChain(this._autoTurnChainCounts?.get(question.owner.agentName) || 0,
@@ -475,21 +465,20 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             return;
         }
     }
-    const questionOwner = freezeTurnOwner(this);
+    const questionOwner = owner;
     const questionRevision = questionOwner.memory?.sessionIdentityRevision;
     const questionTabId = questionOwner.tab?.sessionId;
     let savedUserContent;
-    const turnAbort = createTurnAbort();
     const questionTabKey = questionDelivery ? _tabKey(questionDelivery.tab) : '';
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
         // Display: user's text with @[Name] badges (no mention metadata)
-        await this.append_message('user', attachmentResult.content, mentionDisplayText, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId });
+        await this.append_message('user', attachmentResult.content, mentionDisplayText, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId }, owner);
         savedUserContent = mentionDisplayText;
     } else {
         // No attachments: API gets mention context, display shows only user text
         const apiContent = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
-        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId });
+        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId }, owner);
         if (questionDelivery?.window.messages.some(message => message.questionId === questionDelivery.question.id)) {
             questionDelivery.claim.ack();
             if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
@@ -511,6 +500,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
         savedUserContent = apiContent;
     }
+    if (turnAbort.isAborted()) return;
     const userEvent: ActiveSessionEventInput = {
         type: 'user_message',
         message_id: userMessageId,
@@ -536,7 +526,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             return;
         }
     } else {
-        try { await this.appendToActiveSession?.(userEvent); }
+        try { await this.appendToActiveSession?.(userEvent, owner); }
         catch (error: unknown) {
             const current = freezeTurnOwner(this);
             if (!questionOwner.sessionPath || questionOwner.sessionEpoch
@@ -550,38 +540,13 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
+    if (turnAbort.isAborted()) return;
     if (!questionDelivery) {
-        if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
-        try { if (!await ensureTurnSessionEpoch(this)) return; }
-        catch (error) { this.handle_error(error); return; }
-        if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)
-            || (this.plugin?.agentManager?.getActiveAgent()?.name || '?') !== activeAgentName) return;
+        try { if (!await ensureTurnSessionEpoch(this, owner)) return; }
+        catch (error) { this.handle_error(error, owner.agentName, undefined, ownerTabKey); return; }
     }
-
-    // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU - razem z zapaleniem guzika Stop i PRZED pierwszym
-    // awaitem przygotowania. Za chwilę wchodzimy w budowę promptu z pamięcią (okno „potrafi
-    // trwać sekundy", patrz niżej przy `turnAbort`), a `_switchTab` nie jest w tym czasie
-    // blokowany i przestawia `agentManager.activeAgent`, `this.rollingWindow`,
-    // `this.tokenTracker`. Czytanie tych luster PO awaitach zamiast z zamrożonego `owner`
-    // pozwoliłoby rozmowie zaczętej u agenta A - z promptem z JEGO pamięci - skończyć jako
-    // tura agenta B (jego model, jego uprawnienia narzędzi, jego plik sesji). Od tej linii
-    // wszystko w `send_message` idzie z `owner`; `getActiveAgent()` / `this.rollingWindow` są
-    // tu zakazane (pilnuje tego strażnik po źródle w `turnOwner.test.ts`).
-    const owner = freezeTurnOwner(this);
-    if (questionDelivery) Object.assign(owner, questionDelivery.owner);
-    // Klucz `_agentStates` liczony RAZ, TU - zaraz po zamrożeniu właściciela, przed KAŻDYM
-    // awaitem tej funkcji - i wożony dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey`
-    // w catchu). `_tabKey(turn.owner?.tab)` przeliczany LENIWIE przy sprzątaniu
-    // (finalize/error/watchdog, czyli po długich awaitach albo minutach oczekiwania na model)
-    // czyta ŻYWE pole `tab.sessionPath` - a `/save session` → „Archiwizuj i nowa sesja"
-    // (`archive_new`) podmienia `activeTab.sessionPath` NA MIEJSCU, bez re-keyowania
-    // `_agentStates`. Zamrożony klucz sprzed mutacji trafia we wpis, pod którym stan NAPRAWDĘ
-    // leży; przeliczony po fakcie - nie.
-    const ownerTabKey = _tabKey(owner.tab);
-    if (questionDelivery && ownerTabKey !== questionTabKey) {
-        if (this._preparingTurns.get(questionTabKey)?.abort === turnAbort) this._preparingTurns.delete(questionTabKey);
-        return;
-    }
+    if (turnAbort.isAborted()) return;
+    if (questionDelivery && ownerTabKey !== questionTabKey) return;
     // Prawdziwa wiadomość człowieka przerywa ŁAŃCUCH auto-tur PO SUBACH (`_deliverSubTaskResult`,
     // niżej) dla TEGO agenta - inaczej sufit `max_consecutive_auto_turns` liczyłby też tury,
     // które user zaczął sam. `isHuman` to `resolveMessageOrigin(opts?.meta)` policzone na
@@ -593,15 +558,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // Przechwycone okno + tracker tury: store pętli i cała finalizacja operują na TYM oknie,
     // nawet jeśli user przełączy zakładkę.
     // Konstruktor widoku zakłada oba pola i żadna ścieżka ich nie zeruje - zamrożenie je tylko kopiuje.
-    const rw = owner.rollingWindow!;
     const parentConversation = rw.parentConversation;
     const tt = owner.tokenTracker!;
 
-    // Uchwyt przerwania powstaje RAZEM z zapaleniem guzika Stop, nie dopiero przy rejestracji
-    // tury w `_streamCtxMap`. Między jednym a drugim jest budowa promptu z pamięcią (potrafi
-    // trwać sekundy) - w tym oknie user MOŻE kliknąć Stop, a mapa tur jeszcze nic o tej turze
-    // nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
-    this._preparingTurns.set(ownerTabKey, { tab: owner.tab, rollingWindow: rw, abort: turnAbort });
     const ownerTabSessionPath = owner.tab?.sessionPath;
     const ownerTabSessionEpoch = owner.tab?.sessionEpoch ?? null;
     const turnSessionPath = owner.sessionPath || (owner.memory ? await owner.memory.startActiveSession(owner.agentName).catch(() => '') : '');
@@ -622,7 +581,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
 
     if (turnAbort.isAborted()) return;
     // Toggle UI state + show immediate visual feedback
-    if (!questionDelivery || owner.tab?.isActive) {
+    if (isOwnerActive()) {
         this.set_generating(true);
         this.showTypingIndicator(t('chat.streaming.preparing'));
     } else {
@@ -674,7 +633,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const oczkoEnabled = this.env?.settings?.pkmAssistant?.enableOczko !== false;
     if (oczkoEnabled) {
         try {
-            const noteCtx = await this._buildActiveNoteContext();
+            const noteResult = await noteContext;
+            if (noteResult.kind === 'error') throw noteResult.error;
+            const noteCtx = noteResult.value;
             if (noteCtx) {
                 // Text context → system prompt (always)
                 if (noteCtx.text) {
@@ -697,8 +658,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                             (msg.content as ContentBlock[]).push(imgBlock);
                         }
                         // Warn if model likely can't see images
-                        if (!this._isCurrentModelVision()) {
-                            const modelName = this.get_chat_model()?.modelKey || 'model';
+                        if (!this._isCurrentModelVision(owner.agent)) {
+                            const modelName = this.get_chat_model({ agent: owner.agent })?.modelKey || 'model';
                             new Notice(t('chat.streaming.oczko_no_vision', { model: modelName }), 6000);
                         }
                     }
@@ -790,8 +751,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // Start streaming - closured callbacks know which agent they belong to
         // Ostatnia treść namalowana przez handle_chunk (cykl życia jak current_message_container) -
         // czyta to _finalizeTurn, żeby wiedzieć czy finalna wersja różni się od tego, co widzi user.
-        this._lastPaintedContent = null;
-        if (!questionDelivery || owner.tab?.isActive) this.showTypingIndicator();
+        if (isOwnerActive()) this._lastPaintedContent = null;
+        if (isOwnerActive()) this.showTypingIndicator();
 
         // Extended thinking: universal flag for all providers that support it.
         // Liczony RAZ na turę, nie per kontynuację.
@@ -1007,6 +968,13 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
     log.debug('Chat', `[${streamAgentName}] send_message END (${Date.now() - sendStart}ms)`);
+    } finally {
+        const preparing = this._preparingTurns.get(ownerTabKey);
+        if (preparing?.abort === turnAbort) {
+            this._preparingTurns.delete(ownerTabKey);
+            syncTabGenerating(this, preparing.tab, ownerTabKey, sendWindow);
+        }
+    }
 }
 
 export function handle_chunk(this: ChatViewLike, response: StreamResponse, tabKey: string) {
@@ -2269,7 +2237,7 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     log.error('Chat', 'Chat error:', safeErrorText(error));
 
     // Determine which tab this error belongs to
-    const ctx = ownerTabKey ? this._streamCtxMap.get(ownerTabKey) : null;
+    const ctx = ownerTabKey ? this._streamCtxMap.get(ownerTabKey) ?? this._preparingTurns.get(ownerTabKey) : null;
     const activeTab = this.chatTabs.find((tab: ChatTab) => tab.isActive);
     const isActiveTab = !agentName || (ctx ? ctx.rollingWindow === this.rollingWindow && (ctx.tab ? activeTab === ctx.tab : activeTab?.agentName === agentName) : activeTab?.agentName === agentName);
     if (isActiveTab) this.hideTypingIndicator();

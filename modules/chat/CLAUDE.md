@@ -260,11 +260,12 @@ kompresja końca tury, finalizacja strumienia i sprzątanie po Stopie muszą wte
 WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
 
 - **`freezeTurnOwner(view)`** (`chat/turnOwner.ts`, pure, testowalny) czyta widok RAZ,
-  synchronicznie, na samym starcie `send_message` (obok `createTurnAbort()`, razem z
-  zapaleniem guzika Stop, PRZED pierwszym awaitem przygotowania) i oddaje `FrozenTurnOwner`:
+  synchronicznie, na samym starcie `send_message` (obok `createTurnAbort()`, PRZED
+  pierwszym awaitem, również zapisem usunięć i obsługą bezczynności) i oddaje `FrozenTurnOwner`:
   `agentName`, `agent`, `rollingWindow`, `tokenTracker`, `memory` (po nazwie, fail-closed),
-  `sessionPath`, `tab`, `autonomy`, `artifactId`. Ścieżka i epoka pochodzą z pamięci po
-  zapisie wiadomości użytkownika, który może naprawić nieaktualną ścieżkę zakładki.
+  `sessionPath`, `sessionEpoch`, `tab`, `autonomy`, `artifactId`. Początkowa ścieżka i epoka
+  pochodzą z pamięci w chwili wysłania. Zapis pytania może utworzyć/naprawić sesję;
+  wtedy owner przyjmuje wynik swojego `sessionWriter`, niezależnego od wyboru zakładki.
   Od tej linii `send_message` NIE pyta już
   widoku "kto jest teraz aktywny" - prompt, resolucja skilli z markerów, Oczko, model
   (`get_chat_model({agent})`), autonomia i adres zwrotny delegacji w tle idą z `owner`, nie z
@@ -275,8 +276,8 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   ścieżki w `AgentMemory`; w pozostałych przypadkach zostaje `null`. `turnKind` jest liczony
   raz z `meta.origin`: `human` daje `user`, każda inna wartość daje `machine`, i trafia do
   każdego wywołania `MCPClient` tej tury.
-  Pierwszy zapis wiadomości może utworzyć plik jeszcze przed `freezeTurnOwner`. Wtedy czat
-  przenosi potwierdzoną parę ścieżki i epoki z pamięci na świeżą zakładkę, jeśli jej
+  Pierwszy zapis wiadomości może utworzyć plik po `freezeTurnOwner`. Wtedy czat
+  przenosi potwierdzoną parę ścieżki i epoki z pisarza tury na świeżą zakładkę, jeśli jej
   tożsamość nie zmieniła się w czasie przygotowania tury. Gdy `sessionId` jest pusty po
   „Nowa sesja”, przed przypięciem ścieżki dostaje zamrożony `tabKey`, aby `_tabKey` nie
   zmienił się podczas tury i finalizacja nadal rozpoznała aktywną zakładkę.
@@ -324,20 +325,22 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   niżej) tura A czytałaby estymatę nadpisaną przez turę B.
 - **Decyzja "czy bieżący model jest wizyjny" pyta o WŁAŚCICIELA tury, nie o globalnie
   aktywnego agenta.** `_isCurrentModelVision(agent?)` przyjmuje opcjonalnego agenta; wybór
-  kształtu wyniku `generate_image` (`_chatExecuteToolCall`) podaje `turn.agent`. Dwa wywołania
-  czysto UI-owe (ostrzeżenie przed wysyłką, jeszcze przed zamrożeniem właściciela) zostają bez
-  argumentu celowo - tam pytanie o aktywnego agenta jest właściwym pytaniem.
+  kształtu wyniku `generate_image` (`_chatExecuteToolCall`) podaje `turn.agent`. Ostrzeżenia
+  przed wysłaniem załączników i obrazów Oczka również podają agenta właściciela.
 - **Mid-loop compression ustawia `rollingWindow.sessionPath` tak samo jak end-of-turn** (czyta
   ją `Summarizer` do stopki "pełna rozmowa zapisana w: ...") - obie ścieżki kompresji muszą
   używać zamrożonej ścieżki tury, nie współdzielonego wskaźnika pamięci agenta.
-- ⚠️ **Zostaje wąskie okno PRZED zamrożeniem:** między kliknięciem Wyślij a `createTurnAbort()`
-  są jeszcze awaity zapisu przy bezczynności, komendy `/`, rozwiązywanie wzmianek i
-  `append_message` (wiadomość użytkownika idzie przez `this.rollingWindow` widoku, nie przez
-  okno tury). Nowy await w tym odcinku - rozważ przesunięcie zamrożenia w górę.
+- **Cała wysyłka ma właściciela przed pierwszym awaitem.** `append_message(..., owner?)`
+  zapisuje do jego okna i po await nie maluje w innej zakładce. `_preparingTurns` obejmuje
+  także zapis usunięć, bezczynność, wzmianki i pytanie: Stop/zamknięcie mogą przerwać tę fazę,
+  a kolejne wysłanie z tego okna trafia do kolejki. Przełączenie samo nie przerywa wysyłki.
 - ⚠️ **`_switchTab` NIE jest blokowany w trakcie generowania i nie będzie** - user ma prawo
   czytać inną zakładkę, gdy agent pracuje. Bezpieczeństwo stoi na tym, że żywa tura trzyma
   WŁASNE referencje (zamrożone), nie na tym, że nikt nic nie przełączy.
-- **`appendToActiveSession` adresuje pamięć po `event.agentName`** - czyli po turze, która
+- **`appendToActiveSession(event, owner?)` przy ownerze używa `createSessionWriter`**
+  z przechwyconą ścieżką i epoką. Nową tożsamość publikuje tylko do zgodnej zakładki,
+  a do wskaźnika pamięci tylko przy niezmienionej rewizji aktywnego okna. Bez ownera
+  adresuje pamięć po `event.agentName` - czyli po turze, która
   zdarzenie wyprodukowała, nie po agencie akurat wybranym w UI. Nowe zdarzenie do event-logu
   musi nieść `agentName` jawnie.
 - **`handleSaveSession(agentName?, rollingWindow?)`** przyjmuje właściciela i okno tury.
@@ -1707,8 +1710,11 @@ przez `commitMessageEdit`, a F7 wywołuje rzeczywiste `send_message`.
 pierwszym await. Aktywna zakładka, agent i okno zmieniają się synchronicznie; oczekiwanie
 na I/O jest na końcu, więc klik A → B → C nie przypisuje okna B do sesji A.
 `messageEdit` wiąże edycję z wiadomością, oknem, zakładką, agentem i tożsamością sesji.
-Przełączenie zakładki/agenta, nowa lub wczytana sesja, zamknięcie, wymiana inputu,
-wyczyszczenie szkicu i Escape anulują tryb bez usuwania historii. Znacznik PL/EN nad
+Przed wysłaniem przełączenie zakładki/agenta, nowa lub wczytana sesja, zamknięcie,
+wymiana inputu, wyczyszczenie szkicu i Escape anulują tryb bez usuwania historii.
+Po przyjęciu Wyślij `takeMessageEdit` odpina nasłuchy i przekazuje zamiar wysyłce;
+przełączenie nie anuluje tego zamiaru. Historia jest ucinana dopiero przez commit
+wysłanej poprawki, po rozpoznaniu, że tekst nie wykonał komendy slash. Znacznik PL/EN nad
 polem znika przy anulowaniu i potwierdzeniu; wygląd jest wyłącznie w CSS.
 `resetInputArea(true)` zachowuje tylko już wysłaną do kolejki poprawkę, oczekującą na
 koniec tury; zwykłe czyszczenie pola anuluje edycję. Restart nie odtwarza szkicu ani trybu.
@@ -1778,17 +1784,17 @@ nie wznawia subagenta. UI nie ma przycisków przyjęcia: prowadzący wywołuje n
 a istniejący przepływ zgody i diff obsługuje rzeczywisty zapis.
 
 
-### 2.4.7 — starsze sesje przed zamrożeniem tury
+### 2.4.7 — potwierdzenie epoki przed uruchomieniem modelu
 
-`send_message` wywołuje `ensureTurnSessionEpoch` przed docelowym zamrożeniem ownera tury. Starsza istniejąca
-sesja otrzymuje trwałą epokę przez kolejkę AgentMemory tylko gdy rejestr udostępnia agentowi
-`delegate` lub `sub_agent` (starszy host bez rejestru zachowuje migrację). Zwykły czat bez
-delegacji nie przepisuje starego pliku. Nie zgadujemy zamiaru modelu z tekstu pytania:
-jeśli delegacja jest dostępna, próba ustanowienia epoki poprzedza zamrożenie adresu tury.
-Sprawdzane są agent, instancja pamięci, aktywny obiekt i ID zakładki, ścieżka/epoka oraz
-okno rozmowy; przełączenie nie przypisuje migrowanej tożsamości nowej zakładce ani nie
-uruchamia jej modelu. Dwie zakładki współdzielą migrację i przyjmują tę samą epokę,
-ale zachowują osobne kontrole właściciela. AgentMemory dopisuje epokę natywnym append
+`send_message` zamraża ownera przed pierwszym awaitem. Po zapisie pytania
+`ensureTurnSessionEpoch(view, owner?)` uzupełnia epokę jego sesji przez niezależny
+`sessionWriter`, gdy rejestr udostępnia `delegate` lub `sub_agent` (starszy host bez
+rejestru również próbuje). Przełączenie A→B pozwala dokończyć turę A; nie publikuje
+jej epoki do pamięci wskazującej B. Kontrola obiektu zakładki, ścieżki/epoki i instancji
+pamięci nadal odrzuca wymianę sesji. Bez pisarza zachowany jest dotychczasowy kontrakt
+hosta z kontrolą aktywnego okna i rewizji. Dwie sesje dzielą kolejkę adaptera;
+każdy pisarz przyjmuje potwierdzoną epokę tego samego pliku.
+AgentMemory dopisuje epokę natywnym append
 i potwierdza ją readbackiem (kontrakt P3 w `../memory/CLAUDE.md`). Brak rzeczywistego właściciela nadal
 odmawia piszącemu subowi, bez zapisu live. Testy: `chat_streaming.epochMigration.test.ts`
 (produkcyjne send_message), F1 w `turnOwner.test.ts` i harness 74 (piszący sub po boocie).
@@ -1807,3 +1813,18 @@ nową pamięcią i adapterem, zarówno przez listę sesji, jak przez fallback re
 `chat_streaming.epochMigration.test.ts` sprawdza pięć nieudanych odczytów/dopisków
 z odpowiedziami modelu i udaną szóstą turę bez dodatkowych plików. A→B→A w trakcie
 readbacku (również z błędem) nie publikuje starej epoki ani diagnostyki do nowej rewizji.
+
+
+### P1 — wysyłka poprawki podczas przełączania zakładki
+
+Treść, zamiar edycji, załączniki, wzmianki i kontekst Oczka są przechwytywane przed
+pierwszym awaitem. Input jest czyszczony przy przyjęciu wysyłki; kontynuacja nie czyści
+szkicu ani chipów innej zakładki. Rozpoznane komendy slash zachowują oczekujące
+załączniki i wzmianki; zużywa je dopiero wiadomość do modelu. Usunięcia i pytanie są zapisywane kolejno do sesji A,
+a model i finalizacja korzystają z tego samego ownera. `isOwnerActive` bramkuje tylko UI.
+Testy `chat/chat_streaming.sendTab.test.ts` uruchamiają rejestracje klik/Enter i klik
+zakładki z produkcji, prawdziwe okna, pisarza sesji, pętlę oraz finalizację. Kontrolowane
+I/O obejmuje usunięcia, bezczynność, slash-fallback, wzmianki, addMessage z/bez załącznika,
+zapis pytania, zimny odczyt, tworzenie sesji, migrację/readback epoki, prompt, Oczko,
+odbiór zatrzymanego suba i hook pierwszej iteracji. Sprawdzane są pełne treści obu okien
+oraz plików sesji, payload modelu i szkic/załącznik B.
