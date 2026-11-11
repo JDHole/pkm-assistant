@@ -423,7 +423,8 @@ for (const kind of ['confirmed', 'owner-switch', 'window-error'] as const) {
             if (kind === 'owner-switch') f.memory.setActiveSessionIdentity(f.path, null);
             throw new Error('EACCES question');
         };
-        await t.throwsAsync(chat.send(), { message: kind === 'window-error' ? 'window failed' : 'EACCES question' });
+        await chat.send();
+        t.deepEqual(f.errors, [kind === 'window-error' ? 'Error: window failed' : 'Error: EACCES question']);
         t.is(await f.adapter.read(f.path), history);
         t.deepEqual(f.requests, []);
     });

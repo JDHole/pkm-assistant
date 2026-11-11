@@ -1,3 +1,4 @@
+import { RollingWindow } from './RollingWindow.js';
 import test from 'ava';
 import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
@@ -16,9 +17,9 @@ test('wynik z A czeka podczas B i jest przekazany po powrocie do A', async t => 
     ];
     const sent: Array<{ tab: string; text: string }> = [];
     const view = {
-        chatTabs: tabs, _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
-        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-        send_message: (opts: { injectedText: string }) => { sent.push({ tab: tabs.find(tab => tab.isActive)!.sessionId, text: opts.injectedText }); },
+        rollingWindow: new RollingWindow(), chatTabs: tabs, _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier },
+        send_message: (opts: { injectedText: string; onAccepted?: () => void }) => { opts.onAccepted?.(); sent.push({ tab: tabs.find(tab => tab.isActive)!.sessionId, text: opts.injectedText }); },
     };
     notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
     const task = registry.create({ id: 'run-a', name: 'worker', agentName: 'A', origin, background: true });
@@ -53,13 +54,13 @@ test('dostarczenie dodaje subId tylko dla bieżącego wątku idle reusable', asy
         if (mode === 'closed') registry.closeThread(thread!.threadId);
         let sentText = '';
         const view = {
-            chatTabs: [{ agentName: 'Jaskier', sessionPath: 'sessions/active/main.md', sessionEpoch: 'main-epoch', sessionId: 'main-tab', isActive: true }],
+            rollingWindow: new RollingWindow(), chatTabs: [{ agentName: 'Jaskier', sessionPath: 'sessions/active/main.md', sessionEpoch: 'main-epoch', sessionId: 'main-tab', isActive: true }],
             _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
             env: { settings: { pkmAssistant: { limits: {} } } },
             plugin: { subTaskRegistry: registry },
-            send_message: (opts: { injectedText: string }) => { sentText = opts.injectedText; },
+            send_message: (opts: { injectedText: string; onAccepted?: () => void }) => { opts.onAccepted?.(); sentText = opts.injectedText; },
         };
-        t.true(_deliverSubTaskResult.call(view as never, task));
+        t.false(_deliverSubTaskResult.call(view as never, task));
         await Promise.resolve();
         const hasInstruction = sentText.includes('narzędzie sub_agent');
         t.is(hasInstruction, mode === 'idle');

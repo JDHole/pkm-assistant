@@ -1,3 +1,4 @@
+import { restoreSendDraft } from './sendDraft.js';
 import { cancelMessageEdit } from './messageEdit.js';
 /**
  * Multi-agent tab management — init, switch, close, picker, tab bar rendering.
@@ -197,6 +198,8 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     }
     // Mirror for sub-agent inheritance.
     if (this.plugin) this.plugin.currentAutonomy = this.currentAutonomy;
+
+    restoreSendDraft(this);
 
     // 5. Restore generating state
     this.set_generating(stored?.isGenerating || false);

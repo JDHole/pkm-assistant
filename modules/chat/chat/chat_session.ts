@@ -18,7 +18,7 @@ import { t } from '../../../core/i18n/index.js';
 import { TokenTracker } from '../../../core/index.js';
 import {
     buildOwnerWindowOptions,
-    resolveOwnerAgentName,
+    isFrozenTurnOwnerCurrent, publishTurnSessionIdentity, resolveOwnerAgentName,
     resolveOwnerMemory,
 } from './turnOwner.js';
 // `_agentStates` MUSI być kluczowana dokładnie tym, co liczy `_switchTab` - inaczej wynik
@@ -371,15 +371,16 @@ export async function appendToActiveSession(this: ChatViewLike, event: ActiveSes
         owner.sessionWriter = writer;
         const revision = memory.sessionIdentityRevision;
         const tab = owner.tab;
-        const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch;
+        const tabPath = owner.acceptedIdentity?.path ?? tab?.sessionPath;
         const tabKey = _tabKey(tab);
+        if (!isFrozenTurnOwnerCurrent(this, owner)) return null;
         const path = await writer.appendToActiveSession(event);
         owner.sessionPath = path;
         owner.sessionEpoch = writer.sessionEpoch;
-        if (!tab || this.chatTabs.includes(tab) && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch) {
+        if (isFrozenTurnOwnerCurrent(this, owner)) {
             if (tab) {
                 if (!tab.sessionId) tab.sessionId = tabKey;
-                tab.sessionPath = path; tab.sessionEpoch = owner.sessionEpoch;
+                publishTurnSessionIdentity(owner);
             }
             if ((!tab || tab.isActive) && this.rollingWindow === owner.rollingWindow && memory.sessionIdentityRevision === revision) {
                 memory.setActiveSessionIdentity(path, owner.sessionEpoch);

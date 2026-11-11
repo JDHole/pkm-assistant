@@ -19,6 +19,8 @@ function fixture() {
     const agentManager = { getActiveAgent: () => ({ name: 'Jaskier' }), getAgentMemory: () => ({ activeSessionPath: 's.md', sessionEpoch: 'e1' }) };
     const sent: Array<Record<string, unknown>> = [];
     const view = {
+        _preparingTurns: new Map(), _streamCtxMap: new Map(), _agentStates: new Map(),
+        set_generating(value: boolean) { this.is_generating = value; }, handle_error() {},
         chatTabs: [tab], rollingWindow: window, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier, agentManager },
         env: { settings: { pkmAssistant: { limits: {} } } }, _autoTurnChainCounts: new Map<string, number>(),
         _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
@@ -395,6 +397,7 @@ test.serial('druga sesja tego samego agenta działa, gdy zapis pytania pierwszej
     f.memory.activeSessionPath = 'b.md';
     f.memory.sessionEpoch = 'e2';
     f.view.rollingWindow = f.b;
+    f.view.set_generating(false);
     f.view.input_area.value = 'Wiadomość do B';
     await send_message.call(f.view as never, { meta: { origin: 'human' } });
     t.deepEqual({ calls: f.modelCalls(), toolOwners: f.toolOwners, b: f.b.messages[0]?.content,

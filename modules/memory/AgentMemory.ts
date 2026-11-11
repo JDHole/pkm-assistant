@@ -498,6 +498,14 @@ export class AgentMemory {
         writer.setActiveSessionIdentity(path, epoch);
         writer._structureEnsured = this._structureEnsured;
         writer._persistActiveSession = async () => { /* A background send must not select a session. */ };
+        if (path) {
+            writer.appendToActiveSession = async (event = {}) => {
+                // Missing-file recovery may establish a new identity on this private cursor.
+                // An existing file, including a reused name, must match its expected epoch.
+                const target = await writer.startActiveSession(event.agentName || writer.agentName);
+                return writer.appendSessionEvent(target, event, writer.sessionEpoch);
+            };
+        }
         return writer;
     }
 

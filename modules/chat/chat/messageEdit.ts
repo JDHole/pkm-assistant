@@ -35,13 +35,19 @@ export function hasPendingMessageEdit(window: RollingWindow): boolean {
 }
 /** Detach a submitted edit from input/tab cancellation; commit only after slash dispatch. */
 export function takeMessageEdit(window: RollingWindow): () => void {
-    const message = hasPendingMessageEdit(window) ? pending.get(window)?.message : undefined;
-    cancelMessageEdit(window);
+    const message = takeMessageEditSubmission(window);
     return () => {
         if (!message) return;
         const index = window.messages.indexOf(message);
         if (index >= 0) window.removeMessages(index);
     };
+}
+
+/** Capture the message without mutating its window; send persists the edit before removal. */
+export function takeMessageEditSubmission(window: RollingWindow): RollingMessage | undefined {
+    const message = hasPendingMessageEdit(window) ? pending.get(window)?.message : undefined;
+    cancelMessageEdit(window);
+    return message;
 }
 
 export function commitMessageEdit(window: RollingWindow): void {

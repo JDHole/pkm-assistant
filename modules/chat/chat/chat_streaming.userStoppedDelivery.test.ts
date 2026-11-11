@@ -128,10 +128,10 @@ test('Stop biegnącego suba zachowuje wynik, a zdrowy sub nadal dostarcza automa
     const notifier = new SubTaskNotifier({ registry });
     t.teardown(() => { notifier.dispose(); registry.dispose(); });
     const autoSentIds: string[] = [];
-    const view = { chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
+    const view = { rollingWindow: new RollingWindow(), chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
         _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
-        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-        send_message: (opts: { meta: { subTaskId: string } }) => { autoSentIds.push(opts.meta.subTaskId); } };
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier },
+        send_message: (opts: { meta: { subTaskId: string }; onAccepted?: () => void }) => { opts.onAccepted?.(); autoSentIds.push(opts.meta.subTaskId); } };
     notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
     const task = stoppedRun(registry);
     await Promise.resolve();
@@ -230,10 +230,10 @@ test('Stop użytkownika po wcześniejszym Stopie prowadzącego nadal zatrzymuje 
     const notifier = new SubTaskNotifier({ registry });
     t.teardown(() => { notifier.dispose(); registry.dispose(); });
     const autoSentIds: string[] = [];
-    const view = { chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
+    const view = { rollingWindow: new RollingWindow(), chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
         _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
-        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-        send_message: (opts: { meta: { subTaskId: string } }) => { autoSentIds.push(opts.meta.subTaskId); } };
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier },
+        send_message: (opts: { meta: { subTaskId: string }; onAccepted?: () => void }) => { opts.onAccepted?.(); autoSentIds.push(opts.meta.subTaskId); } };
     notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
     const task = registry.create({ id: 'run-stopped', name: 'worker', agentName: origin.agentName, origin, background: true });
     registry.attachAbort(task.id, () => {});
@@ -256,10 +256,10 @@ test('Stop rezerwacji queued zachowuje wynik rozliczony po rozpoczęciu następn
     const notifier = new SubTaskNotifier({ registry });
     t.teardown(() => { notifier.dispose(); registry.dispose(); });
     const autoSentIds: string[] = [];
-    const view = { chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
+    const view = { rollingWindow: new RollingWindow(), chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
         _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
-        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-        send_message: (opts: { meta: { subTaskId: string } }) => { autoSentIds.push(opts.meta.subTaskId); } };
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier },
+        send_message: (opts: { meta: { subTaskId: string }; onAccepted?: () => void }) => { opts.onAccepted?.(); autoSentIds.push(opts.meta.subTaskId); } };
     notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
     const thread = registry.createThread({ threadId: 'queued-stop', name: 'worker', owner: origin, origin, config: {}, phase: 'queued' });
     const host = new MockEl();
@@ -413,10 +413,10 @@ for (const late of ['error', 'done'] as const) {
                 settings: { pkmAssistant: { chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } },
                     modelLibrary: { minion: [{ platform: 'ollama', model: 'worker-model', isDefault: true }] },
                     limits: { max_parallel_delegations: 5, subagent_max_iterations_worker: 1 } } } } };
-        const view = { chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
+        const view = { rollingWindow: new RollingWindow(), chatTabs: [{ ...origin, sessionId: 'tab-a', isActive: true }],
             _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
             env: { settings: { pkmAssistant: { limits: {} } } }, plugin,
-            send_message: (opts: { meta: { subTaskId: string } }) => { autoSentIds.push(opts.meta.subTaskId); } };
+            send_message: (opts: { meta: { subTaskId: string }; onAccepted?: () => void }) => { opts.onAccepted?.(); autoSentIds.push(opts.meta.subTaskId); } };
         notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
         const receipt = await createDelegateTool({}).execute({ task: 'Odczytaj', _invocationOrigin: origin }, {}, plugin as never) as { task_id: string; sub_id: string };
         const waitUntil = async (predicate: () => boolean) => {

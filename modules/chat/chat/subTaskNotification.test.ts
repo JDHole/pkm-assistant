@@ -1,3 +1,4 @@
+import { RollingWindow } from './RollingWindow.js';
 import test from 'ava';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { setLocale, t as tr } from '../../../core/i18n/index.js';
@@ -12,9 +13,9 @@ test.serial('C2: runner przekazuje handoff do prowadzącego po błędzie syntezy
     t.teardown(() => { notifier.dispose(); registry.dispose(); });
     let injectedText = '';
     const origin = { agentName: 'Owner', tabKey: 'tab-a' };
-    const view = { chatTabs: [{ agentName: 'Owner', sessionId: 'tab-a', isActive: true }], _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
-        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-        send_message: (opts: { injectedText: string }) => { injectedText = opts.injectedText; } };
+    const view = { rollingWindow: new RollingWindow(), chatTabs: [{ agentName: 'Owner', sessionId: 'tab-a', isActive: true }], _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier },
+        send_message: (opts: { injectedText: string; onAccepted?: () => void }) => { opts.onAccepted?.(); injectedText = opts.injectedText; } };
     notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
     const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'treść '.repeat(1200) };
     const search = { name: 'search', description: 'search', inputSchema: {}, execute: async () => 'najnowszy wynik' };
@@ -44,8 +45,8 @@ test.serial('C2: pusty wynik przekazuje nieznany efekt przerwanego zapisu', asyn
     t.teardown(() => { notifier.dispose(); registry.dispose(); });
     let injectedText = '';
     const origin = { agentName: 'Owner', tabKey: 'tab-a' };
-    const view = { chatTabs: [{ agentName: 'Owner', sessionId: 'tab-a', isActive: true }], _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
-        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry }, send_message: (opts: { injectedText: string }) => { injectedText = opts.injectedText; } };
+    const view = { rollingWindow: new RollingWindow(), chatTabs: [{ agentName: 'Owner', sessionId: 'tab-a', isActive: true }], _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry, subTaskNotifier: notifier }, send_message: (opts: { injectedText: string; onAccepted?: () => void }) => { opts.onAccepted?.(); injectedText = opts.injectedText; } };
     notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
     let started!: () => void;
     const startedPromise = new Promise<void>(resolve => { started = resolve; });

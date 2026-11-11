@@ -38,7 +38,7 @@ async function fixture() {
         updateTokenCounter() {}, _updateTokenPanel() {}, render_messages() {}, add_welcome_message() {},
         resetInputArea() { this.input_area.value = ''; },
         async _resolveMentions(text: string) { return { displayText: text, contextText: '' }; },
-        async append_message(role: 'user', content: string) { await this.rollingWindow.addMessage(role, content); },
+        async append_message(role: 'user', content: string, _display: unknown, meta: Dynamic, owner: Dynamic) { await (owner?.rollingWindow ?? this.rollingWindow).addMessage(role, content, meta); },
         async appendToActiveSession() {}, showTypingIndicator() {}, hideTypingIndicator() {},
         get_chat_model: (options: Dynamic) => { modelOptions.push(options.skipCache); return options.skipCache ? models[1] : models[0]; }, _chatResolveTools: () => [],
         _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {}, _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {},

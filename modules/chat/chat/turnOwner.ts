@@ -55,6 +55,7 @@ export interface FreezeViewLike {
     chatTabs?: OwnerTabLike[];
     rollingWindow?: RollingWindow | null;
     tokenTracker?: TokenTracker | null;
+    _agentStates?: Map<string, { rollingWindow: RollingWindow }>;
     currentAutonomy?: AutonomyMode;
     currentArtifactId?: string | null;
 }
@@ -263,6 +264,9 @@ export interface FrozenTurnOwner {
     sessionEpochFailure?: Readonly<SessionEpochFailure>;
     /** Private cursor used by send preparation; never changed by tab selection. */
     sessionWriter?: AgentMemory;
+    signal?: AbortSignal;
+    /** Expected tab identity captured at acceptance, advanced only by this owner's publication. */
+    acceptedIdentity?: { id: string | undefined; path: string | undefined; epoch: string | null | undefined };
     /** Zakładka, z której wyszła tura (adres zwrotny delegacji w tle). */
     tab: OwnerTabLike | null;
     /** Autonomia tej zakładki — polityka „czy pytać" dla egzekutora narzędzi. */
@@ -301,9 +305,31 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
         ...(!memory?.sessionEpoch && memory?.getSessionEpochFailure?.(memory.activeSessionPath || '')
             ? { sessionEpochFailure: Object.freeze({ ...memory.getSessionEpochFailure(memory.activeSessionPath || '')! }) } : {}),
         tab,
+        acceptedIdentity: { id: tab?.sessionId, path: tab?.sessionPath, epoch: tab?.sessionEpoch },
         autonomy: view?.currentAutonomy,
         artifactId: view?.currentArtifactId ?? null,
     };
+}
+
+/** Tab selection is allowed; replacing its window or session is not. */
+export function isFrozenTurnOwnerCurrent(view: FreezeViewLike, owner: FrozenTurnOwner): boolean {
+    if (owner.signal?.aborted || resolveOwnerMemory(view.plugin?.agentManager, owner.agentName) !== owner.memory) return false;
+    const tab = owner.tab;
+    if (!tab) return view.rollingWindow === owner.rollingWindow;
+    const identity = owner.acceptedIdentity;
+    if (!view.chatTabs?.includes(tab) || identity && (tab.sessionId !== identity.id
+        || tab.sessionPath !== identity.path || tab.sessionEpoch !== identity.epoch)) return false;
+    if (tab.isActive) return view.rollingWindow === owner.rollingWindow;
+    return !view._agentStates || [...view._agentStates.values()].some(state => state.rollingWindow === owner.rollingWindow);
+}
+
+/** Call only after validating the acceptance snapshot, never take a fresh snapshot after I/O. */
+export function publishTurnSessionIdentity(owner: FrozenTurnOwner): void {
+    const tab = owner.tab;
+    if (!tab) return;
+    tab.sessionPath = owner.sessionPath;
+    tab.sessionEpoch = owner.sessionEpoch;
+    owner.acceptedIdentity = { id: tab.sessionId, path: tab.sessionPath, epoch: tab.sessionEpoch };
 }
 
 /** Complete the captured session identity without following the selected tab's memory cursor.
@@ -313,10 +339,8 @@ export async function ensureTurnSessionEpoch(view: FreezeViewLike, owner?: Froze
         const writer = owner.sessionWriter;
         const path = owner.sessionPath;
         const tab = owner.tab;
-        const tabPath = tab?.sessionPath, tabEpoch = tab?.sessionEpoch;
-        const current = () => (!tab || view.chatTabs?.includes(tab) === true
-            && tab.sessionPath === tabPath && tab.sessionEpoch === tabEpoch)
-            && resolveOwnerMemory(view.plugin?.agentManager, owner.agentName) === owner.memory;
+        const current = () => isFrozenTurnOwnerCurrent(view, owner);
+        if (!current()) return false;
         const tools = view.plugin?.toolRegistry?.filterByAgent(owner.agent);
         if (path && !owner.sessionEpoch && (!tools || tools.some(tool => tool.name === 'delegate' || tool.name === 'sub_agent'))) {
             try { owner.sessionEpoch = await writer.ensureActiveSessionEpoch(path, current); }
@@ -326,7 +350,7 @@ export async function ensureTurnSessionEpoch(view: FreezeViewLike, owner?: Froze
             }
         }
         if (!current()) return false;
-        if (tab) { tab.sessionPath = path; tab.sessionEpoch = owner.sessionEpoch; }
+        publishTurnSessionIdentity(owner);
         if ((!tab || tab.isActive) && view.rollingWindow === owner.rollingWindow
             && owner.memory?.activeSessionPath === path) {
             owner.memory.sessionEpoch = owner.sessionEpoch;

@@ -1,4 +1,5 @@
-import { cancelMessageEdit, takeMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
+import { cancelMessageEdit, takeMessageEditSubmission, hasPendingMessageEdit } from './messageEdit.js';
+import { recoverSendDraft } from './sendDraft.js';
 import { sessionMessageId } from '../../memory/index.js';
 /**
  * @module chat_streaming
@@ -73,7 +74,7 @@ import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
 import { createTurnAbort, stopSubTasksForOwners } from './turnAbort.js';
 import { ChatTurnPartialState } from './turnPartial.js';
 import type { ActiveSessionEventInput } from '../../memory/index.js';
-import { freezeTurnOwner, ensureTurnSessionEpoch } from './turnOwner.js';
+import { freezeTurnOwner, ensureTurnSessionEpoch, isFrozenTurnOwnerCurrent } from './turnOwner.js';
 import { evaluateAutoTurnChain, resetAutoTurnChain } from './autoTurnChain.js';
 import { RenderThrottle, shouldPaintFrame } from './renderThrottle.js';
 import type { StreamFrame } from './renderThrottle.js';
@@ -106,6 +107,7 @@ import type { TurnAbortHandle } from './turnAbort.js';
 interface SendMessageOptions {
     injectedText?: unknown;
     meta?: unknown;
+    onAccepted?: () => void;
     questionDelivery?: { question: ParentQuestion; token: object; claim: SubTaskNoticeClaim; window: RollingWindow; tab: ChatTab; owner: FrozenTurnOwner };
 }
 
@@ -333,7 +335,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         if (isInjected) {
             // Dostawca wyniku sprawdza `is_generating` PRZED wstrzyknięciem, więc tu nie
             // powinniśmy trafić. Jak jednak trafimy - wynik ZOSTAJE w kolejce notifiera
-            // (dostawca zwrócił `true` tylko wtedy, gdy tura naprawdę ruszyła), a slotu
+            // (claim jest potwierdzany dopiero po przyjęciu wiadomości), a slotu
             // usera nie wolno zająć powiadomieniem.
             if (!questionDelivery) this._subTaskTurnPending = false;
             log.warn('Chat', 'Powiadomienie o subie trafiło na trwającą turę - pomijam wstrzyknięcie');
@@ -363,9 +365,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const ownerTabKey = _tabKey(owner.tab);
     const rw = owner.rollingWindow!;
     const turnAbort = createTurnAbort();
+    owner.signal = turnAbort.signal;
     const isOwnerActive = () => isSendWindowActive(this, owner);
     const editing = isHuman && !isInjected && hasPendingMessageEdit(sendWindow);
-    const commitEdit = isHuman && !isInjected ? takeMessageEdit(sendWindow) : () => {};
+    const editedMessage = isHuman && !isInjected ? takeMessageEditSubmission(sendWindow) : undefined;
     const hasAttachments = !isInjected && this.attachmentManager?.hasAttachments();
     const userAttachments = hasAttachments ? this.attachmentManager?.snapshotAttachments?.() : undefined;
     const userMentions = !isInjected ? this.mentionAutocomplete?.getMentions().map(mention => ({ ...mention })) : undefined;
@@ -382,8 +385,11 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         } catch (error: unknown) { return { kind: 'error' as const, error }; }
     })();
     const slash = mayRunSlashCommand(messageMeta) && text.startsWith('/');
+    let commandHandled = false;
+    let submittedChipsCleared = false;
     const clearSubmittedChips = () => {
         if (isInjected || !isOwnerActive()) return;
+        submittedChipsCleared = true;
         if (hasAttachments) this.attachmentManager!.clear();
         if (this.mentionAutocomplete?.hasMentions()) this.mentionAutocomplete.clear();
     };
@@ -398,9 +404,22 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // Commands such as /save do not consume the attachments waiting for a message.
         if (!slash) clearSubmittedChips();
     };
+    let userMessageId: string | undefined;
+    let accepted = false;
+    let recovered = false;
+    const recoverDraft = () => {
+        if (accepted || recovered || isInjected || commandHandled
+            || userMessageId && rw.messages.some(message => sessionMessageId(message) === userMessageId)) return;
+        recovered = true;
+        recoverSendDraft(this, owner, { text: rawText,
+            attachments: submittedChipsCleared ? userAttachments ?? [] : [],
+            mentions: submittedChipsCleared ? userMentions ?? [] : [], editedMessage });
+    };
+    turnAbort.signal.addEventListener('abort', recoverDraft, { once: true });
     clearSubmittedInput();
     // Stop/close own the preparation from the first I/O, not merely prompt construction.
     this._preparingTurns.set(ownerTabKey, { tab: owner.tab, rollingWindow: rw, abort: turnAbort });
+    if (isOwnerActive()) this.set_generating(true);
     const turnStartedSeq = this.plugin?.subTaskRegistry?.issueTurnStartSequence();
     const sendStart = Date.now();
     const activeAgentName = owner.agentName || '?';
@@ -416,11 +435,28 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
     if (turnAbort.isAborted()) return;
     this.lastMessageTimestamp = Date.now();
-    if (slash && await this.slashCommands?.execute(text, { view: this, plugin: this.plugin })) return;
+    if (slash) {
+        commandHandled = await this.slashCommands?.execute(text, { view: this, plugin: this.plugin }) ?? false;
+        if (commandHandled) return;
+    }
     if (turnAbort.isAborted()) return;
     if (slash && !this.input_area.value.trim()) clearSubmittedChips();
-    commitEdit();
-    if (sendWindow.removedMessageIds?.length) await persistMessageRemovals(owner);
+    if (editedMessage) {
+        const index = rw.messages.indexOf(editedMessage);
+        if (index >= 0) {
+            const removed = rw.messages.slice(index);
+            // Persist a proposed edit first. EACCES must leave RAM and parent projection intact.
+            await owner.memory?.saveSession?.(rw.messages.slice(0, index), {}, {
+                removedMessageIds: removed.map(sessionMessageId),
+                removedRanges: [{ from: sessionMessageId(removed[0]), to: sessionMessageId(removed[removed.length - 1]) }],
+                ...(owner.sessionPath ? { expectedSession: { path: owner.sessionPath, epoch: owner.sessionEpoch } } : {}),
+            });
+            rw.removeMessages(index);
+            const ids = new Set(removed.map(sessionMessageId));
+            rw.removedMessageIds = rw.removedMessageIds.filter(id => !ids.has(id));
+            rw.removedMessageRanges = rw.removedMessageRanges.filter(range => !ids.has(range.from));
+        }
+    }
     if (turnAbort.isAborted()) return;
     if (editing && isOwnerActive()) void this.render_messages();
     if (!isInjected) {
@@ -436,7 +472,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     if (turnAbort.isAborted()) return;
     if (mentionResult.kind === 'error') throw mentionResult.error;
     const { displayText: mentionDisplayText, contextText: mentionContextText } = mentionResult.value;
-    const userMessageId = crypto.randomUUID();
+    userMessageId = crypto.randomUUID();
     const combinedText = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
     const attachmentResult = hasAttachments ? attachmentManager!.buildMessageContent(combinedText, userAttachments) : null;
     if (Array.isArray(attachmentResult?.content) && attachmentResult.content.some(b => b.type === 'image_url')) {
@@ -455,7 +491,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         const valid = reservation?.kind === 'reserved' && reservation.token === token
             && activeTab === tab && tab.isActive === true && isOwnerActive() && sendWindow === window
             && isQuestionOwnerCurrent(this, question)
-            && !this.is_generating && !this._drainSuppressed
+            && !this._streamCtxMap.has(ownerTabKey) && !this._drainSuppressed
             && evaluateAutoTurnChain(this._autoTurnChainCounts?.get(question.owner.agentName) || 0,
                 getLimits(this.env?.settings).max_consecutive_auto_turns).allowed
             && this.plugin?.subTaskRegistry?.isQuestionOpen(question.taskId, question.id) === true;
@@ -490,16 +526,11 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             const count = this._autoTurnChainCounts.get(agentName) || 0;
             this._autoTurnChainCounts.set(agentName, evaluateAutoTurnChain(count, getLimits(this.env?.settings).max_consecutive_auto_turns).nextCount);
         }
-        try {
-            await appended;
-        } catch (error) {
-            if (questionDelivery && this._preparingTurns.get(questionTabKey)?.abort === turnAbort) {
-                this._preparingTurns.delete(questionTabKey);
-            }
-            throw error;
-        }
+        await appended;
         savedUserContent = apiContent;
     }
+    accepted = rw.messages.some(message => sessionMessageId(message) === userMessageId);
+    if (accepted) opts.onAccepted?.();
     if (turnAbort.isAborted()) return;
     const userEvent: ActiveSessionEventInput = {
         type: 'user_message',
@@ -511,14 +542,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         ...(savedResultQuestion(messageMeta) ? { question: savedResultQuestion(messageMeta) } : {}),
     };
     if (questionDelivery) {
-        try {
-            await questionDelivery.owner.memory?.appendSessionEvent(questionDelivery.owner.sessionPath, userEvent, questionDelivery.owner.sessionEpoch);
-        } catch (error) {
-            if (this._preparingTurns.get(questionTabKey)?.abort === turnAbort) {
-                this._preparingTurns.delete(questionTabKey);
-            }
-            throw error;
-        }
+        await questionDelivery.owner.memory?.appendSessionEvent(questionDelivery.owner.sessionPath, userEvent, questionDelivery.owner.sessionEpoch);
         if (turnAbort.isAborted()) {
             if (this._preparingTurns.get(questionTabKey)?.abort === turnAbort) {
                 this._preparingTurns.delete(questionTabKey);
@@ -567,7 +591,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const turnSessionEpoch = owner.sessionPath === turnSessionPath
         ? owner.sessionEpoch
         : (owner.memory?.activeSessionPath === turnSessionPath ? owner.memory.sessionEpoch ?? null : null);
-    if (turnSessionPath && owner.tab && owner.memory?.activeSessionPath === turnSessionPath
+    if (!turnAbort.isAborted() && isFrozenTurnOwnerCurrent(this, owner)
+        && turnSessionPath && owner.tab && owner.memory?.activeSessionPath === turnSessionPath
         && (owner.memory.sessionEpoch ?? null) === turnSessionEpoch
         && owner.tab.sessionPath === ownerTabSessionPath
         && (owner.tab.sessionEpoch ?? null) === ownerTabSessionEpoch
@@ -588,14 +613,13 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         const state = this._agentStates.get(ownerTabKey ?? '');
         if (state) state.isGenerating = true;
     }
-    // Od tej chwili serializację przejmuje `is_generating` - bezpiecznik „tura powiadomienia
-    // już rusza" (ustawiany przez dostawcę PRZED tym awaitem) nie jest już potrzebny.
+    // Preparation already owns the generating state; release the delivery reservation
+    // once the accepted message has a session identity.
     this._subTaskTurnPending = false;
     if (questionDelivery && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
         this._questionAutoTurn = { kind: 'idle' };
     }
 
-    try {
     // Get system prompt for the TURN OWNER (includes memory: brain + active context)
     const agentManager = this.plugin?.agentManager;
     if (agentManager) {
@@ -671,14 +695,6 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
-    } catch (error) {
-        const preparing = this._preparingTurns.get(ownerTabKey);
-        if (preparing?.abort === turnAbort) {
-            this._preparingTurns.delete(ownerTabKey);
-            syncTabGenerating(this, preparing.tab, ownerTabKey, rw);
-        }
-        throw error;
-    }
     // Profil i nazwa właściciela - z zamrożenia sprzed budowy promptu, nie z lustra.
     const activeAgent = owner.agent;
     const streamAgentName = owner.agentName;
@@ -968,7 +984,11 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
     log.debug('Chat', `[${streamAgentName}] send_message END (${Date.now() - sendStart}ms)`);
+    } catch (error: unknown) {
+        recoverDraft();
+        if (!turnAbort.isAborted()) this.handle_error(error, owner.agentName, undefined, ownerTabKey);
     } finally {
+        turnAbort.signal.removeEventListener('abort', recoverDraft);
         const preparing = this._preparingTurns.get(ownerTabKey);
         if (preparing?.abort === turnAbort) {
             this._preparingTurns.delete(ownerTabKey);
@@ -2677,24 +2697,33 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             }
             return false;
         }
-        if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
-        // `evaluateSubTaskDelivery` odmawia bez zakładki - za bramką `tab` na pewno istnieje.
-        this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
-
+        const owner = freezeTurnOwner(this);
+        const window = this.rollingWindow;
         const { text, meta } = buildSubTaskResultDelivery(task, this.plugin?.subTaskRegistry, limits.subagent_result_max_chars);
-
-        // Bezpiecznik ustawiany SYNCHRONICZNIE: `drain()` woła dostawcę w pętli, a `send_message`
-        // dochodzi do `set_generating(true)` dopiero po kilku awaitach - bez tej flagi drugi
-        // czekający wynik wystartowałby RÓWNOLEGŁĄ turę na tej samej zakładce.
+        // Reserve synchronously, claim after notifier leaves its delivering stack. Scheduling
+        // is not acceptance: only the message entering the captured window acknowledges it.
         this._subTaskTurnPending = true;
-        log.info('Chat', `[${tab!.agentName}] wynik suba z tła → auto-tura (${task.id}, ${task.status})`);
-        void Promise.resolve()
-            // Wynik suba to tekst MASZYNY - żadnych przywilejów człowieka (rejestr adresów,
-            // markery `@@skill:`, komendy `/`).
-            .then(() => this.send_message({ injectedText: text, meta }))
-            .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
+        void Promise.resolve().then(async () => {
+            const notifier = this.plugin?.subTaskNotifier;
+            const [claim] = notifier?.claimPending(candidate => candidate.id === task.id) ?? [];
+            if (notifier && !claim) return;
+            let accepted = false;
+            try {
+                if (this.is_generating || this._drainSuppressed || !tab?.isActive
+                    || this.rollingWindow !== window || !isFrozenTurnOwnerCurrent(this, owner)) return;
+                await this.send_message({ injectedText: text, meta, onAccepted: () => {
+                    accepted = true;
+                    claim?.ack();
+                    if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
+                    this._autoTurnChainCounts.set(tab.agentName, chain.nextCount);
+                } });
+            } finally {
+                if (accepted || window?.messages.some(message => message.subTaskId === task.id)) claim?.ack();
+                else claim?.release();
+            }
+        }).catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
             .finally(() => { if (this._questionAutoTurn?.kind !== 'reserved') this._subTaskTurnPending = false; });
-        return true;
+        return false;
     } catch (e) {
         log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || String(e)}`);
         return false;

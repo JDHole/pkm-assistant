@@ -1,3 +1,4 @@
+import { RollingWindow } from './RollingWindow.js';
 import test from 'ava';
 import { setLocale } from '../../../core/i18n/index.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
@@ -68,13 +69,13 @@ test('powiadomienie dostarcza osobne dane ramki i zachowuje tekst dla modelu', a
     registry.endRun(thread.threadId, { successful: true, transcript: [], effects: [{ ...outcome.effects[0], expectedCheck: 'exists' }] });
     const sent: Array<{ injectedText: string; meta: Record<string, unknown> }> = [];
     const view = {
-        chatTabs: [{ agentName: 'Jaskier', sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch, sessionId: owner.tabKey, isActive: true }],
+        rollingWindow: new RollingWindow(), chatTabs: [{ agentName: 'Jaskier', sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch, sessionId: owner.tabKey, isActive: true }],
         _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
         env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-        send_message: (opts: { injectedText: string; meta: Record<string, unknown> }) => { sent.push(opts); },
+        send_message: (opts: { injectedText: string; meta: Record<string, unknown>; onAccepted?: () => void }) => { opts.onAccepted?.(); sent.push(opts); },
     };
 
-    t.true(_deliverSubTaskResult.call(view as never, task));
+    t.false(_deliverSubTaskResult.call(view as never, task));
     await Promise.resolve();
 
     t.is(sent[0]?.injectedText,
@@ -107,13 +108,13 @@ test('notatka o dokończeniu wynika tylko z reusable sub_id', async t => {
         registry.finish(task, { text: 'gotowe', toolsUsed: [], durationMs: 1000, usage: null, outcome });
         const sent: Array<{ injectedText: string; meta: Record<string, unknown> }> = [];
         const view = {
-            chatTabs: [{ agentName: 'Jaskier', sessionId: `tab-${mode}`, isActive: true }],
+            rollingWindow: new RollingWindow(), chatTabs: [{ agentName: 'Jaskier', sessionId: `tab-${mode}`, isActive: true }],
             _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
             env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
-            send_message: (opts: { injectedText: string; meta: Record<string, unknown> }) => { sent.push(opts); },
+            send_message: (opts: { injectedText: string; meta: Record<string, unknown>; onAccepted?: () => void }) => { opts.onAccepted?.(); sent.push(opts); },
         };
 
-        t.true(_deliverSubTaskResult.call(view as never, task));
+        t.false(_deliverSubTaskResult.call(view as never, task));
         await Promise.resolve();
         t.deepEqual((sent[0]?.meta._subTaskResult as { thread: unknown }).thread,
             { kind: mode === 'single' ? 'single' : 'unknown' });

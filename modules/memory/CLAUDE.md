@@ -1061,10 +1061,18 @@ tych samych końcowych bajtów wybierają pierwszy, bez obietnicy blokady międz
 
 `AgentMemory.createSessionWriter(path, epoch)` zwraca instancję z własnym wskaźnikiem
 sesji i rewizją; kolejka pliku, seq i cache adaptera pozostają współdzielone.
-Korzysta z istniejących `appendToActiveSession` (także tworzenie/naprawa brakującego
-pliku) i `ensureActiveSessionEpoch`. Nie zapisuje `.active_session.json`: pisarz
-pracujący w tle nie wybiera aktywnej sesji. Wołacz publikuje wynik do swojej zakładki;
-aktualizacja wskaźnika głównej pamięci i jego zapis wymagają nadal aktywnego okna
+Dla przechwyconej ścieżki `appendToActiveSession` najpierw wykonuje
+`startActiveSession` (także naprawa brakującego pliku), a następnie
+`appendSessionEvent(target, event, writer.sessionEpoch)`. Ten dopisek sprawdza
+oczekiwaną epokę z odczytanego pliku w kolejce ścieżki: samo zimne `exists` nie
+uprawnia do zapisu do nazwy użytej ponownie przez nową epokę. Pisarz bez ścieżki
+tworzy własną nową sesję dotychczasową drogą. Migrację prowadzi
+`ensureActiveSessionEpoch`. Nie zapisuje `.active_session.json`: pisarz
+pracujący w tle nie wybiera aktywnej sesji. Wołacz publikuje wynik do swojej zakładki
+wyłącznie po kontroli sygnału przerwania, obiektu zakładki, jej ID/ścieżki/epoki
+z migawki przyjęcia wysyłki, zachowanego okna i instancji pamięci. Zmiana wybranej
+zakładki jest dozwolona; wymiana sesji nie. Aktualizacja wskaźnika głównej pamięci
+i jego zapis wymagają dodatkowo aktywnego okna
 oraz zgodnej rewizji. Nie należy podłączać tej instancji do selekcji w AgentManager.
 Kontrola migracji dotyczy właściciela sesji, a nie wybranej zakładki. Diagnostyka
 migracji zostaje przy pisarzu i przechwyconej turze. Testy pełnej ścieżki wysyłki:
