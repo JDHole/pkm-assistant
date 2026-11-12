@@ -2,7 +2,7 @@ import test from 'ava';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { RollingWindow } from './RollingWindow.js';
-import { startEditMessage, append_message } from './chat_messages.js';
+import { startEditMessage, append_message, render_messages } from './chat_messages.js';
 import * as streaming from './chat_streaming.js';
 import { handleSaveSession, appendToActiveSession, handleNewSession, initSessionManager, handleLoadSession, _restoreActiveSession, consolidateSession } from './chat_session.js';
 import { _switchTab, _renderTabBar, _closeActiveTab } from './chat_tabs.js';
@@ -11,7 +11,7 @@ import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
-import { Notice } from 'obsidian';
+import { MarkdownRenderer, Notice } from 'obsidian';
 import { t as translate } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { cancelMessageEdit } from './messageEdit.js';
@@ -446,6 +446,50 @@ for (const stage of ['memory-read', 'memory-consolidate', 'compress'] as const) 
     release.resolve();
     await run;
     t.is(f.view.input_area.value, 'Szkic B');
+});
+
+test.serial('B1: powrót A przed końcem kontynuacji pokazuje odpowiedź', async t => {
+    const f = await fixture();
+    t.teardown(() => f.view.attachmentManager.destroy());
+    const renderMarkdown = MarkdownRenderer.render;
+    MarkdownRenderer.render = async (_app, text, el) => { el.textContent = text; };
+    t.teardown(() => { MarkdownRenderer.render = renderMarkdown; });
+    const journalEntered = deferred(), releaseJournal = deferred(), modelEntered = deferred(), releaseModel = deferred();
+    const append = f.memory.appendSessionEvent.bind(f.memory);
+    f.memory.appendSessionEvent = async (...args) => {
+        if (args[1]?.type === 'agent_message' && Array.isArray(args[1].tool_calls)) {
+            journalEntered.resolve();
+            await releaseJournal.promise;
+        }
+        return append(...args);
+    };
+    let calls = 0;
+    Object.assign(f.view, {
+        render_messages,
+        _drawConnectorLines() {},
+        get_chat_model: () => ({ providerId: 'openai', stream(_payload: unknown, cb: { chunk(value: unknown): void; done(value: unknown): void }) {
+            if (++calls === 1) {
+                cb.chunk({ choices: [{ message: { content: 'Praca A' } }] });
+                cb.done({ choices: [{ message: { role: 'assistant', content: 'Praca A', tool_calls: [{ id: 't1', type: 'function', function: { name: 'list', arguments: '{}' } }] } }] });
+            }
+            else { modelEntered.resolve(); void releaseModel.promise.then(() => cb.done({ choices: [{ message: { role: 'assistant', content: 'Gotowa odpowiedź A' } }] })); }
+        } }),
+        _chatResolveTools: () => [{ type: 'function', function: { name: 'list', parameters: {} } }],
+        _chatExecuteToolCall: async () => ({ success: true }),
+        _chatOnToolCallsParsed() {},
+    });
+    f.view.input_area.value = 'Pytanie z narzędziem';
+    const run = f.clickSend();
+    await Promise.race([journalEntered.promise, run.then(() => { throw new Error('Nie osiągnięto zapisu narzędzia'); })]);
+    await f.clickB();
+    releaseJournal.resolve();
+    await Promise.race([modelEntered.promise, run.then(() => { throw new Error('Nie osiągnięto kontynuacji modelu'); })]);
+    await f.clickA();
+    releaseModel.resolve();
+    await run;
+    const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
+    t.is(texts(f.view.messages_container).find(text => text === 'Gotowa odpowiedź A'), 'Gotowa odpowiedź A');
+    t.is((await f.memory.loadActiveSession(f.tabs[0].sessionPath)).messages.at(-1)?.content, 'Gotowa odpowiedź A');
 });
 
 for (const stage of ['agent_message', 'tool_result', 'compression', 'skill_nudge', 'delegate_nudge', 'queued_add', 'queued_event', 'tile_render'] as const) test.serial(`F2: kontynuacja narzędzia przy ${stage} nie maluje w B`, async t => {

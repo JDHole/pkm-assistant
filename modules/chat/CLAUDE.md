@@ -1,5 +1,10 @@
 # modules/chat/
 
+Przełączenie zakładki unieważnia współdzielone cele malowania i blok myślenia przed
+przerysowaniem historii; dla trwającej tury przywraca wskaźnik pracy. Kontynuacja w tle
+nadal nie zeruje celów aktywnej zakładki. Test A → B → A w `chat_streaming.sendTab.test.ts`
+sprawdza końcową odpowiedź w widocznym DOM i sesji.
+
 Sekcja pytania w powiadomieniu normalizuje końce linii do LF przed obliczeniem długości. Pusty po trim handoff ustępuje dostępnemu wynikowi częściowemu.
 
 `ask_user` z `question_id` pokazuje pytanie i zadanie suba wyłącznie dla otwartego pytania właściciela kanału. Przyjęta odpowiedź prowadzącego przechowuje dane kafelka w wyniku narzędzia, aby historia mogła go odtworzyć.

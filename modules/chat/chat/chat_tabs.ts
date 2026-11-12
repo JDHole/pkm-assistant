@@ -117,6 +117,10 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     // (na wypadek nowego `await` przed tym miejscem): bramka `shouldPaintFrame` w
     // `_paintStreamFrame`.
     this._renderThrottle?.cancel();
+    // History redraw detaches the old tab's paint targets, including its thinking block.
+    this._resetPaintTargets?.();
+    this._currentThinkingBlock = null;
+    this.hideTypingIndicator?.();
 
     cancelMessageEdit(this.rollingWindow);
     // Capture the outgoing window and destination before any asynchronous work.
@@ -253,6 +257,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
         void this.render_messages();
         this.scrollToFinalMessage();
     }
+    if (this.is_generating) this.showTypingIndicator();
 
     // 11. Wynik suba dla TEJ zakładki mógł przyjść, gdy była w tle - dostawca odmawiał
     // wtedy przyjęcia (auto-tura za plecami usera). Teraz zakładka jest na wierzchu, więc
