@@ -12,6 +12,7 @@
  * `version: 'plugin'` is a sentinel — resolved to the actual plugin version at runtime
  * (via resolveBuiltinManifests({ pluginVersion })) so manifests stay in sync with package.json.
  */
+import app from './app.manifest.js';
 import core from './core.manifest.js';
 import artifacts from './artifacts.manifest.js';
 import vault from './vault.manifest.js';
@@ -54,9 +55,10 @@ export interface ResolveManifestsOptions {
     /** Version from package.json (e.g. "1.2.1") */
     pluginVersion?: string;
     komunikatorEnabled?: boolean;
+    obsidianAppEnabled?: boolean;
 }
 
-export const BUILTIN_MANIFESTS: BuiltinServerManifest[] = [core, artifacts, vault, memory, web, multimodal, delegation, komunikator];
+export const BUILTIN_MANIFESTS: BuiltinServerManifest[] = [core, artifacts, vault, memory, web, multimodal, delegation, komunikator, app];
 
 /**
  * Resolve `version: 'plugin'` sentinel to the actual plugin version.
@@ -64,7 +66,7 @@ export const BUILTIN_MANIFESTS: BuiltinServerManifest[] = [core, artifacts, vaul
  *
  * @returns Manifests with resolved versions
  */
-export function resolveBuiltinManifests({ pluginVersion, komunikatorEnabled = true }: ResolveManifestsOptions = {}): BuiltinServerManifest[] {
+export function resolveBuiltinManifests({ pluginVersion, komunikatorEnabled = true, obsidianAppEnabled = false }: ResolveManifestsOptions = {}): BuiltinServerManifest[] {
     let manifests = BUILTIN_MANIFESTS;
     // Kill-switch komunikatora (flaga default ON): gdy user wyłączy pocztę, cały serwer
     // `komunikator` (kom_send/kom_list/kom_read) znika z katalogu.
@@ -73,6 +75,7 @@ export function resolveBuiltinManifests({ pluginVersion, komunikatorEnabled = tr
     if (komunikatorEnabled === false) {
         manifests = manifests.filter(m => m.name !== 'komunikator');
     }
+    if (!obsidianAppEnabled) manifests = manifests.filter(m => m.name !== 'app');
     return manifests.map(m => ({
         ...m,
         version: m.version === 'plugin' ? (pluginVersion || '1.0.0') : m.version,
@@ -101,6 +104,7 @@ export function getBuiltinManifest(name: string): BuiltinServerManifest | null {
  */
 export function resolveServerDescription(name: string): string {
     switch (name) {
+        case 'app': return t('mcp.server.app.desc');
         case 'core': return t('mcp.server.core.desc');
         case 'vault': return t('mcp.server.vault.desc');
         case 'memory': return t('mcp.server.memory.desc');

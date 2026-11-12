@@ -155,7 +155,8 @@ test('delegation group disables sub_agent visibility and execution', t => {
 test('getBuiltinServerMap: returns the full map with all expected servers', t => {
     const r = new ToolRegistry();
     const map = r.getBuiltinServerMap();
-    t.deepEqual(Object.keys(map).sort(), ['artifacts', 'core', 'delegation', 'komunikator', 'memory', 'multimodal', 'vault', 'web']);
+    t.deepEqual(Object.keys(map).sort(), ['app', 'artifacts', 'core', 'delegation', 'komunikator', 'memory', 'multimodal', 'vault', 'web']);
+    t.deepEqual(map.app, ['obsidian_app']);
     t.true(map.vault.includes('read'));
     t.true(map.vault.includes('search')); // unified search lives in vault server
     t.true(map.memory.includes('memory_save'));

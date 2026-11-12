@@ -1,3 +1,4 @@
+export { createObsidianAppTool } from './ObsidianAppTool.js';
 /**
  * modules/tools/ — Public API
  *

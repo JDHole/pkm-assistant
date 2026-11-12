@@ -97,6 +97,7 @@ export const PERMISSION_TYPES = {
  * (fail-closed). Dopisz ją tu tylko, jeśli jej cel naprawdę nie jest ścieżką.
  */
 const NON_VAULT_TARGET_ACTIONS = new Set([
+    'app.state',
     'web.search',
     'web.read',
     'agent.message',
@@ -106,6 +107,8 @@ const NON_VAULT_TARGET_ACTIONS = new Set([
 
 // Bez `export` - zero konsumentów poza tym plikiem; w tym pliku zostaje żywy w checkPermission().
 const ACTION_PERMISSIONS: Record<string, string | undefined> = {
+    'app.state': PERMISSION_TYPES.READ_NOTES,
+    'app.open': PERMISSION_TYPES.READ_NOTES,
     'vault.read': PERMISSION_TYPES.READ_NOTES,
     'vault.write': PERMISSION_TYPES.EDIT_NOTES,
     'vault.create': PERMISSION_TYPES.CREATE_FILES,

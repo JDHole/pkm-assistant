@@ -100,6 +100,7 @@ test('defaultDisabledTools: 5 grup wyłączonych (web/multimodal/delegation/arti
     }
     // `todo` jest wyjątkiem - default ON mimo grupy artifacts wyłączonej.
     t.false(disabled.includes('todo'), 'todo default ON (wyjątek z grupy artifacts)');
+    t.true(disabled.includes('obsidian_app'));
     t.true(disabled.includes('artifact_create'), 'reszta grupy artifacts zostaje OFF');
 });
 

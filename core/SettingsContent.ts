@@ -24,6 +24,7 @@ interface PkmSettingsSlice {
     defaultAutonomy?: string;
     extendedPromptRules?: boolean;
     komunikatorEnabled?: boolean;
+    obsidianAppEnabled?: boolean;
     debugMode?: boolean;
     traceEnabled?: boolean;
     cacheTelemetryEnabled?: boolean;
@@ -262,6 +263,14 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
                 pkm.extendedPromptRules = value;
                 await save();
             }));
+
+    new Setting(container)
+        .setName(t('settings.obsidian_app_enabled'))
+        .setDesc(t('settings.obsidian_app_enabled_desc'))
+        .addToggle(toggle => toggle.setValue(pkm.obsidianAppEnabled === true).onChange(async value => {
+            pkm.obsidianAppEnabled = value;
+            await save();
+        }));
 
     // Globalny wyłącznik Komunikatora - poczta między agentami. Domyślnie ON i widoczny
     // dla usera. Rejestracja narzędzi i katalog serwerów czytają flagę PRZY STARCIE,

@@ -92,6 +92,7 @@ interface ToolAxisDecision {
 }
 
 const BUILTIN_TOOL_MAP: Record<string, string[]> = {
+    app: ['obsidian_app'],
     core: ['ask_user'],
     // artifact_* (żywe artefakty, gatunek 1) + todo (gatunek 2). Stare chat_todo/idea_review/plan_review skasowane (aliasy w toolAliases.js).
     artifacts: ['artifact_create', 'artifact_read', 'artifact_update', 'artifact_list', 'todo'],

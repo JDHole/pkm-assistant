@@ -98,6 +98,7 @@ function _toolEntry(iconFn: UiIcon, toolName: string) {
 export type ToolInfoEntry = ReturnType<typeof _toolEntry>;
 
 export const TOOL_INFO = {
+    obsidian_app: _toolEntry(() => UiIcons.file(14), 'obsidian_app'),
     // Prymitywy (read/list ze scope vault|memory):
     read:            _toolEntry(() => UiIcons.file(14), 'read'),
     list:            _toolEntry(() => UiIcons.folder(14), 'list'),

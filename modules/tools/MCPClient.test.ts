@@ -74,6 +74,7 @@ test('normalizeArgsAliases: multiple aliases at once', t => {
 
 test('executeToolCall: maps built-in tools to known action types', async t => {
     const expectedActions = {
+        obsidian_app: 'app.open',
         ask_user: 'vault.read',
         add_text_to_image: 'image.generate',
         vault_filter_yaml: 'vault.read',

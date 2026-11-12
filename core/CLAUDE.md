@@ -454,3 +454,5 @@ i instrukcji subagent_changes w powiadomieniu. Główne API core pozostaje bez z
 oraz AccessGuard odmawiają przed wyjątkiem admin_access. Narzędzia treści, ich
 listingi i skany pamięci używają tego samego helpera; runtime review ma własne I/O.
 Test behawioralny publicznego MCP: `modules/tools/AdminVaultTools.test.ts` (F4).
+
+The optional `pkmAssistant.obsidianAppEnabled` setting defaults off; changing it requires a plugin reload. Permission actions `app.state` and `app.open` are read-level, with `app.open` checked against its vault target.

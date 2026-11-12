@@ -5,10 +5,10 @@ import { ServerLoader } from './ServerLoader.js';
 const emptyVault = () => ({ adapter: { exists: async () => false, list: async () => ({ folders: [] }) } });
 const toolNames = (server: { tools?: Array<string | { name: string }> }) => (server.tools || []).map(x => (typeof x === 'string' ? x : x.name));
 
-test('BUILTIN_MANIFESTS: 8 servers registered (no skills server)', t => {
-    t.is(BUILTIN_MANIFESTS.length, 8);
+test('BUILTIN_MANIFESTS: 9 servers registered (no skills server)', t => {
+    t.is(BUILTIN_MANIFESTS.length, 9);
     const names = BUILTIN_MANIFESTS.map(m => m.name).sort();
-    t.deepEqual(names, ['artifacts', 'core', 'delegation', 'komunikator', 'memory', 'multimodal', 'vault', 'web']);
+    t.deepEqual(names, ['app', 'artifacts', 'core', 'delegation', 'komunikator', 'memory', 'multimodal', 'vault', 'web']);
 });
 
 test('every built-in manifest has required fields', t => {

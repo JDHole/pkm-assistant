@@ -37,6 +37,7 @@ import { ChatView } from "../modules/chat/index.js";
 import type { AgentsPlugin } from "../modules/agents/index.js";
 import type { ChatViewLike } from "../modules/chat/index.js";
 import { AgentManager } from "../modules/agents/index.js";
+import { createWorkspacePort, isObsidianAppEnabled } from "../modules/obsidian-app/index.js";
 import { isKomunikatorEnabled, registerKomunikatorCleanup } from "../modules/komunikator/index.js";
 // Obsidianowe bebechy core/ (PluginBase, runtime/PluginRuntime, utils/obsidianNav,
 // security/MasterPasswordModal) deep-importuje TYLKO ten plik - jako composition root.
@@ -71,6 +72,7 @@ import {
   stopAllDelegations,
   createAgentDelegateTool,
   createKomunikatorTools,
+  createObsidianAppTool,
   // Artefakty żywe (gatunek 1)
   createArtifactCreateTool,
   createArtifactReadTool,
@@ -805,6 +807,12 @@ export default class PkmAssistantPlugin extends PluginBase {
         // Modal sprzątania po drugim ptaszku (kolejka - jeden modal na raz).
         this._komunikatorCleanupUnsub = registerKomunikatorCleanup(this);
       }
+      const obsidianAppEnabled = isObsidianAppEnabled(this.settings);
+      if (obsidianAppEnabled) {
+        this.toolRegistry.registerTool(createObsidianAppTool(createWorkspacePort(
+          this.app, (value): value is Obsidian.TFile => value instanceof Obsidian.TFile,
+        )));
+      }
       // Artefakty żywe (gatunek 1). Stare chat_todo/idea_review/plan_review skasowane (aliasy).
       this.toolRegistry.registerTool(createArtifactCreateTool());
       this.toolRegistry.registerTool(createArtifactReadTool());
@@ -825,7 +833,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.info('Plugin', `MCP system OK: ${toolCount} narzędzi zarejestrowanych`);
 
       // ServerManager - dynamic MCP server packages
-      this.serverManager = new ServerManager(this.app, this, { komunikatorEnabled });
+      this.serverManager = new ServerManager(this.app, this, { komunikatorEnabled, obsidianAppEnabled });
       await this.serverManager.initialize();
       // TS-boundary: `Agent` (modules/agents, `permissions: AgentPermissions`) vs
       // `ServerVisibilityAgent` (modules/tools) - dwa moduły, dwa lokalne kontrakty dla „agenta

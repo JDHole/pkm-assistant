@@ -945,3 +945,5 @@ publicznego list i read, a nie wewnętrzny model widoku.
 P4 migracji epoki: DelegateTool przenosi opcjonalne `sessionEpochFailure` z zaufanego
 origin przez parser schematu memory (`unknown`, maskowanie, zamrożona kopia).
 Niepoprawne dane są pomijane; przy potwierdzonej epoce diagnostyka nie jest przenoszona.
+
+`obsidian_app` is an opt-in built-in tool registered only when the plugin setting is enabled; its `app` manifest is filtered by the same flag. The workspace port and serialization live in `modules/obsidian-app`; `app.state` has no vault target and `app.open` is checked against the requested vault path. Fresh agents have the group disabled.

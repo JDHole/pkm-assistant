@@ -25,6 +25,7 @@ import { ToolRegistry } from '../../modules/tools/ToolRegistry.js';
 // nie niesie trybu. Narzędzia, których klasa ZALEŻY od operationMode (write/todo), mają
 // WŁASNY, osobny test niżej — tu pinowana jest wartość DOMYŚLNA (brak trybu).
 const EXPECTED: Record<string, ToolRiskLevel> = {
+    obsidian_app: TOOL_RISK_LEVELS.RED, // unknown action fails closed
     // core
     ask_user: TOOL_RISK_LEVELS.GREEN,
     // artifacts

@@ -236,3 +236,5 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
 P5 2.4.7: grupa delegation obejmuje również subagent_changes. Wyłączenie grupy
 blokuje przegląd kopii; samo włączenie nadal nie przyznaje prawa do źródłowego
 writera ani ścieżki. Te kontrole wykonuje narzędzie przeglądu.
+
+The `app` tool group contains `obsidian_app` and is disabled for fresh agents. The plugin-level switch separately controls registration and defaults off.

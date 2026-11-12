@@ -43,6 +43,7 @@ export interface ServerManagerPluginLike {
 export interface ServerManagerOptions {
     /** Kill-switch, forwarded to ServerLoader. */
     komunikatorEnabled?: boolean;
+    obsidianAppEnabled?: boolean;
 }
 
 export class ServerManager {
@@ -62,7 +63,7 @@ export class ServerManager {
         this.app = app;
         this.plugin = plugin;
         const pluginVersion = plugin?.manifest?.version || '1.0.0';
-        this.serverLoader = new ServerLoader(app.vault, { pluginVersion, komunikatorEnabled: options.komunikatorEnabled });
+        this.serverLoader = new ServerLoader(app.vault, { pluginVersion, komunikatorEnabled: options.komunikatorEnabled, obsidianAppEnabled: options.obsidianAppEnabled });
 
         this._activeServers = new Map();
         this._activeTools = new Map();

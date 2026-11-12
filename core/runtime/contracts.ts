@@ -229,6 +229,7 @@ export interface PkmAssistantSettings {
     artifactsFolder?: string;
     indexArtifacts?: boolean;
     komunikatorEnabled?: boolean;
+    obsidianAppEnabled?: boolean;
     onboardingCompleted?: number | boolean;
     modelLibrary?: unknown;
     vaultGroups?: unknown;

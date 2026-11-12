@@ -31,6 +31,7 @@ export interface ServerLoaderOptions {
      * (kom_send/kom_list/kom_read) znika z katalogu. Undefined = bypass (pełny katalog).
      */
     komunikatorEnabled?: boolean;
+    obsidianAppEnabled?: boolean;
 }
 
 /** Wiersz katalogu serwerów dla UI. */
@@ -51,6 +52,7 @@ export class ServerLoader {
     declare vault: unknown;
     declare pluginVersion: string;
     declare komunikatorEnabled: boolean | undefined;
+    declare obsidianAppEnabled: boolean | undefined;
     /** name -> built-in server config */
     declare cache: Map<string, LoadedServerConfig>;
 
@@ -58,6 +60,7 @@ export class ServerLoader {
         this.vault = vault;
         this.pluginVersion = options.pluginVersion || '1.0.0';
         this.komunikatorEnabled = options.komunikatorEnabled;
+        this.obsidianAppEnabled = options.obsidianAppEnabled;
         this.cache = new Map();
     }
 
@@ -67,7 +70,7 @@ export class ServerLoader {
     async loadAllServers(): Promise<void> {
         this.cache.clear();
 
-        const builtins = resolveBuiltinManifests({ pluginVersion: this.pluginVersion, komunikatorEnabled: this.komunikatorEnabled });
+        const builtins = resolveBuiltinManifests({ pluginVersion: this.pluginVersion, komunikatorEnabled: this.komunikatorEnabled, obsidianAppEnabled: this.obsidianAppEnabled });
         for (const manifest of builtins) {
             this.cache.set(manifest.name, {
                 ...manifest,

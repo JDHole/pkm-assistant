@@ -114,6 +114,9 @@ export function classifyToolRisk({
     // Cudzy serwer / kod: nawet deklaracja "read" nie jest przez nas weryfikowalna.
     if (isExternalTool) return TOOL_RISK_LEVELS.RED;
 
+    if (tool === 'obsidian_app' && (action === 'app.state' || action === 'app.open' || operationMode === 'state' || operationMode === 'open')) return TOOL_RISK_LEVELS.GREEN;
+
+
     const greenTools = new Set([
         'read', 'list', 'search',
         'artifact_read', 'artifact_list',

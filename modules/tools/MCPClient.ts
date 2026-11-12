@@ -325,6 +325,7 @@ export interface DiffApprovalOptions {
 }
 
 const ACTION_TYPE_MAP: Record<string, string> = {
+    'obsidian_app': 'app.open',
     'ask_user': 'vault.read',
     // Prymitywy (scope vault|memory dla read/list). Ten sam actionType co legacy vault_*.
     'read': 'vault.read',
@@ -1010,6 +1011,7 @@ export class MCPClient {
             // 5. Check permissions (agent jest już zagwarantowany krokiem 2 - jedyny wyjątek to
             //    narzędzia pamięci, które mają WŁASNĄ bramkę, patrz `isMemoryTool` niżej).
             let actionType = ACTION_TYPE_MAP[toolCall.name] || 'unknown';
+            if (toolCall.name === 'obsidian_app' && argsWithContext.action === 'state') actionType = 'app.state';
             // Narzędzia zewnętrznych serwerów MCP (ExternalMcpManager) → akcja `external.call`.
             // Bez tego actionType zostałby 'unknown' → checkPermission zrobiłby fail-closed deny.
             if (actionType === 'unknown' && this.plugin.externalMcpManager) {

@@ -61,6 +61,7 @@ export const MODULE_NAMES = [
   'memory',
   'models',
   'multimodal',
+  'obsidian-app',
   'onboarding',
   'prompts',
   'shell',

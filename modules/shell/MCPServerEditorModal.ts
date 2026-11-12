@@ -50,7 +50,7 @@ interface McpEditorForm {
 }
 
 // Fallback list if the registry is unavailable - must mirror BUILTIN_TOOL_MAP keys.
-const BUILTIN_SERVER_NAMES = ['core', 'artifacts', 'vault', 'memory', 'web', 'multimodal', 'delegation', 'komunikator'];
+const BUILTIN_SERVER_NAMES = ['core', 'artifacts', 'vault', 'memory', 'web', 'multimodal', 'delegation', 'komunikator', 'app'];
 
 /** Parse a textarea into a trimmed, non-empty line array (args). */
 function parseLines(text: string): string[] {

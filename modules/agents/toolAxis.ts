@@ -29,6 +29,7 @@ export interface LegacyToolAxisConfig {
  * Kolejność grup = kolejność wyświetlania w UI (Uprawnienia sekcja 1 + Umiejętności C5).
  */
 export const BUILTIN_TOOL_GROUPS: Record<string, string[]> = {
+    app: ['obsidian_app'],
     core: ['ask_user'],
     vault: ['read', 'write', 'list', 'delete', 'create_folder', 'search'],
     memory: ['memory_save', 'memory_delete'],
@@ -52,7 +53,7 @@ export const ALL_BUILTIN_TOOLS = Object.values(BUILTIN_TOOL_GROUPS).flat();
  * agent widzi narzędzia vaulta i pamięci, resztę (web/multimodal/delegacja/artefakty/
  * komunikator) ma wyłączoną, dopóki user jej nie włączy w Uprawnieniach.
  */
-export const DEFAULT_DISABLED_GROUPS = ['web', 'multimodal', 'delegation', 'artifacts', 'komunikator'];
+export const DEFAULT_DISABLED_GROUPS = ['web', 'multimodal', 'delegation', 'artifacts', 'komunikator', 'app'];
 
 /**
  * WYJĄTKI od DEFAULT_DISABLED_GROUPS: narzędzia, które mimo wyłączonej grupy są ON u świeżego agenta.
@@ -66,6 +67,7 @@ export const DEFAULT_ENABLED_EXCEPTIONS = ['todo'];
  * Metadane grup dla UI (ikona emoji + klucz i18n etykiety).
  */
 export const GROUP_META: Record<string, { icon: string; labelKey: string }> = {
+    app: { icon: '🪟', labelKey: 'tools.group.app' },
     core: { icon: '⚙️', labelKey: 'tools.group.core' },
     vault: { icon: '📁', labelKey: 'tools.group.vault' },
     memory: { icon: '🧠', labelKey: 'tools.group.memory' },
