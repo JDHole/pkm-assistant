@@ -7,24 +7,24 @@ import { PermissionSystem } from '../../core/security/PermissionSystem.js';
 import { AccessGuard } from '../../core/security/AccessGuard.js';
 import { classifyToolRisk } from '../../core/security/autonomy.js';
 import { defaultDisabledTools } from '../agents/toolAxis.js';
-import { createAppExecutor, isObsidianAppEnabled } from '../obsidian-app/index.js';
+import { createAppExecutor, createWorkspacePort, isObsidianAppEnabled } from '../obsidian-app/index.js';
 import { resolveBuiltinManifests } from './built-in-servers/index.js';
 
-function chain() {
+function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restricted = false) {
     let active = 'Notes/B.md';
     const calls: string[] = [];
     const port = {
         listLeaves: () => [
-            { title: 'A', viewType: 'markdown', path: 'Notes/A.md', active: active === 'Notes/A.md' },
-            { title: 'Secret', viewType: 'markdown', path: 'Secret/S.md', active: active === 'Secret/S.md' },
-            { title: 'Graph view', viewType: 'graph', path: null, active: false },
+            { title: 'A', viewType: 'markdown', identity: { kind: 'file' as const, path: 'Notes/A.md' }, active: active === 'Notes/A.md' },
+            { title: 'Secret', viewType: 'markdown', identity: { kind: 'file' as const, path: 'Secret/S.md' }, active: active === 'Secret/S.md' },
+            { title: 'Graph view', viewType: 'graph', identity: { kind: 'none' as const }, active: false },
         ],
         getActivePath: () => active,
         fileExists: (path: string) => ['Notes/A.md', 'Notes/B.md', 'Secret/S.md'].includes(path),
         openPath: async (path: string) => { calls.push(`start:${path}`); await Promise.resolve(); active = path; calls.push(`end:${path}`); },
     };
-    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port));
-    const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(customPort ?? port));
+    const agent = { name: 'Tola', disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: !restricted, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
     const call = (args: Record<string, unknown>, opts: Parameters<typeof client.executeToolCall>[2] = {}) => client.executeToolCall({ name: 'obsidian_app', arguments: args }, 'Tola', opts);
@@ -98,4 +98,80 @@ test('queued open observes abort immediately before its effect', async t => {
     t.deepEqual(await first, { ok: true, success: true, verified: true, effect: 'changed', data: { path: 'Notes/A.md' } });
     t.deepEqual(await second, { ok: false, success: false, error: { code: 'aborted', message: 'aborted' } });
     t.deepEqual(calls, ['Notes/A.md']); t.is(active, 'Notes/A.md');
+});
+
+
+test.serial('workspace adapter masks deferred, side, invalid and noncanonical file identities through MCP', async t => {
+    const previous = AccessGuard._noGoFolders; AccessGuard._noGoFolders = ['secret', 'secret%20data'];
+    try {
+        const leaf = (type: string, title: string, state: unknown) => ({
+            view: { getDisplayText: () => title, getViewType: () => type },
+            getViewState: () => ({ type, state }),
+        });
+        const leaves = [leaf('markdown', 'Wynagrodzenia 2026', { file: 'Secret/Wynagrodzenia 2026.md' }),
+            leaf('backlink', 'Secret backlink', { file: 'Secret/S.md' }),
+            leaf('graph', 'Graph view', {}), leaf('markdown', 'Invalid', { file: 42 }),
+            leaf('markdown', 'Salary', { file: 'Secret%20Data/Salary.md' }),
+            leaf('markdown', 'RootSecret', { file: 'Notes%2FRootSecret.md' }),
+            { view: { getDisplayText: () => { throw new Error('bad view'); }, getViewType: () => 'markdown' }, getViewState: () => ({ state: {} }) }];
+        const app = { workspace: { activeLeaf: leaves[2], iterateAllLeaves: (fn: (value: unknown) => void) => leaves.forEach(fn) }, vault: {} };
+        const port = createWorkspacePort(app as never, (_value): _value is never => false);
+        const result = await chain(port).call({ action: 'state' });
+        t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, tabs: [
+            { restricted: true, active: false }, { restricted: true, active: false },
+            { title: 'Graph view', view_type: 'graph', path: null, active: true },
+            { restricted: true, active: false }, { restricted: true, active: false },
+            { restricted: true, active: false }, { restricted: true, active: false },
+        ] } });
+        t.false(JSON.stringify(result).includes('Wynagrodzenia'));
+        t.false(JSON.stringify(result).includes('Salary'));
+        t.false(JSON.stringify(result).includes('RootSecret'));
+        const scoped = await chain(port, true).call({ action: 'state' });
+        t.deepEqual(scoped, result);
+    } finally { AccessGuard._noGoFolders = previous; }
+});
+
+test('timeout releases queue and waiting calls reject sub and Stop immediately', async t => {
+    let release = () => {}; const pending = new Promise<void>(resolve => { release = resolve; });
+    const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => null, fileExists: () => true, openPath: () => pending }, 40);
+    const first = execute({ action: 'open', path: 'Notes/A.md' });
+    const controller = new AbortController();
+    const waiting = execute({ action: 'state' }, { abortSignal: controller.signal });
+    controller.abort();
+    t.deepEqual(await waiting, { ok: false, success: false, error: { code: 'aborted', message: 'aborted' } });
+    t.deepEqual(await execute({ action: 'state', _invocationToolNames: [] }), { ok: false, success: false, error: { code: 'sub_agent_denied', message: 'sub_agent_denied' } });
+    t.deepEqual(await first, { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
+    t.deepEqual(await execute({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, tabs: [] } });
+    release();
+});
+
+test('Stop during open reports Stop through MCP while the effect completes', async t => {
+    let active = 'Notes/B.md'; let release = () => {}; let started = () => {};
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const port = { listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
+        openPath: async (path: string) => { started(); await pending; active = path; } };
+    const c = chain(port); const controller = new AbortController();
+    const call = c.call({ action: 'open', path: 'Notes/A.md' }, { abortSignal: controller.signal });
+    await entered; controller.abort(); release();
+    t.deepEqual(await call, { success: false, error: 'Stopped' });
+    t.is(active, 'Notes/A.md');
+});
+
+test('MCP denies sub and stopped calls while an open is pending', async t => {
+    let release = () => {}; let started = () => {};
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const port = { listLeaves: () => [], getActivePath: () => 'Notes/A.md', fileExists: () => true,
+        openPath: async () => { started(); await pending; } };
+    const c = chain(port);
+    const first = c.call({ action: 'open', path: 'Notes/A.md' });
+    await entered;
+    t.deepEqual(await c.call({ action: 'state' }, { callerToolNames: ['obsidian_app'] }), { ok: false, success: false, error: { code: 'sub_agent_denied', message: 'sub_agent_denied' }, isError: true });
+    const controller = new AbortController();
+    const waiting = c.call({ action: 'state' }, { abortSignal: controller.signal });
+    controller.abort();
+    t.deepEqual(await waiting, { success: false, error: 'Stopped' });
+    release();
+    t.deepEqual(await first, { ok: true, success: true, verified: true, effect: 'unchanged', data: { path: 'Notes/A.md' } });
 });

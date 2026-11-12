@@ -1,5 +1,5 @@
 import type { App, TFile } from 'obsidian';
-import type { LeafInfo, WorkspacePort } from './index.js';
+import type { LeafIdentity, LeafInfo, WorkspacePort } from './index.js';
 
 /** Obsidian API boundary. File identity is supplied by the composition root. */
 export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile): WorkspacePort {
@@ -8,16 +8,24 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
         listLeaves: () => {
             const leaves: LeafInfo[] = [];
             workspace.iterateAllLeaves(leaf => {
-                const rawFile: unknown = 'file' in leaf.view ? leaf.view.file : null;
-                let path: string | null = null;
-                if (rawFile !== null && rawFile !== undefined) {
-                    if (typeof rawFile !== 'object' || !('path' in rawFile) || typeof rawFile.path !== 'string') throw new Error('Invalid workspace file');
-                    path = rawFile.path;
-                }
-                const title: unknown = leaf.view.getDisplayText();
-                const viewType: unknown = leaf.view.getViewType();
-                if (typeof title !== 'string' || typeof viewType !== 'string') throw new Error('Invalid workspace view');
-                leaves.push({ title, viewType, path, active: leaf === workspace.activeLeaf });
+                const active = leaf === workspace.activeLeaf;
+                try {
+                    let identity: LeafIdentity;
+                    if ('file' in leaf.view) {
+                        const viewFile: unknown = leaf.view.file;
+                        identity = viewFile !== null && typeof viewFile === 'object' && 'path' in viewFile && typeof viewFile.path === 'string' ? { kind: 'file', path: viewFile.path } : { kind: 'unknown' };
+                    } else {
+                        const state: unknown = leaf.getViewState().state;
+                        if (state !== null && typeof state === 'object' && 'file' in state) {
+                            identity = typeof state.file === 'string' ? { kind: 'file', path: state.file } : { kind: 'unknown' };
+                        } else identity = { kind: 'none' };
+                    }
+                    if (identity.kind === 'unknown') { leaves.push({ active, identity }); return; }
+                    const title: unknown = leaf.view.getDisplayText();
+                    const viewType: unknown = leaf.view.getViewType();
+                    if (typeof title !== 'string' || typeof viewType !== 'string') throw new Error('Invalid workspace view');
+                    leaves.push({ title, viewType, identity, active });
+                } catch { leaves.push({ active, identity: { kind: 'unknown' } }); }
             });
             return leaves;
         },

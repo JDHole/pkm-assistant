@@ -299,3 +299,6 @@ export function getLimits(
   }
   return out;
 }
+
+/** Maximum time one obsidian_app operation occupies its queue; it cannot cancel an in-flight port call. */
+export const OBSIDIAN_APP_OPERATION_TIMEOUT_MS = 5000;

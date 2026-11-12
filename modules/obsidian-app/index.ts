@@ -1,6 +1,9 @@
+import { sanitizePath } from '../../core/index.js';
+import { OBSIDIAN_APP_OPERATION_TIMEOUT_MS } from '../../config/limits.js';
 export { createWorkspacePort } from './workspace.js';
-/** Workspace boundary for the built-in app tool. */
-export interface LeafInfo { title: string; viewType: string; path: string | null; active: boolean }
+
+export type LeafIdentity = { kind: 'file'; path: string } | { kind: 'none' } | { kind: 'unknown' };
+export type LeafInfo = { active: boolean; identity: { kind: 'unknown' } } | { active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
 export interface WorkspacePort {
     listLeaves(): LeafInfo[];
     getActivePath(): string | null;
@@ -8,7 +11,7 @@ export interface WorkspacePort {
     openPath(path: string, options: { newTab: boolean }): Promise<void>;
 }
 export type AppAction = { action: 'state' } | { action: 'open'; path: string; newTab: boolean };
-export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable';
+export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout';
 export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown };
 export function isObsidianAppEnabled(settings: { pkmAssistant?: { obsidianAppEnabled?: boolean } }): boolean {
     return settings.pkmAssistant?.obsidianAppEnabled === true;
@@ -22,37 +25,52 @@ export function parseAction(input: unknown): AppAction | null {
     return { action: 'open', path: input.path, newTab: 'new_tab' in input && input.new_tab === true };
 }
 export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean }
-export function createAppExecutor(port: WorkspacePort) {
+const fail = (code: AppErrorCode): AppResult => ({ ok: false, success: false, error: { code, message: code } });
+export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS) {
     let queue: Promise<void> = Promise.resolve();
     return (args: Record<string, unknown>, context?: AppContext): Promise<AppResult> => {
+        if ('_invocationToolNames' in args || '_invocationSubRunContext' in args) return Promise.resolve(fail('sub_agent_denied'));
+        const action = parseAction(args);
+        if (!action) return Promise.resolve(fail('invalid_args'));
+        const aborted = () => context?.abortSignal?.aborted === true || context?.shouldAbort?.() === true;
+        if (aborted()) return Promise.resolve(fail('aborted'));
         const run = async (): Promise<AppResult> => {
-            const fail = (code: AppErrorCode): AppResult => ({ ok: false, success: false, error: { code, message: code } });
-            if ('_invocationToolNames' in args || '_invocationSubRunContext' in args) return fail('sub_agent_denied');
-            const action = parseAction(args);
-            if (!action) return fail('invalid_args');
+            if (aborted()) return fail('aborted');
             try {
                 if (action.action === 'state') {
                     const tabs = port.listLeaves().map(leaf => {
-                        let allowed = false;
-                        try { allowed = leaf.path === null || context?.authorizeFileRead?.(leaf.path).allowed === true; } catch { /* fail closed */ }
-                        return allowed ? { title: leaf.title, view_type: leaf.viewType, path: leaf.path, active: leaf.active } : { restricted: true as const, active: leaf.active };
+                        let allowed = leaf.identity.kind === 'none';
+                        if (leaf.identity.kind === 'file') {
+                            try { allowed = sanitizePath(leaf.identity.path) === leaf.identity.path && context?.authorizeFileRead?.(leaf.identity.path).allowed === true; } catch { /* fail closed */ }
+                        }
+                        if (!allowed || leaf.identity.kind === 'unknown' || !('title' in leaf)) return { restricted: true as const, active: leaf.active };
+                        return { title: leaf.title, view_type: leaf.viewType, path: leaf.identity.kind === 'file' ? leaf.identity.path : null, active: leaf.active };
                     });
-                    const activePath = port.getActivePath();
                     const activeTab = tabs.find(tab => tab.active);
-                    let activeAllowed = false;
-                    try { activeAllowed = activePath !== null && context?.authorizeFileRead?.(activePath).allowed === true; } catch { /* fail closed */ }
-                    return { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: activeTab && 'restricted' in activeTab || !activeAllowed ? null : activePath, tabs } };
+                    return { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: activeTab && 'path' in activeTab ? activeTab.path : null, tabs } };
                 }
                 if (!port.fileExists(action.path)) return fail('not_found');
                 const before = port.getActivePath();
-                if (context?.abortSignal?.aborted || context?.shouldAbort?.()) return fail('aborted');
+                if (aborted()) return fail('aborted');
                 await port.openPath(action.path, { newTab: action.newTab });
                 const verified = port.getActivePath() === action.path;
                 return { ok: true, success: true, verified, effect: verified ? (before === action.path ? 'unchanged' : 'changed') : 'unknown', data: { path: action.path } };
             } catch { return fail('unavailable'); }
         };
-        const result = queue.then(run);
-        queue = result.then(() => undefined, () => undefined);
-        return result;
+        const scheduled = queue.then(async () => {
+            if (aborted()) return fail('aborted');
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const timeout = new Promise<AppResult>(resolve => { timer = setTimeout(() => resolve(fail('timeout')), timeoutMs); });
+            try { return await Promise.race([run(), timeout]); } finally { clearTimeout(timer); }
+        });
+        queue = scheduled.then(() => undefined, () => undefined);
+        const signal = context?.abortSignal;
+        if (!signal) return scheduled;
+        return new Promise<AppResult>(resolve => {
+            const onAbort = () => resolve(fail('aborted'));
+            signal.addEventListener('abort', onAbort, { once: true });
+            if (signal.aborted) onAbort();
+            void scheduled.then(result => { signal.removeEventListener('abort', onAbort); resolve(result); });
+        });
     };
 }
