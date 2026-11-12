@@ -1,5 +1,7 @@
 # modules/tools/
 
+Wynik obrazu może używać kontraktu `kind: 'media'` z `summary` i tablicą `images` (MIME, base64 i opcjonalne wymiary). Producent zwraca wynik, czat rozpoznaje go przez `asToolMedia` i używa `mediaTextPart` oraz `toToolMessageContent`, a provider obsługuje bloki obrazu zgodnie z P1 w `modules/models/CLAUDE.md`. `generate_image` jest adaptowane do tego kontraktu bez zmiany surowego wyniku UI.
+
 2.4.6 F1: timeout planu uruchamia abort w callbacku `settle`, po zatrzaśnięciu
 porażki i blokad, przed publikacją zakończenia. Dzięki temu pierwsze powiadomienie
 prowadzącego i skrzynka rodzica dostają snapshot/handoff dotychczasowej pracy.

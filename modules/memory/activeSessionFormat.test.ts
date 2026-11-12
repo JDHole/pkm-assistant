@@ -5,6 +5,7 @@ import {
     escapeEventFieldText,
     unescapeEventFieldLabels,
     formatSessionEvent,
+    redactInlineImages,
     parseActiveSession,
     parseFrontmatter,
     parseSessionEpoch,
@@ -795,4 +796,30 @@ test('terminalne pytania przeżywają event-log, a starsze wyniki nie zmieniają
 test('uszkodzone lub nieterminalne pytanie nie blokuje odczytu wyniku', t => {
     const text = formatSessionEvent('user_message', { content: 'Dorobek', question: { text: 'Pytanie', resolution: { kind: 'answered', text: 'Tak' } } }, '2026-10-28T12:00:00.000Z');
     t.deepEqual(parseActiveSession(text).messages, [{ role: 'user', content: 'Dorobek', seq: null }]);
+});
+
+test('redakcja obrazów w zdarzeniach i po odczycie sesji', t => {
+    const timestamp = '2026-11-12T10:00:00.000Z';
+    const result = [{ type: 'text', text: 'ok' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,' + 'A'.repeat(4096) } }];
+    const original = structuredClone(result);
+    const event = formatSessionEvent('tool_result', { tool_call_id: 'c1', result }, timestamp);
+    t.true(event.includes('[image image/png ~3 kB]'));
+    t.false(event.includes('AAAA'));
+    t.false(event.includes('base64,'));
+    t.deepEqual(result, original);
+    const mcp = formatSessionEvent('mcp_call', { tool: 'generate_image', result: { success: true, format: 'png', base64: 'B'.repeat(2048) } }, timestamp);
+    t.true(mcp.includes('[image image/png ~2 kB]'));
+    t.false(mcp.includes('BBBB'));
+    const file = formatSessionEvent('user_message', { content: 'Cześć' }, timestamp) + event;
+    t.deepEqual(parseActiveSession(file).messages.map(message => message.content.includes('base64,')), [false, false]);
+    t.is(formatSessionEvent('user_message', { content: 'Cześć', seq: 1 }, timestamp),
+        '## 2026-11-12T10:00:00.000Z — user message\n\n**content:**\n\nCześć\n\n**seq:**\n\n1\n\n');
+});
+
+
+test('redactInlineImages kopiuje zagnieżdżone wartości i redaguje oba rodzaje danych', t => {
+    const input = { mime: 'image/jpeg', base64: 'C'.repeat(16), nested: ['tekst data:image/webp;base64,QUJD koniec'] };
+    const before = structuredClone(input);
+    t.deepEqual(redactInlineImages(input), { mime: 'image/jpeg', base64: '[image image/jpeg ~1 kB]', nested: ['tekst [image image/webp ~1 kB] koniec'] });
+    t.deepEqual(input, before);
 });
