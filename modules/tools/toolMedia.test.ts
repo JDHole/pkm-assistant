@@ -46,3 +46,14 @@ test('usuwa binarkę z opisu i odrzuca nieprawidłowe wymiary', t => {
     t.is(asToolMedia('generate_image', { kind: 'media', summary: 's', base64: 'QUJD', images: [{ mime: 'image/png', base64: 'QUJD', width: 0 }] }), null);
     t.deepEqual(asToolMedia('generate_image', { base64: 'QUJD', format: {} })?.images, [{ mime: 'image/png', base64: 'QUJD' }]);
 });
+
+test('opis uwzględnia toJSON, daty i tekst po data-URL', t => {
+    const raw = {
+        kind: 'media', summary: 's', meta: { toJSON() { return { base64: 'QUJD' }; } },
+        images: [{ mime: 'image/png', base64: 'QUJD' }],
+        note: 'data:image/png;base64,QUJD\nOCR total: 123 PLN', when: new Date('2026-11-12T00:00:00.000Z'),
+    };
+    const textPart = mediaTextPart('x', raw);
+    t.deepEqual(textPart, { kind: 'media', summary: 's', meta: {}, images: [{ mime: 'image/png' }], note: '[image image/png]\nOCR total: 123 PLN', when: '2026-11-12T00:00:00.000Z' });
+    t.false(JSON.stringify(textPart).includes('QUJD'));
+});

@@ -44,25 +44,15 @@ export function asToolMedia(toolName: string, raw: unknown): ToolMediaResult | n
     return null;
 }
 
-function stripBinary(value: unknown): unknown {
-    if (typeof value === 'string') {
-        if (value.startsWith('data:image/')) {
-            const mime = /^data:(image\/[A-Za-z0-9.+-]+)/.exec(value)?.[1] ?? 'image';
-            return `[image ${mime}]`;
-        }
-        return value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/g, '[image $1]');
-    }
-    if (Array.isArray(value)) return value.map(stripBinary);
-    if (!isRecord(value)) return value;
-    return Object.fromEntries(Object.entries(value)
-        .filter(([key]) => key !== 'base64')
-        .map(([key, entry]) => [key, stripBinary(entry)]));
-}
-
 /** Tworzy opis wyniku bez danych binarnych. */
 export function mediaTextPart(_toolName: string, raw: unknown): Record<string, unknown> {
     if (!isRecord(raw)) return {};
-    const cleaned = stripBinary(raw) as Record<string, unknown>;
+    const cleaned = JSON.parse(JSON.stringify(raw, (key, value: unknown) => {
+        if (key === 'base64') return undefined;
+        return typeof value === 'string'
+            ? value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/g, '[image $1]')
+            : value;
+    })) as Record<string, unknown>;
     if (raw.kind === 'media' && Array.isArray(raw.images)) {
         cleaned.images = raw.images.filter(isImage).map(({ mime, width, height }) => ({
             mime, ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }),

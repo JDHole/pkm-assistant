@@ -284,12 +284,10 @@ function sizeInKb(length: number): number {
     return Math.max(1, Math.round(length * 3 / 4 / 1024));
 }
 
-/** Redaguje obrazy i pola base64 w tekstowej wartości wyniku lub argumentów. */
+/** Redaguje obrazowe data-URL w tekstowej wartości pola. */
 export function redactInlineImages(value: string): string {
     return value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)/g,
-        (_match, mime: string, base64: string) => `[image ${mime} ~${sizeInKb(base64.length)} kB]`)
-        .replace(/"base64"\s*:\s*"([A-Za-z0-9+/=]{16,})"/g,
-            (_match, base64: string) => `"base64":"[binary ~${sizeInKb(base64.length)} kB]"`);
+        (_match, mime: string, base64: string) => `[image ${mime} ~${sizeInKb(base64.length)} kB]`);
 }
 
 function redactSessionValue(this: Record<string, unknown>, key: string, value: unknown): unknown {
@@ -298,7 +296,7 @@ function redactSessionValue(this: Record<string, unknown>, key: string, value: u
             : typeof this.format === 'string' ? `image/${this.format}` : null;
         return mime ? `[image ${mime} ~${sizeInKb(value.length)} kB]` : `[binary ~${sizeInKb(value.length)} kB]`;
     }
-    return typeof value === 'string' ? redactInlineImages(value) : value;
+    return value;
 }
 
 /**
@@ -333,9 +331,9 @@ export function formatSessionEvent(
             lines.push('**seq:**', '', String(value), '');
             return;
         }
-        const redact = label === 'result' || label === 'args';
-        const text = typeof value === 'string' ? (redact ? redactInlineImages(value) : value)
-            : JSON.stringify(value, redact ? redactSessionValue : undefined, 2);
+        const redact = !(label === 'content' && (type === 'user_message' || type === 'agent_message'));
+        const serialized = typeof value === 'string' ? value : JSON.stringify(value, redact ? redactSessionValue : undefined, 2);
+        const text = redact ? redactInlineImages(serialized) : serialized;
         lines.push(`**${label}:**`);
         lines.push('');
         lines.push(escapeEventFieldText(text));

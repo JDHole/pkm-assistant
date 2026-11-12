@@ -821,7 +821,7 @@ test('redakcja podczas serializacji zachowuje tekst rozmowy i toJSON', t => {
     const timestamp = '2026-11-12T10:00:00.000Z';
     const raw = { mime: 'image/png', base64: 'A'.repeat(2048) };
     const serialized = formatSessionEvent('tool_result', { result: JSON.stringify(raw) }, timestamp);
-    t.is(serialized, '## 2026-11-12T10:00:00.000Z — tool result\n\n**result:**\n\n{"mime":"image/png","base64":"[binary ~2 kB]"}\n\n');
+    t.is(serialized, `## 2026-11-12T10:00:00.000Z — tool result\n\n**result:**\n\n${JSON.stringify(raw)}\n\n`);
     t.is(formatSessionEvent('mcp_call', { result: raw }, timestamp), '## 2026-11-12T10:00:00.000Z — mcp call\n\n**result:**\n\n{\n  "mime": "image/png",\n  "base64": "[image image/png ~2 kB]"\n}\n\n');
     t.is(formatSessionEvent('user_message', { content: 'kod: "data:image/png;base64,QUJDQUJDQUJDQUJDQUJD"' }, timestamp), '## 2026-11-12T10:00:00.000Z — user message\n\n**content:**\n\nkod: "data:image/png;base64,QUJDQUJDQUJDQUJDQUJD"\n\n');
     const cyclic: { text: string; self?: unknown; toJSON(): { text: string } } = { text: 'ok', toJSON() { return { text: this.text }; } };
@@ -830,4 +830,33 @@ test('redakcja podczas serializacji zachowuje tekst rozmowy i toJSON', t => {
     t.is(formatSessionEvent('mcp_call', { args: { base64: 'Q'.repeat(32) } }, timestamp), '## 2026-11-12T10:00:00.000Z — mcp call\n\n**args:**\n\n{\n  "base64": "[binary ~1 kB]"\n}\n\n');
     t.is(redactInlineImages('tekst data:image/webp;base64,QUJD koniec'), 'tekst [image image/webp ~1 kB] koniec');
     t.is(raw.base64, 'A'.repeat(2048));
+});
+
+test('data-URL w zagnieżdżonych polach i round-trip, z wyjątkiem treści rozmowy', t => {
+    const timestamp = '2026-11-12T10:00:00.000Z';
+    const nested = JSON.stringify({ content: JSON.stringify({ u: 'data:image/png;base64,' + 'A'.repeat(2048) }) });
+    const calls = [{ id: 'c1', type: 'function', function: { name: 'x', arguments: JSON.stringify({ img: 'data:image/jpeg;base64,' + 'B'.repeat(1024) }) } }];
+    const result = formatSessionEvent('tool_result', { result: nested }, timestamp);
+    const agent = formatSessionEvent('agent_message', { tool_calls: calls }, timestamp);
+    const tool = formatSessionEvent('tool_result', { content: 'data:image/png;base64,' + 'D'.repeat(2048) }, timestamp);
+    t.true(result.includes('[image image/png ~2 kB]'));
+    t.false(result.includes('AAAA'));
+    t.true(agent.includes('[image image/jpeg ~1 kB]'));
+    t.false(agent.includes('BBBB'));
+    t.true(tool.includes('[image image/png ~2 kB]'));
+    t.false(tool.includes('DDDD'));
+    const restored = parseActiveSession(result + agent + tool).messages;
+    t.is(restored.length, 3);
+    t.false(JSON.stringify(restored).includes('base64,'));
+    t.true(restored[0].content.includes('[image image/png ~2 kB]'));
+    t.true(restored[1].toolCalls?.[0]?.function.arguments.includes('[image image/jpeg ~1 kB]'));
+    t.is(restored[2].content, '[image image/png ~2 kB]');
+    for (const type of ['user_message', 'agent_message']) {
+        t.is(formatSessionEvent(type, { content: 'data:image/png;base64,QUJD' }, timestamp),
+            `## ${timestamp} — ${type.replace(/_/g, ' ')}\n\n**content:**\n\ndata:image/png;base64,QUJD\n\n`);
+    }
+    const plain = JSON.stringify({ base64: 'C'.repeat(64) });
+    t.is(formatSessionEvent('tool_result', { result: plain }, timestamp), `## ${timestamp} — tool result\n\n**result:**\n\n${plain}\n\n`);
+    t.is(formatSessionEvent('mcp_call', { result: { format: 'png', base64: 'C'.repeat(2048) } }, timestamp),
+        `## ${timestamp} — mcp call\n\n**result:**\n\n{\n  "format": "png",\n  "base64": "[image image/png ~2 kB]"\n}\n\n`);
 });
