@@ -21,6 +21,8 @@ import type { ChatTab, ChatViewLike } from './chatViewShape.js';
 import type { Agent } from '../../agents/index.js';
 import type { ServerVisibilityAgent } from '../../tools/index.js';
 
+const tabSwitches = new WeakMap<ChatViewLike, object>();
+
 /**
  * Initialize chatTabs from the current active agent.
  * Called once in renderView.
@@ -102,6 +104,8 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     const targetKey = _tabKey(targetTab);
     const agentName = targetTab.agentName;
     if (currentKey === targetKey) return;
+    const switchToken = {};
+    tabSwitches.set(this, switchToken);
 
     // 0. Rozbrój dren kolejki poprzedniej zakładki. Bez uchwytu na timer (goły `setTimeout`)
     // dren wybudzałby się po przełączeniu i startował turę u agenta, który akurat jest na
@@ -235,7 +239,8 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     }
 
     // 7. Re-render messages
-    void this.render_messages();
+    let historyRender = this.render_messages();
+    const renderedWindow = this.rollingWindow;
     if (this.rollingWindow.messages.length === 0) {
         this.add_welcome_message();
     }
@@ -254,10 +259,13 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     const switchedTab = this.chatTabs.find((t: ChatTab) => _tabKey(t) === targetKey);
     if (switchedTab?._needsRefresh) {
         delete switchedTab._needsRefresh;
-        void this.render_messages();
+        historyRender = this.render_messages();
         this.scrollToFinalMessage();
     }
-    if (this.is_generating) this.showTypingIndicator();
+    if (this.is_generating) void Promise.resolve(historyRender).then(() => {
+        if (tabSwitches.get(this) === switchToken && this.chatTabs.includes(targetTab) && targetTab.isActive
+            && this.rollingWindow === renderedWindow && this.is_generating) this.showTypingIndicator();
+    });
 
     // 11. Wynik suba dla TEJ zakładki mógł przyjść, gdy była w tle - dostawca odmawiał
     // wtedy przyjęcia (auto-tura za plecami usera). Teraz zakładka jest na wierzchu, więc

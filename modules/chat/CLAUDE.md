@@ -3,7 +3,8 @@
 Przycisk nowej rozmowy zgłasza błędy operacji sesji przez Notice i zapisuje szczegóły w logu. Nieudana archiwizacja nie resetuje rozmowy.
 
 Przełączenie zakładki unieważnia współdzielone cele malowania i blok myślenia przed
-przerysowaniem historii; dla trwającej tury przywraca wskaźnik pracy. Kontynuacja w tle
+przerysowaniem historii; dla trwającej tury przywraca wskaźnik pracy po renderze, tylko
+jeśli zakładka i okno nadal są aktywne, a tura trwa. Kontynuacja w tle
 nadal nie zeruje celów aktywnej zakładki. Test A → B → A w `chat_streaming.sendTab.test.ts`
 sprawdza końcową odpowiedź w widocznym DOM i sesji.
 

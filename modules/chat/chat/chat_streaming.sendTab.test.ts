@@ -6,6 +6,7 @@ import { startEditMessage, append_message, render_messages } from './chat_messag
 import * as streaming from './chat_streaming.js';
 import { handleSaveSession, appendToActiveSession, handleNewSession, initSessionManager, handleLoadSession, _restoreActiveSession, consolidateSession } from './chat_session.js';
 import { _switchTab, _renderTabBar, _closeActiveTab } from './chat_tabs.js';
+import { SkinManager, setSvg } from '../../crystal-soul/index.js';
 import { AgentMemory } from '../../memory/index.js';
 import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
@@ -99,6 +100,13 @@ function installSendListeners(view: unknown) {
     new Function('HUMAN_MESSAGE_META', 'cancelMessageEdit', code).call(view, HUMAN_MESSAGE_META, cancelMessageEdit);
     const globalCode = render.body.statements.filter(s => /this.handleGlobalKeydownBound =|document.addEventListener\('keydown'/.test(s.getText(source))).map(s => s.getText(source)).join('\n');
     new Function(ts.transpile(globalCode)).call(view);
+}
+
+function installTypingIndicator(view: unknown) {
+    const source = ts.createSourceFile('chat_ui.ts', readFileSync(new URL('./chat_ui.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    const methods = source.statements.filter(s => ts.isFunctionDeclaration(s) && ['showTypingIndicator', 'hideTypingIndicator', 'updateTypingStatus'].includes(s.name?.text || ''));
+    const code = ts.transpile(methods.map(s => s.getText(source).replace(/^export /, '')).join('\n') + '\nObject.assign(this, { showTypingIndicator, hideTypingIndicator, updateTypingStatus });');
+    new Function('SkinManager', 'setSvg', 't', code).call(view, SkinManager, setSvg, translate);
 }
 
 async function fixture(newSession = false, tabNames = ['A', 'B']) {
@@ -464,8 +472,10 @@ test.serial('B1: powrót A przed końcem kontynuacji pokazuje odpowiedź', async
         return append(...args);
     };
     let calls = 0;
+    let rendered: Promise<void> = Promise.resolve();
+    installTypingIndicator(f.view);
     Object.assign(f.view, {
-        render_messages,
+        render_messages() { rendered = render_messages.call(f.view as never); return rendered; },
         _drawConnectorLines() {},
         get_chat_model: () => ({ providerId: 'openai', stream(_payload: unknown, cb: { chunk(value: unknown): void; done(value: unknown): void }) {
             if (++calls === 1) {
@@ -485,11 +495,48 @@ test.serial('B1: powrót A przed końcem kontynuacji pokazuje odpowiedź', async
     releaseJournal.resolve();
     await Promise.race([modelEntered.promise, run.then(() => { throw new Error('Nie osiągnięto kontynuacji modelu'); })]);
     await f.clickA();
+    await rendered;
+    const lastClass = Array.from(f.view.messages_container.children).at(-1)?.className;
     releaseModel.resolve();
     await run;
+    t.is(lastClass, 'cs-typing');
     const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
     t.is(texts(f.view.messages_container).find(text => text === 'Gotowa odpowiedź A'), 'Gotowa odpowiedź A');
     t.is((await f.memory.loadActiveSession(f.tabs[0].sessionPath)).messages.at(-1)?.content, 'Gotowa odpowiedź A');
+});
+
+for (const action of ['switch', 'finish'] as const) test.serial(`B1b: ${action} podczas renderu nie przywraca wskaźnika`, async t => {
+    const f = await fixture();
+    t.teardown(() => f.view.attachmentManager.destroy());
+    const modelEntered = deferred(), releaseModel = deferred(), renderEntered = deferred(), releaseRender = deferred();
+    installTypingIndicator(f.view);
+    let holdRender = false;
+    Object.assign(f.view, {
+        async render_messages() {
+            f.view.messages_container.empty();
+            f.view.messages_container.createDiv({ cls: 'history', text: 'Historia' });
+            if (holdRender) { holdRender = false; renderEntered.resolve(); await releaseRender.promise; }
+        },
+        get_chat_model: () => ({ providerId: 'openai', stream(_payload: unknown, cb: { done(value: unknown): void }) {
+            modelEntered.resolve();
+            void releaseModel.promise.then(() => cb.done({ choices: [{ message: { role: 'assistant', content: 'Gotowe A' } }] }));
+        } }),
+    });
+    f.view.input_area.value = 'Pytanie A';
+    const run = f.clickSend();
+    await modelEntered.promise;
+    await f.clickB();
+    holdRender = true;
+    await f.clickA();
+    await renderEntered.promise;
+    if (action === 'switch') await f.clickB();
+    else { releaseModel.resolve(); await run; }
+    releaseRender.resolve();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const classes = Array.from(f.view.messages_container.children).map(el => el.className);
+    releaseModel.resolve();
+    await run;
+    t.deepEqual(classes, action === 'switch' ? ['history'] : ['history', 'cs-message cs-message--agent']);
 });
 
 for (const stage of ['agent_message', 'tool_result', 'compression', 'skill_nudge', 'delegate_nudge', 'queued_add', 'queued_event', 'tile_render'] as const) test.serial(`F2: kontynuacja narzędzia przy ${stage} nie maluje w B`, async t => {
