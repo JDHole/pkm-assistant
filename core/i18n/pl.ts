@@ -1626,7 +1626,7 @@ export const pl: Record<string, string> = {
   'settings.obsidian_app_enabled': 'Nawigacja Obsidiana',
   'settings.obsidian_app_enabled_desc': 'Pozwala sprawdzać stan i nawigować. Zmiana wymaga przeładowania pluginu.',
   'mcp.server.app.desc': 'Stan i nawigacja obszaru roboczego Obsidiana.',
-  'mcp.obsidian_app.desc': 'Sprawdź karty obszaru roboczego lub otwórz plik vaulta.',
+  'mcp.obsidian_app.desc': 'Sprawdź karty, otwórz plik vaulta lub zrób zrzut okna. Zrzut wymaga zgody i trafia do wybranego dostawcy modelu.',
   'tool.obsidian_app': 'Obsidian',
   'chat.tool_status.obsidian_app': 'Sprawdzanie obszaru roboczego',
   'chat.tile.tool.obsidian_app': 'Obsidian',

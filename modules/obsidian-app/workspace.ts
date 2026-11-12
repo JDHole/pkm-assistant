@@ -9,8 +9,15 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
             const leaves: LeafInfo[] = [];
             workspace.iterateAllLeaves(leaf => {
                 const active = leaf === workspace.getMostRecentLeaf();
+                let visible: boolean | 'unknown' = 'unknown';
                 try {
-                    if (leaf.isDeferred) { leaves.push({ active, identity: { kind: 'unknown' } }); return; }
+                    if (leaf.isDeferred === true) { leaves.push({ active, visible: false, identity: { kind: 'unknown' } }); return; }
+                    const container: unknown = leaf.view.containerEl;
+                    if (container && typeof container === 'object' && 'isShown' in container && typeof container.isShown === 'function') {
+                        const isShown = container.isShown as () => unknown;
+                        const shown = isShown.call(container);
+                        if (typeof shown === 'boolean') visible = shown;
+                    }
                     let identity: LeafIdentity = { kind: 'none' };
                     const state: unknown = leaf.getViewState().state;
                     if (state !== null && typeof state === 'object' && 'file' in state) {
@@ -23,12 +30,12 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                             else identity = { kind: 'file', path: viewFile.path };
                         } else identity = { kind: 'unknown' };
                     }
-                    if (identity.kind === 'unknown') { leaves.push({ active, identity }); return; }
+                    if (identity.kind === 'unknown') { leaves.push({ active, visible, identity }); return; }
                     const viewType: unknown = leaf.view.getViewType();
                     const title: unknown = identity.kind === 'none' ? leaf.view.getDisplayText() : '';
                     if (typeof title !== 'string' || typeof viewType !== 'string') throw new Error('Invalid workspace view');
-                    leaves.push({ title, viewType, identity, active });
-                } catch { leaves.push({ active, identity: { kind: 'unknown' } }); }
+                    leaves.push({ title, viewType, identity, active, visible });
+                } catch { leaves.push({ active, visible: 'unknown', identity: { kind: 'unknown' } }); }
             });
             return leaves;
         },

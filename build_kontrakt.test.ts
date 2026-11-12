@@ -29,15 +29,27 @@ const releaseSource = read('release.js');
 /** Wzorzec, którym DWA niezależne testy w `core/` czytają listę `external` z esbuild.js. */
 const ESBUILD_EXTERNAL_REGEX = /external:\s*\[([\s\S]*?)\]/;
 
-// ── Literał external: obsidian jest, electron nie wraca ──────────────────────────────
+// ── Electron w external tylko z jedynym konsumentem portu zrzutu ─────────────────────
 
-test('esbuild.js ma literal external z obsidian i bez electron', t => {
+test('external zawiera electron wtedy i tylko wtedy, gdy używa go port zrzutu', t => {
     const match = ESBUILD_EXTERNAL_REGEX.exec(esbuildSource);
     t.truthy(match, 'esbuild.js nie ma bloku external: [...] jako literal - dwa strażniki w core/ oślepną');
 
     const list = [...(match ? match[1] : '').matchAll(/['"]([^'"]+)['"]/g)].map(m => m[1]);
     t.true(list.includes('obsidian'), 'lista external musi zawierac "obsidian"');
-    t.false(list.includes('electron'), 'electron zszedl z listy razem ze swoim jedynym konsumentem i nie wraca');
+    const consumers: string[] = [];
+    const scan = (dir: string) => {
+        for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+            const path = join(dir, entry.name);
+            if (entry.isDirectory()) scan(path);
+            else if (/\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) {
+                for (const _match of read(path).matchAll(/\brequire\s*\(\s*['"]electron['"]\s*\)/g)) consumers.push(path);
+            }
+        }
+    };
+    scan('src'); scan('modules');
+    t.true(consumers.length === 0 || (consumers.length === 1 && consumers[0] === 'src/main.ts'), 'electron może mieć tylko jednego konsumenta: port zrzutu w src/main.ts');
+    t.is(list.includes('electron'), consumers.length === 1, 'electron musi być w external dokładnie wtedy, gdy istnieje jego konsument');
 });
 
 // ── Strażnik `new Function` (Ajv) w bundlu — esbuild.js musi go mieć, uruchomiony PRZED deployem ──

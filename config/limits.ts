@@ -302,3 +302,7 @@ export function getLimits(
 
 /** Maximum time one obsidian_app operation occupies its queue; it cannot cancel an in-flight port call. */
 export const OBSIDIAN_APP_OPERATION_TIMEOUT_MS = 5000;
+
+/** Screenshot JPEG limits: maximum long edge in pixels and encoded bytes. */
+export const OBSIDIAN_APP_SCREENSHOT_MAX_EDGE = 1568;
+export const OBSIDIAN_APP_SCREENSHOT_MAX_BYTES = 1_500_000;

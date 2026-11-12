@@ -1012,6 +1012,7 @@ export class MCPClient {
             //    narzędzia pamięci, które mają WŁASNĄ bramkę, patrz `isMemoryTool` niżej).
             let actionType = ACTION_TYPE_MAP[toolCall.name] || 'unknown';
             if (toolCall.name === 'obsidian_app' && argsWithContext.action === 'state') actionType = 'app.state';
+            if (toolCall.name === 'obsidian_app' && argsWithContext.action === 'screenshot') actionType = 'app.screenshot';
             // Narzędzia zewnętrznych serwerów MCP (ExternalMcpManager) → akcja `external.call`.
             // Bez tego actionType zostałby 'unknown' → checkPermission zrobiłby fail-closed deny.
             if (actionType === 'unknown' && this.plugin.externalMcpManager) {

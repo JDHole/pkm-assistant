@@ -98,6 +98,7 @@ export const PERMISSION_TYPES = {
  */
 const NON_VAULT_TARGET_ACTIONS = new Set([
     'app.state',
+    'app.screenshot',
     'web.search',
     'web.read',
     'agent.message',
@@ -108,6 +109,7 @@ const NON_VAULT_TARGET_ACTIONS = new Set([
 // Bez `export` - zero konsumentów poza tym plikiem; w tym pliku zostaje żywy w checkPermission().
 const ACTION_PERMISSIONS: Record<string, string | undefined> = {
     'app.state': PERMISSION_TYPES.READ_NOTES,
+    'app.screenshot': PERMISSION_TYPES.READ_NOTES,
     'app.open': PERMISSION_TYPES.READ_NOTES,
     'vault.read': PERMISSION_TYPES.READ_NOTES,
     'vault.write': PERMISSION_TYPES.EDIT_NOTES,
@@ -356,6 +358,8 @@ export class PermissionSystem {
         riskContext: ApprovalRiskContext = {},
     ): boolean {
         const mode = normalizeAutonomy(autonomy);
+
+        if (action === 'app.screenshot') return true;
 
         // yolo — nie pytamy o nic.
         if (mode === 'yolo') return false;

@@ -1621,7 +1621,7 @@ export const en: Record<string, string> = {
   'settings.obsidian_app_enabled': 'Obsidian app navigation',
   'settings.obsidian_app_enabled_desc': 'Allow workspace state and navigation. Reload the plugin to apply.',
   'mcp.server.app.desc': 'Obsidian workspace state and navigation.',
-  'mcp.obsidian_app.desc': 'Inspect workspace tabs or open a vault file.',
+  'mcp.obsidian_app.desc': 'Inspect workspace tabs, open a vault file, or capture the window. Screenshots require approval and are sent to the selected model provider.',
   'tool.obsidian_app': 'Obsidian app',
   'chat.tool_status.obsidian_app': 'Checking Obsidian workspace',
   'chat.tile.tool.obsidian_app': 'Obsidian app',

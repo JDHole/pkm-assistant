@@ -130,6 +130,8 @@ From there, create unlimited custom agents with their own personalities, roles, 
 
 **Your content goes only to providers you configure.** When you use chat, semantic search indexing, web search, speech-to-text, or image generation, the relevant content (chat messages, note excerpts, attachments, search queries, audio) is sent to the provider you explicitly selected in settings. Until you configure a provider and use a feature, nothing leaves your vault.
 
+When the Obsidian app tool is enabled and you approve a screenshot, the Obsidian window image is sent to your selected model provider.
+
 Depending on your configuration, the plugin can connect to:
 
 - **Chat models:** Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, OpenRouter, xAI - or local Ollama / LM Studio (`localhost`).

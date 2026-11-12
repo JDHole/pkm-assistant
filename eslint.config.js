@@ -158,6 +158,11 @@ export default [
     },
   },
   {
+    // Register the rule referenced by the desktop capture port's targeted directive.
+    files: ['src/main.ts'],
+    plugins: { '@typescript-eslint': tseslint.plugin },
+  },
+  {
     files: ['modules/**/*.{js,ts}', 'src/**/*.{js,ts}', 'config/**/*.{js,ts}', 'utils/**/*.{js,ts}'],
     ignores: ['**/*.test.js', '**/*.test.ts'],
     languageOptions: {

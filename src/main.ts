@@ -37,7 +37,7 @@ import { ChatView } from "../modules/chat/index.js";
 import type { AgentsPlugin } from "../modules/agents/index.js";
 import type { ChatViewLike } from "../modules/chat/index.js";
 import { AgentManager } from "../modules/agents/index.js";
-import { createWorkspacePort, isObsidianAppEnabled } from "../modules/obsidian-app/index.js";
+import { createCapturePort, createWorkspacePort, isObsidianAppEnabled } from "../modules/obsidian-app/index.js";
 import { isKomunikatorEnabled, registerKomunikatorCleanup } from "../modules/komunikator/index.js";
 // Obsidianowe bebechy core/ (PluginBase, runtime/PluginRuntime, utils/obsidianNav,
 // security/MasterPasswordModal) deep-importuje TYLKO ten plik - jako composition root.
@@ -811,7 +811,10 @@ export default class PkmAssistantPlugin extends PluginBase {
       if (obsidianAppEnabled) {
         this.toolRegistry.registerTool(createObsidianAppTool(createWorkspacePort(
           this.app, (value): value is Obsidian.TFile => value instanceof Obsidian.TFile,
-        )));
+        ), createCapturePort(() => {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only capture port, result validated as unknown in modules/obsidian-app (plan 11.2 pkt 3)
+          return require('electron');
+        })));
       }
       // Artefakty żywe (gatunek 1). Stare chat_todo/idea_review/plan_review skasowane (aliasy).
       this.toolRegistry.registerTool(createArtifactCreateTool());

@@ -1,25 +1,29 @@
 import { CHAT_VIEW_TYPE, sanitizePath } from '../../core/index.js';
 import { OBSIDIAN_APP_OPERATION_TIMEOUT_MS } from '../../config/limits.js';
 export { createWorkspacePort } from './workspace.js';
+export { createCapturePort } from './capture.js';
+import { encodeCapture } from './capture.js';
+import type { CapturePort } from './capture.js';
+export type { CapturePort, CapturedFrame } from './capture.js';
 
 export type LeafIdentity = { kind: 'file'; path: string } | { kind: 'none' } | { kind: 'unknown' };
-export type LeafInfo = { active: boolean; identity: { kind: 'unknown' } } | { active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
+export type LeafInfo = { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'unknown' } } | { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
 export interface WorkspacePort {
     listLeaves(): LeafInfo[];
     getActivePath(): string | null;
     fileExists(path: string): boolean;
     openPath(path: string, options: { newTab: boolean }): Promise<void>;
 }
-export type AppAction = { action: 'state' } | { action: 'open'; path: string; newTab: boolean };
-export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy';
-export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown };
+export type AppAction = { action: 'state' } | { action: 'screenshot' } | { action: 'open'; path: string; newTab: boolean };
+export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large';
+export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown } | { ok: true; success: true; verified: true; effect: 'unchanged'; kind: 'media'; summary: string; images: { mime: 'image/jpeg'; base64: string; width: number; height: number }[] };
 export function isObsidianAppEnabled(settings: { pkmAssistant?: { obsidianAppEnabled?: boolean } }): boolean {
     return settings.pkmAssistant?.obsidianAppEnabled === true;
 }
 export function parseAction(input: unknown): AppAction | null {
     if (!input || typeof input !== 'object') return null;
     if (!('action' in input)) return null;
-    if (input.action === 'state') return { action: 'state' };
+    if (input.action === 'state' || input.action === 'screenshot') return { action: input.action };
     if (input.action !== 'open' || !('path' in input) || typeof input.path !== 'string' || !input.path.trim()) return null;
     if ('new_tab' in input && typeof input.new_tab !== 'boolean') return null;
     return { action: 'open', path: input.path, newTab: 'new_tab' in input && input.new_tab === true };
@@ -30,7 +34,7 @@ const FILELESS_VIEWS = new Set(['graph', 'search', 'file-explorer', 'bookmarks',
 function authorizedPath(path: string | null, authorize?: AppContext['authorizeFileRead']): path is string {
     try { return path !== null && sanitizePath(path) === path && authorize?.(path).allowed === true; } catch { return false; }
 }
-export function discloseLeaf(leaf: LeafInfo, authorize?: AppContext['authorizeFileRead']) {
+export function discloseLeaf(leaf: Omit<LeafInfo, 'visible'> | LeafInfo, authorize?: AppContext['authorizeFileRead']) {
     const restricted = { restricted: true as const, active: leaf.active };
     try {
         if (leaf.identity.kind === 'unknown' || !('title' in leaf)) return restricted;
@@ -45,7 +49,7 @@ export function discloseLeaf(leaf: LeafInfo, authorize?: AppContext['authorizeFi
         return { title: leaf.title, view_type: leaf.viewType, path: null, active: leaf.active };
     } catch { return restricted; }
 }
-export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS) {
+export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS, capturePort: CapturePort | null = null) {
     let queue: Promise<void> = Promise.resolve();
     let suspended = false;
     return (args: Record<string, unknown>, context?: AppContext): Promise<AppResult> => {
@@ -64,13 +68,21 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                     const activeFile = port.getActivePath();
                     return { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: activeTab && 'path' in activeTab ? activeTab.path : null, active_file: authorizedPath(activeFile, context?.authorizeFileRead) ? activeFile : null, tabs } };
                 }
+                if (action.action === 'screenshot') {
+                    if (port.listLeaves().some(leaf => leaf.visible !== false && 'restricted' in discloseLeaf(leaf, context?.authorizeFileRead))) return fail('restricted_content_visible');
+                    if (aborted()) return fail('aborted');
+                    if (!capturePort) return fail('capture_unavailable');
+                    const image = await encodeCapture(await capturePort.capture());
+                    if (!image) return fail('too_large');
+                    return { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: `Obsidian window screenshot ${image.width}x${image.height}`, images: [image] };
+                }
                 if (!port.fileExists(action.path)) return fail('not_found');
                 const before = port.getActivePath();
                 if (aborted()) return fail('aborted');
                 await port.openPath(action.path, { newTab: action.newTab });
                 const verified = port.getActivePath() === action.path;
                 return { ok: true, success: true, verified, effect: verified ? (before === action.path ? 'unchanged' : 'changed') : 'unknown', data: { path: action.path } };
-            } catch { return fail('unavailable'); }
+            } catch { return fail(action.action === 'screenshot' ? 'capture_unavailable' : 'unavailable'); }
         };
         const scheduled = queue.then(async () => {
             if (aborted()) return fail('aborted');

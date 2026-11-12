@@ -12,7 +12,7 @@ async function loadPublicEntries() {
             contents: "export {default as Plugin} from './src/main.ts'; export {setLocale} from './core/i18n/index.ts'; export {PromptBuilder} from './modules/prompts/PromptBuilder.ts';",
             resolveDir: process.cwd(), sourcefile: 'inline-comment-entry.ts',
         },
-        bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent',
+        bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent', external: ['electron'],
         plugins: [{ name: 'test-assets', setup(build) {
             build.onResolve({ filter: /^obsidian$/ }, () => ({ path: obsidianStub }));
             build.onResolve({ filter: /\.(css|md)$/ }, args => ({ path: path.resolve(args.resolveDir, args.path), namespace: 'text-asset' }));
