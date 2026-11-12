@@ -14,6 +14,7 @@
  * commita, treść przybywa później.
  */
 import test from 'ava';
+import ts from 'typescript';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,27 +30,25 @@ const releaseSource = read('release.js');
 /** Wzorzec, którym DWA niezależne testy w `core/` czytają listę `external` z esbuild.js. */
 const ESBUILD_EXTERNAL_REGEX = /external:\s*\[([\s\S]*?)\]/;
 
-// Strip comments while preserving quoted strings and their escapes, so commented imports
-// cannot satisfy the guard. Template literals are treated as strings as well.
 function electronReferences(source: string): number {
-    let clean = ''; let quote = ''; let line = false; let block = false;
-    for (let i = 0; i < source.length; i++) {
-        const c = source[i]; const n = source[i + 1];
-        if (line) { if (c === '\n') { line = false; clean += '\n'; } else clean += ' '; continue; }
-        if (block) { if (c === '*' && n === '/') { block = false; clean += '  '; i++; } else clean += c === '\n' ? '\n' : ' '; continue; }
-        if (quote) { clean += c; if (c === '\\' && i + 1 < source.length) clean += source[++i]; else if (c === quote) quote = ''; continue; }
-        if (c === '/' && n === '/') { line = true; clean += '  '; i++; continue; }
-        if (c === '/' && n === '*') { block = true; clean += '  '; i++; continue; }
-        if (c === "'" || c === '"' || c === '`') quote = c;
-        clean += c;
-    }
-    return [...clean.matchAll(/\b(?:require\s*\(\s*['"]electron['"]\s*\)|import\s*\(\s*['"]electron['"]\s*\)|import\s+(?:[^;\n]*?\s+from\s+)?['"]electron['"])/g)].length;
+    const file = ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true);
+    let count = 0;
+    const visit = (node: ts.Node): void => {
+        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text === 'electron') count++;
+        if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) && node.moduleReference.expression && ts.isStringLiteral(node.moduleReference.expression) && node.moduleReference.expression.text === 'electron') count++;
+        if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require')) && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'electron') count++;
+        ts.forEachChild(node, visit);
+    };
+    visit(file);
+    return count;
 }
 
-test('electron scanner ignores comments and counts imports', t => {
+test('electron scanner ignores text and counts AST consumers', t => {
     t.is(electronReferences("// require('electron')\n/* import x from 'electron' */"), 0);
-    t.is(electronReferences("import x from 'electron'"), 1);
-    t.is(electronReferences("import('electron'); require(\"electron\")"), 2);
+    t.is(electronReferences(`const text = "require('electron')"`), 0);
+    t.is(electronReferences("import {\n x\n} from 'electron'"), 1);
+    t.is(electronReferences(`import('electron'); require("electron")`), 2);
+    t.is(electronReferences("import x = require('electron')"), 1);
 });
 
 // ── Electron w external tylko z jedynym konsumentem portu zrzutu ─────────────────────

@@ -1,10 +1,11 @@
 import type { App, TFile } from 'obsidian';
 import type { LeafIdentity, LeafInfo, WorkspacePort } from './index.js';
 
-// Dynamic queries and backlinks may display arbitrary files outside the source note.
-const BLOCKED_SELECTORS = ['.block-language-dataview', '.dataview', '.block-language-dataviewjs', '.block-language-query', '.embedded-backlinks'];
-const OVERLAY_SELECTORS = ['.modal-container', '.hover-popover', '.popover', '.menu', '.suggestion-container'];
-const EMBED_SELECTORS = '.internal-embed, .markdown-embed, .file-embed, .image-embed';
+// Extend only after proving that a renderer cannot disclose external content.
+const SAFE_RENDERERS = new Set<string>();
+const RENDERER_SELECTORS = '[class*="block-language-"], .internal-query, .cm-lang-query, .cm-preview-code-block, .dataview, .dataview-container';
+const OVERLAY_SELECTORS = ['.modal-container', '.hover-popover', '.popover', '.menu', '.suggestion-container', '.tooltip', '.prompt'];
+const EMBED_SELECTORS = '.internal-embed, .markdown-embed, .file-embed, .image-embed, .pdf-embed, .media-embed, .cm-embed-block';
 
 /** Obsidian API boundary. File identity is supplied by the composition root. */
 export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile): WorkspacePort {
@@ -55,18 +56,31 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                 const win = doc.defaultView;
                 if (!win) return { kind: 'none' };
                 const bounds = content.getBoundingClientRect();
-                const x = Math.max(0, Math.ceil(bounds.left));
-                const y = Math.max(0, Math.ceil(bounds.top));
-                const right = Math.min(win.innerWidth, Math.floor(bounds.right));
-                const bottom = Math.min(win.innerHeight, Math.floor(bounds.bottom));
-                if (![x, y, right, bottom].every(Number.isSafeInteger) || right <= x || bottom <= y) return { kind: 'none' };
-                const overlays = OVERLAY_SELECTORS.filter(selector => Array.from(doc.querySelectorAll<HTMLElement>(selector)).some(el => el.isShown()));
-                const blocked = BLOCKED_SELECTORS.filter(selector => content.querySelector(selector));
+                const x = Math.max(0, bounds.left);
+                const y = Math.max(0, bounds.top);
+                const right = Math.min(win.innerWidth, bounds.right);
+                const bottom = Math.min(win.innerHeight, bounds.bottom);
+                if (![x, y, right, bottom, win.innerWidth, win.innerHeight].every(Number.isFinite) || right <= x || bottom <= y) return { kind: 'none' };
+                const overlays = OVERLAY_SELECTORS.filter(selector => doc.querySelectorAll(selector).length > 0);
+                const blocked: string[] = [];
+                for (const el of Array.from(content.querySelectorAll<HTMLElement>(RENDERER_SELECTORS))) {
+                    const classes = Array.from(el.classList).filter(name => name.startsWith('block-language-'));
+                    if (classes.length !== 1 || !SAFE_RENDERERS.has(classes[0].slice('block-language-'.length))) blocked.push('renderer');
+                }
+                for (const el of Array.from(content.querySelectorAll<HTMLElement>('.embedded-backlinks'))) {
+                    const display: unknown = win.getComputedStyle(el).display;
+                    const height: unknown = el.getBoundingClientRect().height;
+                    if (typeof display !== 'string' || !display || typeof height !== 'number' || !Number.isFinite(height) || height < 0) throw new Error('Invalid backlinks');
+                    if (display !== 'none' && (el.querySelectorAll('.search-result, .tree-item').length > 0 || height > 0)) blocked.push('backlinks');
+                }
                 const source = info.identity.kind === 'file' ? info.identity.path : '';
                 const embeds = Array.from(content.querySelectorAll<HTMLElement>(EMBED_SELECTORS)).map(el => {
+                    const parent = el.parentElement?.closest(EMBED_SELECTORS);
+                    if (parent && content.contains(parent)) return null;
                     const src: unknown = el.getAttribute('src');
                     if (typeof src !== 'string' || !src) return null;
                     const linkpath = src.split('#')[0].split('|')[0];
+                    if (!linkpath) return null;
                     const dest: unknown = app.metadataCache.getFirstLinkpathDest(linkpath, source);
                     return isFile(dest) && typeof dest.path === 'string' ? dest.path : null;
                 });

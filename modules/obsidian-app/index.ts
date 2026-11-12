@@ -56,7 +56,7 @@ export function decideCapture(target: CaptureTarget, authorize?: AppContext['aut
     if (target.kind === 'none') return { kind: 'error', code: 'no_capturable_view' };
     const leaf = discloseLeaf(target.leaf, authorize);
     const rect = target.rect;
-    if (!target.leaf.active || target.leaf.visible !== true || !('path' in leaf) || !leaf.path || !['markdown', 'pdf', 'image'].includes(leaf.view_type) || ![rect.x, rect.y, rect.width, rect.height].every(Number.isSafeInteger) || rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0) return { kind: 'error', code: 'no_capturable_view' };
+    if (!target.leaf.active || target.leaf.visible !== true || !('path' in leaf) || !leaf.path || !['markdown', 'pdf', 'image'].includes(leaf.view_type) || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0) return { kind: 'error', code: 'no_capturable_view' };
     if (target.overlays.length) return { kind: 'error', code: 'overlay_visible' };
     if (target.blocked.length || target.embeds.some(path => !authorizedPath(path, authorize))) return { kind: 'error', code: 'restricted_content_visible' };
     return { kind: 'ok', rect };

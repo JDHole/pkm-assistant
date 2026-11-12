@@ -222,7 +222,7 @@ test('screenshot capture validates, resizes and delivers media without disk writ
     const { asToolMedia, mediaTextPart, toToolMessageContent } = await import('./toolMedia.js');
     const sizes: unknown[] = []; const qualities: number[] = [];
     const frame = { getSize: () => ({ width: 3000, height: 2000 }), resize: (size: unknown) => { sizes.push(size); return frame; }, toJPEG: (q: number) => { qualities.push(q); return Buffer.from('abc'); } };
-    const capture = createCapturePort(() => ({ remote: { getCurrentWebContents: () => ({ capturePage: async () => frame }) } }));
+    const capture = createCapturePort(() => ({ remote: { getCurrentWebContents: () => ({ getZoomFactor: () => 1, capturePage: async () => frame }) } }));
     const writes: string[] = [];
     const vault = { write: () => writes.push('write'), create: () => writes.push('create'), createBinary: () => writes.push('createBinary') };
     const workspace = { describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 300, y: 80, width: 900, height: 700 }, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };

@@ -15,11 +15,17 @@ export function createCapturePort(loadElectron: () => unknown): CapturePort | nu
         if (!record(electron) || !record(electron.remote) || typeof electron.remote.getCurrentWebContents !== 'function') return null;
         const getContents = electron.remote.getCurrentWebContents as () => unknown;
         const contents = getContents.call(electron.remote);
-        if (!record(contents) || typeof contents.capturePage !== 'function') return null;
+        if (!record(contents) || typeof contents.capturePage !== 'function' || typeof contents.getZoomFactor !== 'function') return null;
+        const getZoomFactor = contents.getZoomFactor as () => unknown;
         const capturePage = contents.capturePage as (rect: CaptureRect) => Promise<unknown>;
         return { capture: rect => {
-            if (![rect.x, rect.y, rect.width, rect.height].every(Number.isSafeInteger) || rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0) throw new Error('Invalid capture rectangle');
-            return capturePage.call(contents, rect);
+            if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0) throw new Error('Invalid capture rectangle');
+            const zoom = getZoomFactor.call(contents);
+            if (typeof zoom !== 'number' || !Number.isFinite(zoom) || zoom <= 0) throw new Error('Invalid zoom');
+            const x = Math.ceil(rect.x * zoom); const y = Math.ceil(rect.y * zoom);
+            const right = Math.floor((rect.x + rect.width) * zoom); const bottom = Math.floor((rect.y + rect.height) * zoom);
+            if (![x, y, right, bottom].every(Number.isSafeInteger) || right <= x || bottom <= y) throw new Error('Invalid scaled rectangle');
+            return capturePage.call(contents, { x, y, width: right - x, height: bottom - y });
         } };
     } catch { return null; }
 }
