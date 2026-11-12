@@ -3,7 +3,7 @@
 **Audio + Image + Vision** (neutralne, generic). 3 obszary:
 - **Audio STT** (Speech-to-Text) - 6 platform (`SttAdapter`)
 - **Image Gen** - 6 platform (OpenRouter, DALL-E 3, Stability AI, Replicate Flux, Gemini Imagen 3, xAI)
-- **Vision INPUT** - detektor modelu multimodalnego (`_is_model_multimodal()` w `modules/models/`), auto-strip images dla non-vision
+- **Vision INPUT** - detektor modelu multimodalnego (`isVisionModel()` w `modules/models/`), auto-strip images dla non-vision
 
 Image Gen ma wyłącznie platformy chmurowe - zero lokalnego generatora, zero workflow builderów.
 
@@ -51,7 +51,7 @@ Cały moduł jest w TypeScripcie. **Specifiery importów zostają z `.js`** (kon
 
 Plus **typy** (`export type` - zero emitu): `SttKeys`, `Transcription`, `ImageGenKeys`, `ImageGenParams`, `GeneratedImage`, `ImageGenPlatform`, `AudioRecorderOptions`, `ImageUrlBlock`, `ActiveNoteContext`.
 
-**Vision INPUT detection (`_is_model_multimodal`)** żyje w `modules/models/adapters/chat_adapter_base.ts`. To detekcja per-model, nie operacja multimodalna.
+**Vision INPUT detection (`isVisionModel`)** żyje w `modules/models/capabilities.ts`. To detekcja per-model, nie operacja multimodalna; rozpoznaje m.in. rodzinę `gpt-5`.
 
 ---
 
@@ -69,14 +69,14 @@ Plus **typy** (`export type` - zero emitu): `SttKeys`, `Transcription`, `ImageGe
 - (`AddTextToImageTool.ts` nie używa multimodal - operuje na obrazie już istniejącym)
 
 **Splot z innymi modułami (luźny):**
-- `modules/models/` - `_is_model_multimodal()` żyje tam (vision detection per-model, nie operacja multimodalna)
+- `modules/models/` - `isVisionModel()` żyje tam (vision detection per-model, nie operacja multimodalna)
 
 ---
 
 ## Kluczowe decyzje
 
 - **Tylko generyczne image gen.** Moduł nie ma żadnego splotu z lokalnym generatorem obrazów - dispatch to 6 platform chmurowych i tyle.
-- **Vision INPUT detekcja w `modules/models/`** - `_is_model_multimodal()` nie jest tutaj, bo to jest detekcja czy model wspiera vision (per-model decision), a nie operacja multimodalna.
+- **Vision INPUT detekcja w `modules/models/`** - `isVisionModel()` nie jest tutaj, bo to jest detekcja czy model wspiera vision (per-model decision), a nie operacja multimodalna.
 - **`_buildFormData()` zwraca `{body, boundary}`**: Stability AI + niektóre platformy potrzebują explicit Content-Type z boundary. Inaczej upload zawisał.
 
 ---
@@ -99,4 +99,4 @@ Plus **typy** (`export type` - zero emitu): `SttKeys`, `Transcription`, `ImageGe
 
 ## Powiązane
 
-- `modules/models/CLAUDE.md` - `_is_model_multimodal()` detekcja vision
+- `modules/models/CLAUDE.md` - `isVisionModel()` detekcja vision

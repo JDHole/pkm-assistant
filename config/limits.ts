@@ -158,8 +158,8 @@ export const DEFAULT_LIMITS = {
   // Watchdog martwego streamu czatu (ms): ile ciszy modelu (zero chunków) tolerujemy,
   // zanim tura zostanie przerwana tą samą ścieżką co ręczny Stop (chat_streaming
   // `_onStreamStall`). Licznik startuje z wywołaniem modelu, resetuje go każdy chunk
-  // i NIE biegnie podczas wykonywania narzędzi (osobna warstwa: modules/tools/
-  // server_timeout.js 60/180 s). 0 = wyłączony. Default 120 s — modele reasoning
+  // i NIE biegnie podczas wykonywania narzędzi (serwery zewnętrzne mają osobny
+  // timeout server_timeout.js 60/180 s; wbudowane nie mają wspólnego timeoutu). 0 = wyłączony. Default 120 s — modele reasoning
   // potrafią długo myśleć zanim oddadzą pierwszy token (spójne z delegation_timeout_ms);
   // twardy sufit XHR w adapterze to 600 s, watchdog ma strzelać wyraźnie wcześniej.
   // Watchdog czatu zbroi się od WEJŚCIA NA SLOT bramki

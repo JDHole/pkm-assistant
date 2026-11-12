@@ -321,8 +321,8 @@ Klucze modułu: `model.stream_aborted`, `model.image_stripped`.
 
 ### Obraz w wyniku narzędzia - per provider
 
-OpenAI-compatible wysyła wynik tool jako tekst, a obrazy w wiadomości user za blokiem tool.
-Anthropic umieszcza image w `tool_result`; Ollama wysyła `images` na user za blokiem tool.
+OpenAI-compatible wysyła wynik `tool` jako tekst i zbiera obrazy w jednej wiadomości `user` za ostatnim `tool` ciągłego bloku.
+Anthropic umieszcza bloki `image` w `tool_result`; Ollama wysyła `images` w następnej wiadomości `user` za blokiem tool.
 Gemini pozostaje bez zmian; obsługa obrazów w wynikach narzędzi ma tam znane ograniczenie.
 
 ### 🟠 13. Step 4b (fallback ról sub) musi znać `agent.models.main`, nie tylko legacy `agent.model`

@@ -1,6 +1,6 @@
 # modules/tools/
 
-Narzędzie, które chce pokazać obraz modelowi, musi użyć kontraktu `kind: 'media'` z `summary` i tablicą `images` (MIME, base64 i opcjonalne wymiary). Czat rozpoznaje wynik przez `asToolMedia` i używa `mediaTextPart` oraz `toToolMessageContent`: obraz w transkrypcie występuje wyłącznie jako data-URL `data:image/<mime>;base64,<b64>` w bloku `image_url`. `generate_image` jest adaptowane przez `asToolMedia` bez zmiany surowego wyniku UI. Surowe pole `base64` w innym wyniku nie jest obrazem dla modelu i nie jest objęte gwarancją redakcji obrazów. `mediaTextPart` usuwa klucze `base64` podczas serializacji (po `toJSON`) i zastępuje same data-URL, zachowując pozostały tekst.
+Narzędzie, które chce pokazać obraz modelowi, musi użyć kontraktu z `toolMedia.ts`: `kind: 'media'` z `summary` i tablicą `images` (MIME, base64 i opcjonalne wymiary). Czat rozpoznaje wynik przez `asToolMedia` i używa `mediaTextPart` oraz `toToolMessageContent`: obraz w transkrypcie występuje wyłącznie jako data-URL `data:image/<mime>;base64,<b64>` w bloku `image_url`. `generate_image` jest adaptowane przez `asToolMedia` bez zmiany surowego wyniku UI. Surowe pole `base64` w innym wyniku nie jest obrazem dla modelu i nie jest objęte gwarancją redakcji obrazów. `mediaTextPart` usuwa klucze `base64` podczas serializacji (po `toJSON`) i zastępuje same data-URL, zachowując pozostały tekst.
 
 Pamięć redaguje data-URL po serializacji wszystkich pól zdarzenia poza `content` zdarzeń `user_message` i `agent_message`; dotyczy to również zagnieżdżonych stringów JSON, `tool_calls` i treści wyników narzędzi. Wyjątek strukturalny dla surowego `generate_image` w `mcp_call.result`: replacer redaguje obiektowe klucze `base64` ze stringiem długości co najmniej 16. Nie zgaduje pól `base64` wewnątrz stringów JSON; szczegóły w `modules/memory/CLAUDE.md`.
 
@@ -52,9 +52,15 @@ bez ID pozostaje zwykłą wiadomością sterującą.
 1. **Built-in tools** - wbudowane narzędzia agenta (read, list, write, memory_save, delegate, web_search, ...), skompilowane w bundlu.
 2. **External MCP servers** - zewnętrzne serwery przez prawdziwy klient MCP (`ExternalMcpManager`, stdio/HTTP przez `@modelcontextprotocol/sdk`), konfigurowane w ustawieniach pluginu (`data.json`), NIE w vaulcie.
 
-Built-in narzędzia żyją w **8 manifestach** (`built-in-servers/`): `core`, `vault`, `memory`, `web`, `multimodal`, `delegation`, `artifacts`, `komunikator`. Skille NIE są osobnym serwerem MCP - są przepisami czytanymi przez prymityw `read` (indeks skilli idzie w system promptcie).
+Built-in narzędzia żyją w **9 manifestach** (`built-in-servers/`): `core`, `vault`, `memory`, `web`, `multimodal`, `delegation`, `artifacts`, `komunikator`, `app`. Skille NIE są osobnym serwerem MCP - są przepisami czytanymi przez prymityw `read` (indeks skilli idzie w system promptcie).
 
 ---
+
+## Dodawanie wbudowanego narzędzia
+
+Zarejestruj implementację w `src/main.ts`, a definicję dodaj do manifestu serwera i w razie nowego serwera do `built-in-servers/index.ts` (także opis w `resolveServerDescription`). Sprawdź mapowanie akcji w `MCPClient.ts` (`ACTION_TYPE_MAP`) i `core/security/PermissionSystem.ts` (`ACTION_PERMISSIONS`, a dla celów poza vaultem `NON_VAULT_TARGET_ACTIONS`), `BUILTIN_TOOL_MAP` w `ToolRegistry.ts` oraz grupę, `GROUP_META` i decyzję o `DEFAULT_DISABLED_GROUPS` w `modules/agents/toolAxis.ts`. Ustal ryzyko każdej akcji w `core/security/autonomy.ts`, dodaj teksty i18n i wpis `TOOL_INFO` w `modules/ui-components/ToolCallDisplay.ts`.
+
+Wspólna ścieżka MCP nie nakłada timeoutu wykonania na narzędzia wbudowane: `timeout_ms` w ich manifeście jest deklaratywny, a `resolveTimeoutMs` stosuje `ExternalMcpManager` do serwerów zewnętrznych. Poszczególne narzędzia mogą mieć własne limity.
 
 ## Co tu jest
 
@@ -84,7 +90,7 @@ modules/tools/
 ├── Multimodal (2): GenerateImageTool.ts, AddTextToImageTool.ts
 ├── Komunikacja: KomunikatorTools.ts (kom_send/kom_list/kom_read), AskUserTool.ts
 │
-├── built-in-servers/                   # 8 manifestów + index.ts + podfolder artifacts/
+├── built-in-servers/                   # 9 manifestów + index.ts + podfolder artifacts/
 │   ├── core.manifest.ts                # ask_user - always-on, removable=false
 │   ├── vault.manifest.ts               # read/list/write/delete/create_folder/search
 │   ├── memory.manifest.ts              # memory_save/memory_delete - odczyt scope=memory bramkowany uprawnieniem
@@ -93,6 +99,7 @@ modules/tools/
 │   ├── delegation.manifest.ts          # delegate/sub_agent/agent_delegate
 │   ├── artifacts.manifest.ts           # artifact_create/read/update/list + todo
 │   ├── komunikator.manifest.ts         # kom_send/kom_list/kom_read
+│   ├── app.manifest.ts                 # obsidian_app (opt-in)
 │   ├── artifacts/                      # ArtifactCreate/Read/Update/ListTool.ts + TodoTool.ts + index.ts
 │   └── index.ts                        # resolveBuiltinManifests({pluginVersion}) + getBuiltinManifest(name) + resolveServerDescription(name)
 │
@@ -950,4 +957,4 @@ P4 migracji epoki: DelegateTool przenosi opcjonalne `sessionEpochFailure` z zauf
 origin przez parser schematu memory (`unknown`, maskowanie, zamrożona kopia).
 Niepoprawne dane są pomijane; przy potwierdzonej epoce diagnostyka nie jest przenoszona.
 
-`obsidian_app` is an opt-in built-in tool registered only when the plugin setting is enabled; its `app` manifest is filtered by the same flag. The workspace port and serialization live in `modules/obsidian-app`; `app.state` has no vault target and `app.open` is checked against the requested vault path. Fresh agents have the group disabled.
+`obsidian_app` is an opt-in built-in tool registered only when the plugin setting is enabled; its `app` manifest is filtered by the same flag. The setting defaults off and changes take effect after plugin reload. The workspace port and serialization live in `modules/obsidian-app`; `app.state` has no vault target and `app.open` is checked against the requested vault path. Fresh agents have the group disabled.

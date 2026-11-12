@@ -23,7 +23,7 @@ type LoopMessageRole = 'system' | 'user' | 'assistant' | 'tool';
  *
  * `content` DOPUSZCZA TABLICĘ świadomie: `appendToolResult` dostaje tablicę bloków content przy
  * wynikach multimodalnych (`generate_image` + model vision) — przechodzi bez stringifikacji
- * i bez obcinania (patrz CLAUDE.md, „Wynik narzędzia: string vs tablica multimodalna").
+ * i bez obcinania (patrz CLAUDE.md, „Hook and transcript contracts").
  * Index signature zostaje, bo store czatu (`RollingWindowMessageStore` → `RollingWindow`)
  * dokłada własne pola meta (np. `cache`, `_systemNudge`).
  */
