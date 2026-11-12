@@ -57,7 +57,7 @@ const VISION_FAMILIES: readonly string[] = [
  * w nazwie (`llama3.2-vision`, `qwen2-vl`) rozstrzyga na TAK. Człon, nie podciąg —
  * inaczej `revisionist-7b` byłby modelem od obrazków.
  */
-const VISION_NAME_PATTERN = /(?:^|[-_/.])(?:vision|vl|multimodal)(?:[-_/.]|$)/;
+const VISION_NAME_PATTERN = /(?:^|[-_/.:])(?:vision|vl|multimodal)(?:[-_/.:]|$)/;
 
 /** Czy `name` należy do rodziny `family` (równość albo `family` + separator członu). */
 function inFamily(name: string, family: string): boolean {

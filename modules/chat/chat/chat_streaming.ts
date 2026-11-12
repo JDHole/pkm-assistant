@@ -17,6 +17,7 @@ import { sessionMessageId, bindSessionMessageId } from '../../memory/index.js';
 import { MarkdownRenderer, Notice } from 'obsidian';
 import { SkinManager, hexToRgbTriplet, UiIcons } from '../../crystal-soul/index.js';
 import { buildCacheMetadata, isLocalPlatform } from '../../models/index.js';
+import { asToolMedia, mediaTextPart, toToolMessageContent } from '../../tools/index.js';
 import { log } from '../../../core/utils/Logger.js';
 // Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
 // (tę samą czyta MCPClient przy normalizacji i runner subów).
@@ -1547,24 +1548,13 @@ export async function _chatExecuteToolCall(
     }
     turn.rawResults.set(toolCall.id, { result: raw, error });
 
-    // Kształt dla store (parytet z dawnym build toolResultContent):
-    // generate_image + vision → tablica multimodalna (pętla przepuszcza bez zmian, model widzi obraz);
-    // generate_image + non-vision → JSON bez base64 (żeby nie wysadzić kontekstu);
-    // reszta → JSON.stringify. Nie mutujemy `raw` (onToolResults renderuje z niego obraz).
-    if (toolCall.name === 'generate_image' && raw?.base64) {
-        // Model WŁAŚCICIELA tury, nie globalnie aktywnego agenta - user mógł przełączyć
-        // zakładkę, gdy ta tura generowała obraz w tle (tura ma własny `turn.agent`).
-        if (this._isCurrentModelVision(turn.agent)) {
-            const textPart = Object.assign({}, raw);
-            delete textPart.base64;
-            return [
-                { type: 'text', text: JSON.stringify(textPart) },
-                { type: 'image_url', image_url: { url: `data:image/${raw.format || 'png'};base64,${raw.base64}` } }
-            ];
-        }
-        const copy = Object.assign({}, raw);
-        delete copy.base64;
-        return JSON.stringify(copy);
+    // Media trafiają do modelu właściciela tury; surowy wynik pozostaje dla UI.
+    const media = asToolMedia(toolCall.name ?? '', raw);
+    if (media) {
+        return toToolMessageContent(media, {
+            vision: this._isCurrentModelVision(turn.agent),
+            textPart: mediaTextPart(toolCall.name ?? '', raw),
+        });
     }
     // The one-character budget sentinel must stay a token, not become the three-character JSON string `"B"`.
     return (raw as unknown) === 'B' ? 'B' : JSON.stringify(raw);

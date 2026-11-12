@@ -1,5 +1,9 @@
 # modules/tools/
 
+Narzędzie, które chce pokazać obraz modelowi, musi użyć kontraktu `kind: 'media'` z `summary` i tablicą `images` (MIME, base64 i opcjonalne wymiary). Czat rozpoznaje wynik przez `asToolMedia` i używa `mediaTextPart` oraz `toToolMessageContent`: obraz w transkrypcie występuje wyłącznie jako data-URL `data:image/<mime>;base64,<b64>` w bloku `image_url`. `generate_image` jest adaptowane przez `asToolMedia` bez zmiany surowego wyniku UI. Surowe pole `base64` w innym wyniku nie jest obrazem dla modelu i nie jest objęte gwarancją redakcji obrazów. `mediaTextPart` usuwa klucze `base64` podczas serializacji (po `toJSON`) i zastępuje same data-URL, zachowując pozostały tekst.
+
+Pamięć redaguje data-URL po serializacji wszystkich pól zdarzenia poza `content` zdarzeń `user_message` i `agent_message`; dotyczy to również zagnieżdżonych stringów JSON, `tool_calls` i treści wyników narzędzi. Wyjątek strukturalny dla surowego `generate_image` w `mcp_call.result`: replacer redaguje obiektowe klucze `base64` ze stringiem długości co najmniej 16. Nie zgaduje pól `base64` wewnątrz stringów JSON; szczegóły w `modules/memory/CLAUDE.md`.
+
 2.4.6 F1: timeout planu uruchamia abort w callbacku `settle`, po zatrzaśnięciu
 porażki i blokad, przed publikacją zakończenia. Dzięki temu pierwsze powiadomienie
 prowadzącego i skrzynka rodzica dostają snapshot/handoff dotychczasowej pracy.

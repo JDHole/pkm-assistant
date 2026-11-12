@@ -1,5 +1,7 @@
 # modules/memory/
 
+`formatSessionEvent` redaguje obrazowe data-URL (`data:image/<mime>;base64,<b64>`) we wszystkich polach zdarzeń po serializacji, także w zagnieżdżonych stringach JSON, `tool_calls` i `content` wyników narzędzi. Wyjątek: `content` zdarzeń `user_message` i `agent_message` pozostaje bajt w bajt nietknięte. `seq` pozostaje bez zmian. Replacer serializacji dodatkowo redaguje klucze obiektowe `base64` ze stringiem długości co najmniej 16 (z MIME lub jako binary), w tym surowy wynik `generate_image` w `mcp_call.result`, także po `toJSON`. Nie rozpoznaje pól `base64` ukrytych w stringu JSON: to świadome ograniczenie, nie heurystyka. Obraz narzędzia dla modelu musi przejść przez kontrakt mediów opisany w `modules/tools/CLAUDE.md`; surowe pole `base64` w innym wyniku nie jest obrazem dla modelu i nie podlega tej gwarancji.
+
 Zdarzenie `agent_loop_partial` zapisuje opcjonalne `question`; przy odczycie jego treść i rozstrzygnięcie są dodawane jako oznaczona część wiadomości dla modelu. Dorobek snapshotu pozostaje osobny.
 
 **Pamięć agenta w Memory v3: per-agent, plikowa, jawna dla usera i niedestrukcyjna.**

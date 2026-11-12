@@ -2107,6 +2107,8 @@ export const pl: Record<string, string> = {
   'model.stream_aborted': 'Strumień modelu przerwany (Stop).',
   // Zastępuje zaszyty polski string w chat_adapter_base.ts (multimodal strip).
   'model.image_stripped': 'Obraz pominięty - model nie obsługuje vision.',
+  'model.tool_image_marker': '[Obraz w następnej wiadomości.]',
+  'model.tool_image_intro': 'Obraz(y) z wyniku narzędzia: {{ids}}',
 
   // ── SubAgent ──
   'subagent.background_started': 'Sub-agent {{name}} wystartował w tle (zadanie {{task_id}}). Wynik NIE jest jeszcze znany i NIE dostaniesz go w tej turze - wróci osobnym powiadomieniem. Nie zgaduj, co znajdzie, i nie udawaj, że już wiesz. Zakończ turę, mówiąc użytkownikowi krótko, co zleciłeś.',

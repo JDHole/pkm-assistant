@@ -2102,6 +2102,8 @@ export const en: Record<string, string> = {
   'model.stream_aborted': 'Model stream aborted (Stop).',
   // Replaces a hardcoded Polish string in chat_adapter_base.ts (multimodal strip).
   'model.image_stripped': 'Image skipped - the model does not support vision.',
+  'model.tool_image_marker': '[Image attached in the next message.]',
+  'model.tool_image_intro': 'Image(s) returned by tool call(s): {{ids}}',
 
   // ── SubAgent ──
   'subagent.background_started': 'Sub-agent {{name}} started in the background (task {{task_id}}). The result is NOT known yet and you will NOT get it in this turn - it will arrive as a separate notification. Do not guess what it will find and do not pretend you already know. End the turn by briefly telling the user what you delegated.',

@@ -96,6 +96,9 @@ export { createKomunikatorTools } from './KomunikatorTools.js';
 export { createGenerateImageTool } from './GenerateImageTool.js';
 export { createAddTextToImageTool } from './AddTextToImageTool.js';
 
+export { asToolMedia, mediaTextPart, toToolMessageContent } from './toolMedia.js';
+export type { ToolMediaImage, ToolMediaResult, ToolContentBlock } from './toolMedia.js';
+
 export { registerSettings } from './SettingsSection.js';
 // Zakładka „Konektory" jest INFORMACYJNA — opis serwerów MCP + ich narzędzi + realna lista
 // narzędzi wbudowanych, bez żadnych akcji zarządzających.

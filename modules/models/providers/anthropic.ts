@@ -340,7 +340,9 @@ function toolResultBlock(message: OpenAiRequestMessage): SentBlock {
     return {
         type: 'tool_result',
         tool_use_id: asText(message.tool_call_id),
-        content: text || '(brak treści)',
+        content: Array.isArray(message.content) && message.content.some(block => block.type === 'image_url')
+            ? contentBlocks(message.content)
+            : text || '(brak treści)',
     };
 }
 

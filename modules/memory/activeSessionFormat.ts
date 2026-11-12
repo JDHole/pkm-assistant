@@ -280,6 +280,25 @@ export function unescapeEventFieldLabels(text: string): string {
     return text.replace(ESCAPED_FIELD_LABEL_LINE_RE, '$1$2');
 }
 
+function sizeInKb(length: number): number {
+    return Math.max(1, Math.round(length * 3 / 4 / 1024));
+}
+
+/** Redaguje obrazowe data-URL w tekstowej wartości pola. */
+export function redactInlineImages(value: string): string {
+    return value.replace(/data:image(?:\\\/|\/)([A-Za-z0-9.+-]+);base64,((?:[A-Za-z0-9+=]|\\\/|\/)+)/g,
+        (_match, subtype: string, base64: string) => `[image image/${subtype} ~${sizeInKb(base64.replace(/\\/g, '').length)} kB]`);
+}
+
+function redactSessionValue(this: Record<string, unknown>, key: string, value: unknown): unknown {
+    if (key === 'base64' && typeof value === 'string' && value.length >= 16) {
+        const mime = typeof this.mime === 'string' && this.mime.startsWith('image/') ? this.mime
+            : typeof this.format === 'string' ? `image/${this.format}` : null;
+        return mime ? `[image ${mime} ~${sizeInKb(value.length)} kB]` : `[binary ~${sizeInKb(value.length)} kB]`;
+    }
+    return typeof value === 'string' ? redactInlineImages(value) : value;
+}
+
 /**
  * Formatuje JEDEN blok event-logu (format A).
  *
@@ -312,7 +331,9 @@ export function formatSessionEvent(
             lines.push('**seq:**', '', String(value), '');
             return;
         }
-        const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+        const redact = !(label === 'content' && (type === 'user_message' || type === 'agent_message'));
+        const serialized = typeof value === 'string' ? value : JSON.stringify(value, redact ? redactSessionValue : undefined, 2);
+        const text = redact ? redactInlineImages(serialized) : serialized;
         lines.push(`**${label}:**`);
         lines.push('');
         lines.push(escapeEventFieldText(text));
