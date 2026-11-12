@@ -1318,17 +1318,55 @@ function lifecycleButtons(f: Awaited<ReturnType<typeof fixture>>) {
     const newChatBtn = createDiv(), closeBtn = createDiv();
     events(newChatBtn); events(closeBtn);
     const requests: Promise<void>[] = [];
+    const notices: unknown[] = [];
+    class CapturedNotice extends Notice {
+        constructor(message: string, timeout?: number) { super(message, timeout); notices.push(message); }
+    }
     Object.assign(f.view, {
         handleNewSession() { const run = handleNewSession.call(f.view as never); requests.push(run); return run; },
         _closeActiveTab() { const run = _closeActiveTab.call(f.view as never); requests.push(run); return run; },
     });
-    new Function('newChatBtn', 'closeBtn', 'log', ts.transpile(registrations.map(s => s.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2022 })).call(f.view, newChatBtn, closeBtn, log);
+    new Function('newChatBtn', 'closeBtn', 'log', 'Notice', 't', ts.transpile(registrations.map(s => s.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2022 })).call(f.view, newChatBtn, closeBtn, log, CapturedNotice, translate);
     return {
-        requests,
+        requests, notices,
         newSession() { newChatBtn.dispatchEvent(new Event('click')); return requests.at(-1)!; },
         close() { closeBtn.dispatchEvent(new Event('click')); return requests.at(-1)!; },
     };
 }
+
+for (const [locale, expected] of [['pl', 'Nie udało się rozpocząć nowej rozmowy. Sprawdź, czy sesja została zarchiwizowana.'], ['en', 'Could not start a new conversation. Check whether the session was archived.']] as const)
+test.serial(`B2: Nowa rozmowa zgłasza nieudaną archiwizację (${locale})`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f);
+    setLocale(locale);
+    const oldPath = f.tabs[0].sessionPath;
+    const name = 'mira_2026-11-11_07-37.md';
+    const path = f.memory.paths.sessionsActive + '/' + name;
+    f.files.set(path, f.files.get(oldPath)!);
+    f.files.delete(oldPath);
+    f.tabs[0].sessionPath = path;
+    f.memory.setActiveSessionIdentity(path, f.tabs[0].sessionEpoch);
+    await f.view.handleSaveSession.call(f.view as never);
+    let before = '';
+    const archives = Array.from({ length: 50 }, (_, i) => [f.memory.paths.sessionsArchive + '/' + (i === 0 ? name : name.replace('.md', `_${i + 1}.md`)), `Archiwum ${i + 1}`] as const);
+    for (const [archive, content] of archives) f.files.set(archive, content);
+    const closePrompt = SessionCloseModal.prototype.prompt, savePrompt = SaveSessionModal.prototype.prompt, proposals = SaveSessionModal.prototype.setProposals;
+    SessionCloseModal.prototype.prompt = async () => { before = await f.adapter.read(path); return { choice: 'archive' }; };
+    let accept!: (value: Awaited<ReturnType<SaveSessionModal['prompt']>>) => void;
+    SaveSessionModal.prototype.prompt = () => new Promise(resolve => { accept = resolve; });
+    SaveSessionModal.prototype.setProposals = () => { accept({ action: 'archive', notes: [], brainUpdates: [] }); };
+    t.teardown(() => { SessionCloseModal.prototype.prompt = closePrompt; SaveSessionModal.prototype.prompt = savePrompt; SaveSessionModal.prototype.setProposals = proposals; });
+    Object.assign(f.view, { consolidateSession });
+    const buttons = lifecycleButtons(f);
+    const failure = await buttons.newSession().catch((error: unknown) => error);
+    await new Promise(resolve => setImmediate(resolve));
+    t.is(failure instanceof Error ? failure.message : '', `archiveActiveSession: brak wolnej nazwy pliku sesji w ${f.memory.paths.sessionsArchive}`);
+    t.deepEqual(buttons.notices, [expected]);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.is(await f.adapter.read(path), before);
+    t.deepEqual(await Promise.all(archives.map(async ([archive]) => [archive, await f.adapter.read(archive)])), archives);
+    t.is([...f.files.keys()].filter(key => key.startsWith(f.memory.paths.sessionsArchive + '/')).length, 50);
+});
 
 function disposeFixture(t: import('ava').ExecutionContext, f: Awaited<ReturnType<typeof fixture>>) {
     t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });

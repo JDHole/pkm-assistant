@@ -401,6 +401,7 @@ export const pl: Record<string, string> = {
 
   // ── Chat session ──
   'chat.session.compressing': 'Kompresuję sesję do pamięci...',
+  'chat.session.new_failed': 'Nie udało się rozpocząć nowej rozmowy. Sprawdź, czy sesja została zarchiwizowana.',
   'chat.session.full_saved': '📂 Pełna rozmowa zapisana w: {{path}}',
   'chat.session.autosave_saved': 'Zapisano do {{agent}}!',
   'chat.session.autosave_failed': 'Zapis nieudany',

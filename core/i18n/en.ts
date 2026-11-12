@@ -402,6 +402,7 @@ export const en: Record<string, string> = {
 
   // ── Chat session ──
   'chat.session.compressing': 'Compressing session to memory...',
+  'chat.session.new_failed': 'Could not start a new conversation. Check whether the session was archived.',
   'chat.session.full_saved': '\uD83D\uDCC2 Full conversation saved in: {{path}}',
   'chat.session.autosave_saved': 'Saved to {{agent}}!',
   'chat.session.autosave_failed': 'Save failed',

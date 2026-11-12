@@ -392,7 +392,12 @@ export function _renderSlimBar(this: ChatViewLike) {
     // Row 1: Nowy chat | Zamknij chat
     const newChatBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.new_chat') } });
     setSvg(newChatBtn, UiIcons.refresh(16));
-    newChatBtn.addEventListener('click', () => { void this.handleNewSession(); });
+    newChatBtn.addEventListener('click', () => {
+        void this.handleNewSession().catch((error: unknown) => {
+            log.error('Chat', 'Nie udało się rozpocząć nowej rozmowy:', error);
+            new Notice(t('chat.session.new_failed'), 6000);
+        });
+    });
 
     const closeBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.close_chat') } });
     setSvg(closeBtn, UiIcons.x(16));
