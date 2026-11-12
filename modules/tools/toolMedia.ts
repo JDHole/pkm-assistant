@@ -23,8 +23,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// Zbiór znaków musi zgadzać się z regexem redakcji w memory.
+const IMAGE_MIME_RE = /^image\/[A-Za-z0-9.+-]+$/;
+
 function isImage(value: unknown): value is ToolMediaImage {
-    return isRecord(value) && typeof value.mime === 'string' && /^image\/.+/.test(value.mime)
+    return isRecord(value) && typeof value.mime === 'string' && IMAGE_MIME_RE.test(value.mime)
         && typeof value.base64 === 'string' && value.base64.length > 0
         && (!('width' in value) || (typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0))
         && (!('height' in value) || (typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0));
@@ -39,7 +42,10 @@ export function asToolMedia(toolName: string, raw: unknown): ToolMediaResult | n
     }
     if (toolName === 'generate_image' && typeof raw.base64 === 'string' && raw.base64.length > 0) {
         const { base64, ...rest } = raw;
-        return { ...rest, kind: 'media', summary: '', images: [{ mime: `image/${typeof raw.format === 'string' && raw.format ? raw.format : 'png'}`, base64 }] };
+        // Format spoza zbioru znaków MIME spada na png: generate_image nigdy nie może wrócić do surowego
+        // JSON.stringify(raw), bo to wysłałoby base64 modelowi jako tekst.
+        const format = typeof raw.format === 'string' && IMAGE_MIME_RE.test(`image/${raw.format}`) ? raw.format : 'png';
+        return { ...rest, kind: 'media', summary: '', images: [{ mime: `image/${format}`, base64 }] };
     }
     return null;
 }
@@ -50,7 +56,7 @@ export function mediaTextPart(_toolName: string, raw: unknown): Record<string, u
     const cleaned = JSON.parse(JSON.stringify(raw, (key, value: unknown) => {
         if (key === 'base64') return undefined;
         return typeof value === 'string'
-            ? value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/g, '[image $1]')
+            ? value.replace(/data:image(?:\\\/|\/)([A-Za-z0-9.+-]+);base64,(?:[A-Za-z0-9+=]|\\\/|\/)+/g, '[image image/$1]')
             : value;
     })) as Record<string, unknown>;
     if (raw.kind === 'media' && Array.isArray(raw.images)) {

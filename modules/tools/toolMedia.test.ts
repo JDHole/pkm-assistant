@@ -32,6 +32,22 @@ test('odrzuca wyniki bez prawidłowych obrazów', t => {
     t.is(asToolMedia('x', { kind: 'media', summary: 's', images: [{ mime: 'text/html', base64: 'QUJD' }] }), null);
 });
 
+test('MIME obrazu odpowiada zakresowi redakcji', t => {
+    for (const mime of ['image/x_png', 'image/png;charset=utf-8']) {
+        t.is(asToolMedia('x', { kind: 'media', images: [{ mime, base64: 'QUJD' }] }), null);
+        // generate_image nie może spaść do surowego JSON z base64 - nieprawidłowy format daje png.
+        t.deepEqual(asToolMedia('generate_image', { format: mime.slice(6), base64: 'QUJD' })?.images, [{ mime: 'image/png', base64: 'QUJD' }]);
+    }
+    for (const mime of ['image/svg+xml', 'image/vnd.ms-photo']) {
+        t.not(asToolMedia('x', { kind: 'media', images: [{ mime, base64: 'QUJD' }] }), null);
+    }
+});
+
+test('opis redaguje data-URL z escapowanymi ukośnikami', t => {
+    t.deepEqual(mediaTextPart('x', { note: 'data:image\\/png;base64,QUJD\\/QUJD koniec' }),
+        { note: '[image image/png] koniec' });
+});
+
 test('usuwa binarkę z opisu i odrzuca nieprawidłowe wymiary', t => {
     const raw = { kind: 'media', summary: 's', base64: 'QUJD', nested: { base64: 'QUJD', url: 'data:image/png;base64,QUJD' }, images: [{ mime: 'image/png', base64: 'QUJD' }] };
     const media = asToolMedia('x', raw);

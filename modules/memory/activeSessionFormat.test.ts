@@ -860,3 +860,16 @@ test('data-URL w zagnieżdżonych polach i round-trip, z wyjątkiem treści rozm
     t.is(formatSessionEvent('mcp_call', { result: { format: 'png', base64: 'C'.repeat(2048) } }, timestamp),
         `## ${timestamp} — mcp call\n\n**result:**\n\n{\n  "format": "png",\n  "base64": "[image image/png ~2 kB]"\n}\n\n`);
 });
+
+test('escapowane ukośniki w argumentach pozostają poprawnym JSON po redakcji', t => {
+    const argumentsText = '{"img":"data:image\\/png;base64,QUJD\\/QUJD' + 'A'.repeat(1024) + '"}';
+    const calls = [{ id: 'c1', type: 'function', function: { name: 'x', arguments: argumentsText } }];
+    const event = formatSessionEvent('agent_message', { tool_calls: calls }, '2026-11-12T10:00:00.000Z');
+    t.false(event.includes('AAAA'));
+    t.true(event.includes('[image image/png ~1 kB]'));
+    const restored = parseActiveSession(event).messages[0].toolCalls?.[0]?.function.arguments;
+    t.truthy(restored);
+    t.false(restored!.includes('base64,'));
+    t.deepEqual(JSON.parse(restored!), { img: '[image image/png ~1 kB]' });
+    t.is(redactInlineImages('data:image\\/png;base64,' + ('A\\/'.repeat(1024))), '[image image/png ~2 kB]');
+});

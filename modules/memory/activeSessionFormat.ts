@@ -286,8 +286,8 @@ function sizeInKb(length: number): number {
 
 /** Redaguje obrazowe data-URL w tekstowej wartości pola. */
 export function redactInlineImages(value: string): string {
-    return value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)/g,
-        (_match, mime: string, base64: string) => `[image ${mime} ~${sizeInKb(base64.length)} kB]`);
+    return value.replace(/data:image(?:\\\/|\/)([A-Za-z0-9.+-]+);base64,((?:[A-Za-z0-9+=]|\\\/|\/)+)/g,
+        (_match, subtype: string, base64: string) => `[image image/${subtype} ~${sizeInKb(base64.replace(/\\/g, '').length)} kB]`);
 }
 
 function redactSessionValue(this: Record<string, unknown>, key: string, value: unknown): unknown {
@@ -296,7 +296,7 @@ function redactSessionValue(this: Record<string, unknown>, key: string, value: u
             : typeof this.format === 'string' ? `image/${this.format}` : null;
         return mime ? `[image ${mime} ~${sizeInKb(value.length)} kB]` : `[binary ~${sizeInKb(value.length)} kB]`;
     }
-    return value;
+    return typeof value === 'string' ? redactInlineImages(value) : value;
 }
 
 /**
