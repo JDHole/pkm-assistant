@@ -7,7 +7,7 @@ import { PermissionSystem } from '../../core/security/PermissionSystem.js';
 import { AccessGuard } from '../../core/security/AccessGuard.js';
 import { classifyToolRisk } from '../../core/security/autonomy.js';
 import { defaultDisabledTools } from '../agents/toolAxis.js';
-import { createAppExecutor, createWorkspacePort, isObsidianAppEnabled } from '../obsidian-app/index.js';
+import { createAppExecutor, createWorkspacePort, discloseLeaf, isObsidianAppEnabled } from '../obsidian-app/index.js';
 import { resolveBuiltinManifests } from './built-in-servers/index.js';
 
 function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restricted = false) {
@@ -49,12 +49,12 @@ test.serial('state masks restricted leaves and active path through MCP', async t
     const previous = AccessGuard._noGoFolders; AccessGuard._noGoFolders = ['secret'];
     try {
         const c = chain(); await c.call({ action: 'open', path: 'Notes/A.md' });
-        t.deepEqual(await c.call({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: 'Notes/A.md', tabs: [
+        t.deepEqual(await c.call({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: 'Notes/A.md', active_file: 'Notes/A.md', tabs: [
             { title: 'A', view_type: 'markdown', path: 'Notes/A.md', active: true }, { restricted: true, active: false }, { title: 'Graph view', view_type: 'graph', path: null, active: false },
         ] } });
         c.setActive('Secret/S.md');
         const hidden = await c.call({ action: 'state' });
-        t.deepEqual(hidden, { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, tabs: [
+        t.deepEqual(hidden, { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, active_file: null, tabs: [
             { title: 'A', view_type: 'markdown', path: 'Notes/A.md', active: false }, { restricted: true, active: true }, { title: 'Graph view', view_type: 'graph', path: null, active: false },
         ] } });
         t.false(JSON.stringify(hidden).includes('Secret'));
@@ -109,16 +109,17 @@ test.serial('workspace adapter masks deferred, side, invalid and noncanonical fi
             getViewState: () => ({ type, state }),
         });
         const leaves = [leaf('markdown', 'Wynagrodzenia 2026', { file: 'Secret/Wynagrodzenia 2026.md' }),
+            { ...leaf('markdown', 'Wynagrodzenia 2026', undefined), isDeferred: true },
             leaf('backlink', 'Secret backlink', { file: 'Secret/S.md' }),
             leaf('graph', 'Graph view', {}), leaf('markdown', 'Invalid', { file: 42 }),
             leaf('markdown', 'Salary', { file: 'Secret%20Data/Salary.md' }),
             leaf('markdown', 'RootSecret', { file: 'Notes%2FRootSecret.md' }),
             { view: { getDisplayText: () => { throw new Error('bad view'); }, getViewType: () => 'markdown' }, getViewState: () => ({ state: {} }) }];
-        const app = { workspace: { activeLeaf: leaves[2], iterateAllLeaves: (fn: (value: unknown) => void) => leaves.forEach(fn) }, vault: {} };
+        const app = { workspace: { getMostRecentLeaf: () => leaves[3], getActiveFile: () => null, iterateAllLeaves: (fn: (value: unknown) => void) => leaves.forEach(fn) }, vault: {} };
         const port = createWorkspacePort(app as never, (_value): _value is never => false);
         const result = await chain(port).call({ action: 'state' });
-        t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, tabs: [
-            { restricted: true, active: false }, { restricted: true, active: false },
+        t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, active_file: null, tabs: [
+            { restricted: true, active: false }, { restricted: true, active: false }, { restricted: true, active: false },
             { title: 'Graph view', view_type: 'graph', path: null, active: true },
             { restricted: true, active: false }, { restricted: true, active: false },
             { restricted: true, active: false }, { restricted: true, active: false },
@@ -141,7 +142,7 @@ test('timeout releases queue and waiting calls reject sub and Stop immediately',
     t.deepEqual(await waiting, { ok: false, success: false, error: { code: 'aborted', message: 'aborted' } });
     t.deepEqual(await execute({ action: 'state', _invocationToolNames: [] }), { ok: false, success: false, error: { code: 'sub_agent_denied', message: 'sub_agent_denied' } });
     t.deepEqual(await first, { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
-    t.deepEqual(await execute({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, tabs: [] } });
+    t.deepEqual(await execute({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, active_file: null, tabs: [] } });
     release();
 });
 
@@ -174,4 +175,44 @@ test('MCP denies sub and stopped calls while an open is pending', async t => {
     t.deepEqual(await waiting, { success: false, error: 'Stopped' });
     release();
     t.deepEqual(await first, { ok: true, success: true, verified: true, effect: 'unchanged', data: { path: 'Notes/A.md' } });
+});
+
+
+test('discloseLeaf requires evidence for file and fileless views', t => {
+    const auth = (path: string) => ({ allowed: !path.startsWith('Secret') });
+    const cases = [
+        [{ active: false, identity: { kind: 'none' }, viewType: 'markdown', title: 'Wynagrodzenia 2026' }, { restricted: true, active: false }],
+        [{ active: false, identity: { kind: 'none' }, viewType: 'mystery', title: 'Sekret' }, { restricted: true, active: false }],
+        [{ active: false, identity: { kind: 'none' }, viewType: 'graph', title: 'Graph' }, { title: 'Graph', view_type: 'graph', path: null, active: false }],
+        [{ active: false, identity: { kind: 'file', path: 'Secret/S.md' }, viewType: 'graph', title: 'Secret' }, { restricted: true, active: false }],
+        [{ active: false, identity: { kind: 'file', path: 'Notes/A.md' }, viewType: 'markdown', title: 'Coś innego' }, { title: 'A', view_type: 'markdown', path: 'Notes/A.md', active: false }],
+        [{ active: false, identity: { kind: 'file', path: 'Secret%20Data/Salary.md' }, viewType: 'markdown', title: 'Salary' }, { restricted: true, active: false }],
+    ] as const;
+    for (const [leaf, expected] of cases) t.deepEqual(discloseLeaf(leaf, auth), expected);
+});
+
+test.serial('active_file retains authorized note while chat has focus', async t => {
+    const previous = AccessGuard._noGoFolders; AccessGuard._noGoFolders = ['secret'];
+    try {
+        let activeFile = 'Notes/A.md';
+        const port = { listLeaves: () => [{ active: true, identity: { kind: 'none' as const }, viewType: 'pkm-assistant-chat', title: 'Chat' }],
+            getActivePath: () => activeFile, fileExists: () => false, openPath: async () => {} };
+        const c = chain(port);
+        t.deepEqual(await c.call({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, active_file: 'Notes/A.md', tabs: [{ title: 'Chat', view_type: 'pkm-assistant-chat', path: null, active: true }] } });
+        activeFile = 'Secret/S.md';
+        t.deepEqual(await c.call({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, active_file: null, tabs: [{ title: 'Chat', view_type: 'pkm-assistant-chat', path: null, active: true }] } });
+    } finally { AccessGuard._noGoFolders = previous; }
+});
+
+test('timed out open blocks later opens until its effect settles', async t => {
+    let release = () => {}; let active: string | null = null;
+    const pending = new Promise<void>(resolve => { release = resolve; }); const calls: string[] = [];
+    const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
+        openPath: async path => { calls.push(`start:${path}`); if (path === 'A') await pending; active = path; calls.push(`end:${path}`); } }, 40);
+    t.deepEqual(await execute({ action: 'open', path: 'A' }), { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
+    t.deepEqual(await execute({ action: 'open', path: 'C' }), { ok: false, success: false, error: { code: 'busy', message: 'busy' } });
+    t.deepEqual(await execute({ action: 'state' }), { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: null, active_file: null, tabs: [] } });
+    release(); await pending; await new Promise(resolve => window.setTimeout(resolve, 0));
+    t.deepEqual(await execute({ action: 'open', path: 'C' }), { ok: true, success: true, verified: true, effect: 'changed', data: { path: 'C' } });
+    t.deepEqual(calls, ['start:A', 'end:A', 'start:C', 'end:C']); t.deepEqual({ active }, { active: 'C' });
 });

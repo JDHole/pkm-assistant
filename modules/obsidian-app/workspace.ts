@@ -8,21 +8,24 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
         listLeaves: () => {
             const leaves: LeafInfo[] = [];
             workspace.iterateAllLeaves(leaf => {
-                const active = leaf === workspace.activeLeaf;
+                const active = leaf === workspace.getMostRecentLeaf();
                 try {
-                    let identity: LeafIdentity;
+                    if (leaf.isDeferred) { leaves.push({ active, identity: { kind: 'unknown' } }); return; }
+                    let identity: LeafIdentity = { kind: 'none' };
+                    const state: unknown = leaf.getViewState().state;
+                    if (state !== null && typeof state === 'object' && 'file' in state) {
+                        identity = typeof state.file === 'string' ? { kind: 'file', path: state.file } : { kind: 'unknown' };
+                    }
                     if ('file' in leaf.view) {
                         const viewFile: unknown = leaf.view.file;
-                        identity = viewFile !== null && typeof viewFile === 'object' && 'path' in viewFile && typeof viewFile.path === 'string' ? { kind: 'file', path: viewFile.path } : { kind: 'unknown' };
-                    } else {
-                        const state: unknown = leaf.getViewState().state;
-                        if (state !== null && typeof state === 'object' && 'file' in state) {
-                            identity = typeof state.file === 'string' ? { kind: 'file', path: state.file } : { kind: 'unknown' };
-                        } else identity = { kind: 'none' };
+                        if (viewFile !== null && typeof viewFile === 'object' && 'path' in viewFile && typeof viewFile.path === 'string') {
+                            if (identity.kind === 'unknown' || (identity.kind === 'file' && identity.path !== viewFile.path)) identity = { kind: 'unknown' };
+                            else identity = { kind: 'file', path: viewFile.path };
+                        } else identity = { kind: 'unknown' };
                     }
                     if (identity.kind === 'unknown') { leaves.push({ active, identity }); return; }
-                    const title: unknown = leaf.view.getDisplayText();
                     const viewType: unknown = leaf.view.getViewType();
+                    const title: unknown = identity.kind === 'none' ? leaf.view.getDisplayText() : '';
                     if (typeof title !== 'string' || typeof viewType !== 'string') throw new Error('Invalid workspace view');
                     leaves.push({ title, viewType, identity, active });
                 } catch { leaves.push({ active, identity: { kind: 'unknown' } }); }
