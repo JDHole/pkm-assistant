@@ -169,3 +169,14 @@ test('reguła "Zawsze zezwalaj" bez agenta (null) przeżywa restart', async t =>
     t.is(rows[0].agentName, null);
     t.is(rows[0].rule, 'vault.write::Notes/a.md');
 });
+
+test('screenshot ignores persistent approval and asks on every invocation', async t => {
+    const mgr = new ApprovalManager({}, { storage: {} });
+    let asked = 0;
+    mgr.setApprovalHandler(async () => { asked++; return { result: 'always' }; });
+    const action = { agentName: 'Tola', type: 'app.screenshot', targetPath: 'app:screenshot' };
+    mgr.addToAlwaysApproved('Tola', 'app.screenshot', 'app:screenshot');
+    t.is((await mgr.requestApproval(action)).result, 'approve');
+    t.is((await mgr.requestApproval(action)).result, 'approve');
+    t.is(asked, 2);
+});

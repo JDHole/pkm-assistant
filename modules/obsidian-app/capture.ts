@@ -1,7 +1,8 @@
+import type { CaptureRect } from './index.js';
 import { OBSIDIAN_APP_SCREENSHOT_MAX_BYTES, OBSIDIAN_APP_SCREENSHOT_MAX_EDGE } from '../../config/limits.js';
 
 export type CapturedFrame = unknown;
-export interface CapturePort { capture(): Promise<CapturedFrame> }
+export interface CapturePort { capture(rect: CaptureRect): Promise<CapturedFrame> }
 
 function record(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object';
@@ -15,8 +16,11 @@ export function createCapturePort(loadElectron: () => unknown): CapturePort | nu
         const getContents = electron.remote.getCurrentWebContents as () => unknown;
         const contents = getContents.call(electron.remote);
         if (!record(contents) || typeof contents.capturePage !== 'function') return null;
-        const capturePage = contents.capturePage as () => Promise<unknown>;
-        return { capture: () => capturePage.call(contents) };
+        const capturePage = contents.capturePage as (rect: CaptureRect) => Promise<unknown>;
+        return { capture: rect => {
+            if (![rect.x, rect.y, rect.width, rect.height].every(Number.isSafeInteger) || rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0) throw new Error('Invalid capture rectangle');
+            return capturePage.call(contents, rect);
+        } };
     } catch { return null; }
 }
 

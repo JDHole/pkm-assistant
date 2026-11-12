@@ -10,12 +10,15 @@ export type LeafIdentity = { kind: 'file'; path: string } | { kind: 'none' } | {
 export type LeafInfo = { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'unknown' } } | { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
 export interface WorkspacePort {
     listLeaves(): LeafInfo[];
+    describeCaptureTarget?(): CaptureTarget;
     getActivePath(): string | null;
     fileExists(path: string): boolean;
     openPath(path: string, options: { newTab: boolean }): Promise<void>;
 }
+export type CaptureRect = { x: number; y: number; width: number; height: number };
+export type CaptureTarget = { kind: 'none' } | { kind: 'ok'; leaf: LeafInfo; rect: CaptureRect; embeds: (string | null)[]; blocked: string[]; overlays: string[] };
 export type AppAction = { action: 'state' } | { action: 'screenshot' } | { action: 'open'; path: string; newTab: boolean };
-export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large';
+export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large' | 'no_capturable_view' | 'overlay_visible';
 export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown } | { ok: true; success: true; verified: true; effect: 'unchanged'; kind: 'media'; summary: string; images: { mime: 'image/jpeg'; base64: string; width: number; height: number }[] };
 export function isObsidianAppEnabled(settings: { pkmAssistant?: { obsidianAppEnabled?: boolean } }): boolean {
     return settings.pkmAssistant?.obsidianAppEnabled === true;
@@ -49,17 +52,27 @@ export function discloseLeaf(leaf: Omit<LeafInfo, 'visible'> | LeafInfo, authori
         return { title: leaf.title, view_type: leaf.viewType, path: null, active: leaf.active };
     } catch { return restricted; }
 }
+export function decideCapture(target: CaptureTarget, authorize?: AppContext['authorizeFileRead']): { kind: 'ok'; rect: CaptureRect } | { kind: 'error'; code: AppErrorCode } {
+    if (target.kind === 'none') return { kind: 'error', code: 'no_capturable_view' };
+    const leaf = discloseLeaf(target.leaf, authorize);
+    const rect = target.rect;
+    if (!target.leaf.active || target.leaf.visible !== true || !('path' in leaf) || !leaf.path || !['markdown', 'pdf', 'image'].includes(leaf.view_type) || ![rect.x, rect.y, rect.width, rect.height].every(Number.isSafeInteger) || rect.x < 0 || rect.y < 0 || rect.width <= 0 || rect.height <= 0) return { kind: 'error', code: 'no_capturable_view' };
+    if (target.overlays.length) return { kind: 'error', code: 'overlay_visible' };
+    if (target.blocked.length || target.embeds.some(path => !authorizedPath(path, authorize))) return { kind: 'error', code: 'restricted_content_visible' };
+    return { kind: 'ok', rect };
+}
 export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS, capturePort: CapturePort | null = null) {
     let queue: Promise<void> = Promise.resolve();
     let suspended = false;
+    let capturing = false;
     return (args: Record<string, unknown>, context?: AppContext): Promise<AppResult> => {
         if ('_invocationToolNames' in args || '_invocationSubRunContext' in args) return Promise.resolve(fail('sub_agent_denied'));
         const action = parseAction(args);
         if (!action) return Promise.resolve(fail('invalid_args'));
         const aborted = () => context?.abortSignal?.aborted === true || context?.shouldAbort?.() === true;
         if (aborted()) return Promise.resolve(fail('aborted'));
-        if (action.action === 'open' && suspended) return Promise.resolve(fail('busy'));
-        const run = async (): Promise<AppResult> => {
+        if ((action.action === 'open' && suspended) || (action.action === 'screenshot' && capturing)) return Promise.resolve(fail('busy'));
+        const run = async (expired: () => boolean): Promise<AppResult> => {
             if (aborted()) return fail('aborted');
             try {
                 if (action.action === 'state') {
@@ -69,12 +82,17 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                     return { ok: true, success: true, verified: true, effect: 'unchanged', data: { active_path: activeTab && 'path' in activeTab ? activeTab.path : null, active_file: authorizedPath(activeFile, context?.authorizeFileRead) ? activeFile : null, tabs } };
                 }
                 if (action.action === 'screenshot') {
-                    if (port.listLeaves().some(leaf => leaf.visible !== false && 'restricted' in discloseLeaf(leaf, context?.authorizeFileRead))) return fail('restricted_content_visible');
+                    const decision = decideCapture(port.describeCaptureTarget?.() ?? { kind: 'none' }, context?.authorizeFileRead);
+                    if (decision.kind === 'error') return fail(decision.code);
                     if (aborted()) return fail('aborted');
                     if (!capturePort) return fail('capture_unavailable');
-                    const image = await encodeCapture(await capturePort.capture());
+                    capturing = true;
+                    let frame: unknown;
+                    try { frame = await capturePort.capture(decision.rect); } finally { capturing = false; }
+                    if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
+                    const image = await encodeCapture(frame);
                     if (!image) return fail('too_large');
-                    return { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: `Obsidian window screenshot ${image.width}x${image.height}`, images: [image] };
+                    return { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: `Obsidian active note screenshot ${image.width}x${image.height}`, images: [image] };
                 }
                 if (!port.fileExists(action.path)) return fail('not_found');
                 const before = port.getActivePath();
@@ -86,11 +104,13 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
         };
         const scheduled = queue.then(async () => {
             if (aborted()) return fail('aborted');
-            if (action.action === 'open' && suspended) return fail('busy');
+            if ((action.action === 'open' && suspended) || (action.action === 'screenshot' && capturing)) return fail('busy');
             let timer: number | undefined;
             let settled = false;
-            const operation = run().finally(() => { settled = true; if (action.action === 'open') suspended = false; });
+            let expired = false;
+            const operation = run(() => expired).finally(() => { settled = true; if (action.action === 'open') suspended = false; });
             const timeout = new Promise<AppResult>(resolve => { timer = window.setTimeout(() => {
+                expired = true;
                 if (action.action === 'open' && !settled) suspended = true;
                 resolve(fail('timeout'));
             }, timeoutMs); });

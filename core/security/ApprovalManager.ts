@@ -192,7 +192,7 @@ export class ApprovalManager {
      * @param action - Action details
      */
     async requestApproval(action: ApprovalAction): Promise<ApprovalResult> {
-        if (action.type === 'delegate.share_conversation') return this.requestOneTimeApproval(action);
+        if (action.type === 'delegate.share_conversation' || action.type === 'app.screenshot') return this.requestOneTimeApproval(action);
         // Narzędzia zewnętrznych serwerów MCP niosą osobne `approvalTarget` (prefiksowana
         // nazwa narzędzia), żeby trwała reguła „zawsze" była per KONKRETNE narzędzie
         // (external.call::srv__tool), a nie za szeroka external.call::*. Dla pozostałych akcji
@@ -283,7 +283,7 @@ export class ApprovalManager {
                 const response = handler(this.app, { ...action, signal: controller.signal, rememberAvailable: false });
                 void Promise.resolve(response).then(value => {
                     const result = typeof value === 'string' ? value : value?.result;
-                    if (result === 'approve') finish({ result: 'approve', reason: '' });
+                    if (result === 'approve' || (action.type === 'app.screenshot' && result === 'always')) finish({ result: 'approve', reason: '' });
                     else if (result === 'redirect') finish({ result: 'redirect', instruction: typeof value === 'object' ? value?.instruction || '' : '' });
                     else finish({ result: 'deny', reason: typeof value === 'object' ? value?.reason || '' : '' });
                 }, () => finish({ result: 'deny', reason: 'handler_unavailable' }));

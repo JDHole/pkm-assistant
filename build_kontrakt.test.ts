@@ -29,6 +29,29 @@ const releaseSource = read('release.js');
 /** Wzorzec, którym DWA niezależne testy w `core/` czytają listę `external` z esbuild.js. */
 const ESBUILD_EXTERNAL_REGEX = /external:\s*\[([\s\S]*?)\]/;
 
+// Strip comments while preserving quoted strings and their escapes, so commented imports
+// cannot satisfy the guard. Template literals are treated as strings as well.
+function electronReferences(source: string): number {
+    let clean = ''; let quote = ''; let line = false; let block = false;
+    for (let i = 0; i < source.length; i++) {
+        const c = source[i]; const n = source[i + 1];
+        if (line) { if (c === '\n') { line = false; clean += '\n'; } else clean += ' '; continue; }
+        if (block) { if (c === '*' && n === '/') { block = false; clean += '  '; i++; } else clean += c === '\n' ? '\n' : ' '; continue; }
+        if (quote) { clean += c; if (c === '\\' && i + 1 < source.length) clean += source[++i]; else if (c === quote) quote = ''; continue; }
+        if (c === '/' && n === '/') { line = true; clean += '  '; i++; continue; }
+        if (c === '/' && n === '*') { block = true; clean += '  '; i++; continue; }
+        if (c === "'" || c === '"' || c === '`') quote = c;
+        clean += c;
+    }
+    return [...clean.matchAll(/\b(?:require\s*\(\s*['"]electron['"]\s*\)|import\s*\(\s*['"]electron['"]\s*\)|import\s+(?:[^;\n]*?\s+from\s+)?['"]electron['"])/g)].length;
+}
+
+test('electron scanner ignores comments and counts imports', t => {
+    t.is(electronReferences("// require('electron')\n/* import x from 'electron' */"), 0);
+    t.is(electronReferences("import x from 'electron'"), 1);
+    t.is(electronReferences("import('electron'); require(\"electron\")"), 2);
+});
+
 // ── Electron w external tylko z jedynym konsumentem portu zrzutu ─────────────────────
 
 test('external zawiera electron wtedy i tylko wtedy, gdy używa go port zrzutu', t => {
@@ -43,7 +66,7 @@ test('external zawiera electron wtedy i tylko wtedy, gdy używa go port zrzutu',
             const path = join(dir, entry.name);
             if (entry.isDirectory()) scan(path);
             else if (/\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(test|spec)\.[cm]?[jt]sx?$/.test(entry.name)) {
-                for (const _match of read(path).matchAll(/\brequire\s*\(\s*['"]electron['"]\s*\)/g)) consumers.push(path);
+                for (let i = 0; i < electronReferences(read(path)); i++) consumers.push(path);
             }
         }
     };

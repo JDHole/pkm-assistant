@@ -225,44 +225,44 @@ test('screenshot capture validates, resizes and delivers media without disk writ
     const capture = createCapturePort(() => ({ remote: { getCurrentWebContents: () => ({ capturePage: async () => frame }) } }));
     const writes: string[] = [];
     const vault = { write: () => writes.push('write'), create: () => writes.push('create'), createBinary: () => writes.push('createBinary') };
-    const workspace = { listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
+    const workspace = { describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 300, y: 80, width: 900, height: 700 }, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
     const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(workspace, capture));
     const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault } as never, plugin as never, registry);
     const result = await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola');
-    t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian window screenshot 1568x1045', images: [{ mime: 'image/jpeg', base64: 'YWJj', width: 1568, height: 1045 }] });
+    t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1568x1045', images: [{ mime: 'image/jpeg', base64: 'YWJj', width: 1568, height: 1045 }] });
     t.deepEqual(sizes, [{ width: 1568, height: 1045 }]); t.deepEqual(qualities, [85]); t.deepEqual(writes, []);
     const media = asToolMedia('obsidian_app', result); if (!media) return t.fail('media missing');
     const textPart = mediaTextPart('obsidian_app', result);
     const vision = toToolMessageContent(media, { vision: true, textPart });
     t.true(Array.isArray(vision)); if (Array.isArray(vision)) t.deepEqual(vision[1], { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,YWJj' } });
-    t.is(toToolMessageContent(media, { vision: false, textPart }), '{"ok":true,"success":true,"verified":true,"effect":"unchanged","kind":"media","summary":"Obsidian window screenshot 1568x1045","images":[{"mime":"image/jpeg","width":1568,"height":1045}],"image_delivery":"not delivered: model without vision"}');
+    t.is(toToolMessageContent(media, { vision: false, textPart }), '{"ok":true,"success":true,"verified":true,"effect":"unchanged","kind":"media","summary":"Obsidian active note screenshot 1568x1045","images":[{"mime":"image/jpeg","width":1568,"height":1045}],"image_delivery":"not delivered: model without vision"}');
 });
 
 test('screenshot unavailable, quality fallback and timeout', async t => {
     const { createCapturePort } = await import('../obsidian-app/index.js');
-    const workspace = { listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
+    const workspace = { describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 300, y: 80, width: 900, height: 700 }, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
     for (const loader of [() => ({}), () => { throw new Error('missing'); }]) {
         const execute = createAppExecutor(workspace, undefined, createCapturePort(loader));
-        t.deepEqual(await execute({ action: 'screenshot' }), { ok: false, success: false, error: { code: 'capture_unavailable', message: 'capture_unavailable' } });
+        t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) }), { ok: false, success: false, error: { code: 'capture_unavailable', message: 'capture_unavailable' } });
     }
     const qualities: number[] = []; let oversize = false;
     const frame = { getSize: () => ({ width: 800, height: 600 }), resize: () => { throw new Error('unexpected resize'); }, toJPEG: (q: number) => { qualities.push(q); return Buffer.alloc(q === 85 || oversize ? 1500001 : 3, 1); } };
     const execute = createAppExecutor(workspace, undefined, { capture: async () => frame });
-    const result = await execute({ action: 'screenshot' });
-    t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian window screenshot 800x600', images: [{ mime: 'image/jpeg', base64: 'AQEB', width: 800, height: 600 }] });
+    const result = await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) });
+    t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 800x600', images: [{ mime: 'image/jpeg', base64: 'AQEB', width: 800, height: 600 }] });
     t.deepEqual(qualities, [85, 60]); oversize = true;
-    t.deepEqual(await execute({ action: 'screenshot' }), { ok: false, success: false, error: { code: 'too_large', message: 'too_large' } });
+    t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) }), { ok: false, success: false, error: { code: 'too_large', message: 'too_large' } });
     const timeout = createAppExecutor(workspace, 10, { capture: () => new Promise(() => {}) });
-    t.deepEqual(await timeout({ action: 'screenshot' }), { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
+    t.deepEqual(await timeout({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) }), { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
 });
 
 test.serial('screenshot refuses restricted leaves and sub-agent before capture', async t => {
     let captures = 0;
     const port = { listLeaves: () => [{ visible: true, active: false, identity: { kind: 'file' as const, path: 'Secret/S.md' }, title: 'S', viewType: 'markdown' }], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
     const execute = createAppExecutor(port, undefined, { capture: async () => { captures++; return null; } });
-    t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: false }) }), { ok: false, success: false, error: { code: 'restricted_content_visible', message: 'restricted_content_visible' } });
+    t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: false }) }), { ok: false, success: false, error: { code: 'no_capturable_view', message: 'no_capturable_view' } });
     t.deepEqual(await execute({ action: 'screenshot', _invocationToolNames: [] }), { ok: false, success: false, error: { code: 'sub_agent_denied', message: 'sub_agent_denied' } });
     t.is(captures, 0);
 });
@@ -289,7 +289,7 @@ test.serial('MCP blocks screenshots for No-Go leaves and callerToolNames', async
         const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
         const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
         const call = (opts: Parameters<typeof client.executeToolCall>[2] = {}) => client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola', opts);
-        t.deepEqual(await call(), { ok: false, success: false, error: { code: 'restricted_content_visible', message: 'restricted_content_visible' }, isError: true });
+        t.deepEqual(await call(), { ok: false, success: false, error: { code: 'no_capturable_view', message: 'no_capturable_view' }, isError: true });
         t.deepEqual(await call({ callerToolNames: ['obsidian_app'] }), { ok: false, success: false, error: { code: 'sub_agent_denied', message: 'sub_agent_denied' }, isError: true });
         t.is(captures, 0);
     } finally { AccessGuard._noGoFolders = previous; }
@@ -304,40 +304,66 @@ test('workspace adapter reports deferred and container visibility', t => {
     t.deepEqual(port.listLeaves().map(item => item.visible), [false, true, false, 'unknown', 'unknown']);
 });
 
-test('screenshot ignores hidden restricted leaves but refuses visible or uncertain ones', async t => {
+test('screenshot excludes background restricted tabs', async t => {
+    let captures = 0; const rectangles: unknown[] = [];
+    class FakeElement {
+        isShown() { return true; }
+        getBoundingClientRect() { return { x: 300, y: 80, left: 300, top: 80, right: 1200, bottom: 780, width: 900, height: 700 }; }
+        querySelector() { return null; }
+        querySelectorAll() { return []; }
+        ownerDocument = { defaultView: { innerWidth: 1400, innerHeight: 900 }, querySelectorAll: () => [] };
+    }
+    const previousElement = globalThis.HTMLElement;
+    Object.defineProperty(globalThis, 'HTMLElement', { value: FakeElement, configurable: true });
+    const content = new FakeElement();
+    const secret = { isDeferred: false, view: { containerEl: { isShown: () => true }, getViewType: () => 'markdown' }, getViewState: () => ({ state: { file: 'Secret/S.md' } }) };
+    const note = { isDeferred: false, view: { contentEl: content, containerEl: { isShown: () => true }, getViewType: () => 'markdown' }, getViewState: () => ({ state: { file: 'Notes/A.md' } }) };
+    const app = { workspace: { rootSplit: {}, getMostRecentLeaf: () => note, getActiveFile: () => ({ path: 'Notes/A.md' }), iterateAllLeaves: (fn: (value: unknown) => void) => [secret, note].forEach(fn) }, vault: {}, metadataCache: {} };
+    const port = createWorkspacePort(app as never, (_value): _value is never => false);
+    const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
+    const execute = createAppExecutor(port, 5000, { capture: async rect => { captures++; rectangles.push(rect); return frame; } });
+    const context = { authorizeFileRead: (path: string) => ({ allowed: path === 'Notes/A.md' }) };
+    t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
+    t.is(captures, 1);
+    t.deepEqual(rectangles, [{ x: 300, y: 80, width: 900, height: 700 }]);
+    Object.defineProperty(globalThis, 'HTMLElement', { value: previousElement, configurable: true });
+});
+
+test('screenshot ignores background restricted leaves regardless of visibility', async t => {
     let visible: boolean | 'unknown' = false; let captures = 0;
-    const port = { listLeaves: () => [
+    const port = { describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 1, y: 1, width: 1, height: 1 }, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [
         { visible, active: false, identity: { kind: 'unknown' as const } },
         { visible: true, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' },
     ], getActivePath: () => 'Notes/A.md', fileExists: () => true, openPath: async () => {} };
     const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
     const execute = createAppExecutor(port, 5000, { capture: async () => { captures++; return frame; } });
     const context = { authorizeFileRead: (path: string) => ({ allowed: path === 'Notes/A.md' }) };
-    t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian window screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
+    t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
     t.is(captures, 1);
     for (const value of [true, 'unknown'] as const) {
         visible = value; captures = 0;
-        t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: false, success: false, error: { code: 'restricted_content_visible', message: 'restricted_content_visible' } });
-        t.is(captures, 0);
+        t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
+        t.is(captures, 1);
     }
 });
 
 
-test('screenshot uses adapter visibility for a No-Go tab beside an active note', async t => {
+test('screenshot ignores No-Go tabs beside an active note', async t => {
     let deferred = true; let shown: boolean | 'unknown' = true; let captures = 0;
     const secret = { get isDeferred() { return deferred; }, view: { get containerEl() { return shown === 'unknown' ? {} : { isShown: () => shown }; }, getViewType: () => 'markdown' }, getViewState: () => ({ state: { file: 'Secret/S.md' } }) };
     const note = { isDeferred: false, view: { containerEl: { isShown: () => true }, getViewType: () => 'markdown' }, getViewState: () => ({ state: { file: 'Notes/A.md' } }) };
     const app = { workspace: { getMostRecentLeaf: () => note, getActiveFile: () => ({ path: 'Notes/A.md' }), iterateAllLeaves: (fn: (value: unknown) => void) => [secret, note].forEach(fn) }, vault: {} };
-    const port = createWorkspacePort(app as never, (_value): _value is never => false);
+    const adapter = createWorkspacePort(app as never, (_value): _value is never => false);
+    const port = { ...adapter, describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 1, y: 1, width: 1, height: 1 }, embeds: [], blocked: [], overlays: [] }) };
     const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
     const execute = createAppExecutor(port, 5000, { capture: async () => { captures++; return frame; } });
     const context = { authorizeFileRead: (path: string) => ({ allowed: path === 'Notes/A.md' }) };
-    t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian window screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
+    t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
     t.is(captures, 1);
     deferred = false;
     for (const value of [true, 'unknown'] as const) {
         shown = value; captures = 0;
-        t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: false, success: false, error: { code: 'restricted_content_visible', message: 'restricted_content_visible' } });
-        t.is(captures, 0);
+        t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
+        t.is(captures, 1);
     }
 });

@@ -213,7 +213,7 @@ export class ApprovalModal extends Modal {
         // Always approve button. Dla narzędzia zewnętrznego serwera „zawsze"
         // dotyczy TEGO KONKRETNEGO narzędzia (reguła external.call::serverId__tool, nie hurt),
         // więc etykieta + tooltip mówią to wprost.
-        if (this.action.type !== 'delegate.share_conversation') {
+        if (this.action.type !== 'delegate.share_conversation' && this.action.type !== 'app.screenshot') {
             const isExternalCall = this.action.type === 'external.call';
             const alwaysBtn = buttonContainer.createEl('button', {
                 cls: 'mod-muted'
@@ -274,6 +274,8 @@ export class ApprovalModal extends Modal {
         switch (a.type) {
             case 'delegate.share_conversation':
                 return a.description || t('approval.share.title');
+            case 'app.screenshot':
+                return t('approval.desc.app_screenshot', { name });
             case 'vault.write': {
                 const path = a.targetPath || t('approval.fallback.file');
                 const modeLabels: Record<string, string> = {

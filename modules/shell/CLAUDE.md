@@ -205,3 +205,5 @@ z odmową; zamknięcie bez decyzji również odmawia. Rozstrzygnięcie jest jedn
 więc późne kliknięcie nie może zmienić odmowy. Testy DOM w `ApprovalModal.test.ts`
 sprawdzają literalne treści, zestaw przycisków, maskowanie, zamknięcie i abort.
 To UI bramki zgody P3; kafelek i pasek delegacji pozostają zakresem P5.
+
+Screenshot approval describes the active note area and model provider; it has no persistent approval button.
