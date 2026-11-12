@@ -37,7 +37,7 @@ test.serial('DOM capture classification and zoom fail closed', async t => {
         const rects: unknown[] = []; let zoom: unknown = 2;
         const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
         const capture = createCapturePort(() => ({ remote: { getCurrentWebContents: () => ({ getZoomFactor: () => zoom, capturePage: async (rect: unknown) => { rects.push(rect); return frame; } }) } }));
-        const execute = createAppExecutor(port, 1000, capture);
+        const execute = createAppExecutor(port, 1000, capture, { screenshot: 'enabled' });
         const context = { authorizeFileRead: (path: string) => ({ allowed: ['Notes/A.md', 'Notes/B.md', 'Allowed/Container.md'].includes(path) }) };
         const run = async (error: string | null) => {
             const before = rects.length; const result = await execute({ action: 'screenshot' }, context);

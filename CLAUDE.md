@@ -47,7 +47,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/agents/` | `AgentManager`, `AgentProfile`, the built-in onboarding agent, agent personality model (Persona + Skills + Permissions + Team + Memory) |
 | `modules/multimodal/` | Audio STT + image generation + vision + active-note awareness |
 | `modules/onboarding/` | Wizard + `PlaybookManager` |
-| `modules/obsidian-app/` | Opt-in workspace state, navigation and active note area capture |
+| `modules/obsidian-app/` | Opt-in workspace state and navigation |
 | `modules/komunikator/` | Inter-agent mail: one file per message, `kom_send`/`kom_list`/`kom_read` primitives, per-agent invisibility, semi-automatic cleanup |
 | `modules/crystal-soul/` | UI generators (icons, crystals, colors) + `SkinManager` |
 | `modules/shell/` | Settings tab, sidebar, modals |

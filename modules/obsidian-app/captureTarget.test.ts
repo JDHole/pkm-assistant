@@ -10,7 +10,7 @@ const ok = { ok: true, success: true, verified: true, effect: 'unchanged', kind:
 test('capture target checks view, embeds, dynamic content and overlays', async t => {
     const target: CaptureTarget = { kind: 'ok', leaf, rect, embeds: [], blocked: [], overlays: [] };
     let current: CaptureTarget = target; const calls: unknown[] = [];
-    const execute = createAppExecutor({ describeCaptureTarget: () => current, listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} }, 1000, { capture: async value => { calls.push(value); return frame; } });
+    const execute = createAppExecutor({ describeCaptureTarget: () => current, listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} }, 1000, { capture: async value => { calls.push(value); return frame; } }, { screenshot: 'enabled' });
     const cases: [CaptureTarget, string | null][] = [
         [target, null],
         [{ ...target, leaf: { ...leaf, viewType: 'graph' } }, 'no_capturable_view'],
@@ -33,7 +33,7 @@ test('timed out capture stays busy and discards late frame', async t => {
     let release: (value: unknown) => void = () => {}; let count = 0; let encoded = 0;
     const pending = new Promise<unknown>(resolve => { release = resolve; });
     const delayed = { ...frame, toJPEG: () => { encoded++; return Buffer.from('a'); } };
-    const execute = createAppExecutor({ describeCaptureTarget: () => ({ kind: 'ok', leaf, rect, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} }, 20, { capture: async () => { count++; return count === 1 ? pending : frame; } });
+    const execute = createAppExecutor({ describeCaptureTarget: () => ({ kind: 'ok', leaf, rect, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} }, 20, { capture: async () => { count++; return count === 1 ? pending : frame; } }, { screenshot: 'enabled' });
     t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
     for (let i = 0; i < 2; i++) t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: false, success: false, error: { code: 'busy', message: 'busy' } });
     t.is(count, 1); release(delayed); await pending; await new Promise(resolve => window.setTimeout(resolve, 0));
@@ -44,7 +44,7 @@ test('stopped capture discards the late frame and remains busy', async t => {
     let release: (value: unknown) => void = () => {}; let encoded = 0;
     const pending = new Promise<unknown>(resolve => { release = resolve; });
     const controller = new AbortController();
-    const execute = createAppExecutor({ describeCaptureTarget: () => ({ kind: 'ok', leaf, rect, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} }, 30, { capture: () => pending });
+    const execute = createAppExecutor({ describeCaptureTarget: () => ({ kind: 'ok', leaf, rect, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} }, 30, { capture: () => pending }, { screenshot: 'enabled' });
     const first = execute({ action: 'screenshot' }, { ...context, abortSignal: controller.signal });
     await new Promise(resolve => window.setTimeout(resolve, 0)); controller.abort();
     t.deepEqual(await first, { ok: false, success: false, error: { code: 'aborted', message: 'aborted' } });

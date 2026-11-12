@@ -45,7 +45,7 @@ Everything the agent sends to the model - system prompt, memory, tools, skills -
 
 **Full Prompt Transparency** - The Prompt Inspector shows every section of the system prompt with token counts. Edit any part. No black boxes.
 
-**Built-in MCP Tools** - Read/write notes, memory, skills, delegation, live artifacts, web search (5 providers), image generation, audio STT, agent-to-agent mail, and opt-in `obsidian_app` for workspace tabs, opening notes, and capturing the active note area. The app tool is disabled by default; each capture requires approval. Plus external MCP servers (stdio/HTTP) you connect yourself.
+**Built-in MCP Tools** - Read/write notes, memory, skills, delegation, live artifacts, web search (5 providers), image generation, audio STT, agent-to-agent mail, and opt-in `obsidian_app` for workspace tabs and opening notes. The app tool is disabled by default. Plus external MCP servers (stdio/HTTP) you connect yourself.
 
 **Sub-Agent Delegation** - Agents delegate research and strategy tasks to cheaper/smaller models, saving tokens while maintaining quality.
 
@@ -130,7 +130,7 @@ From there, create unlimited custom agents with their own personalities, roles, 
 
 **Your content goes only to providers you configure.** When you use chat, semantic search indexing, web search, speech-to-text, or image generation, the relevant content (chat messages, note excerpts, attachments, search queries, audio) is sent to the provider you explicitly selected in settings. Until you configure a provider and use a feature, nothing leaves your vault.
 
-When the Obsidian app tool is enabled and you approve a screenshot, an image of the active note area can be sent to your selected model provider when the model and provider support tool-result images.
+Screenshot functionality is prepared but disabled in this version; no screenshot is sent.
 
 Depending on your configuration, the plugin can connect to:
 

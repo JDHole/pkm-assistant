@@ -18,7 +18,7 @@ export interface WorkspacePort {
 export type CaptureRect = { x: number; y: number; width: number; height: number };
 export type CaptureTarget = { kind: 'none' } | { kind: 'ok'; leaf: LeafInfo; rect: CaptureRect; embeds: (string | null)[]; blocked: string[]; overlays: string[] };
 export type AppAction = { action: 'state' } | { action: 'screenshot' } | { action: 'open'; path: string; newTab: boolean };
-export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large' | 'no_capturable_view' | 'overlay_visible';
+export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large' | 'no_capturable_view' | 'overlay_visible' | 'screenshot_disabled';
 export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown } | { ok: true; success: true; verified: true; effect: 'unchanged'; kind: 'media'; summary: string; images: { mime: 'image/jpeg'; base64: string; width: number; height: number }[] };
 export function isObsidianAppEnabled(settings: { pkmAssistant?: { obsidianAppEnabled?: boolean } }): boolean {
     return settings.pkmAssistant?.obsidianAppEnabled === true;
@@ -61,7 +61,9 @@ export function decideCapture(target: CaptureTarget, authorize?: AppContext['aut
     if (target.blocked.length || target.embeds.some(path => !authorizedPath(path, authorize))) return { kind: 'error', code: 'restricted_content_visible' };
     return { kind: 'ok', rect };
 }
-export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS, capturePort: CapturePort | null = null) {
+export type AppExecutorOptions = { screenshot?: 'disabled' | 'enabled' };
+export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS, capturePort: CapturePort | null = null, options: AppExecutorOptions = {}) {
+    const screenshotEnabled = options.screenshot === 'enabled';
     let queue: Promise<void> = Promise.resolve();
     let suspended = false;
     let capturing = false;
@@ -69,6 +71,7 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
         if ('_invocationToolNames' in args || '_invocationSubRunContext' in args) return Promise.resolve(fail('sub_agent_denied'));
         const action = parseAction(args);
         if (!action) return Promise.resolve(fail('invalid_args'));
+        if (action.action === 'screenshot' && !screenshotEnabled) return Promise.resolve(fail('screenshot_disabled'));
         const aborted = () => context?.abortSignal?.aborted === true || context?.shouldAbort?.() === true;
         if (aborted()) return Promise.resolve(fail('aborted'));
         if ((action.action === 'open' && suspended) || (action.action === 'screenshot' && capturing)) return Promise.resolve(fail('busy'));

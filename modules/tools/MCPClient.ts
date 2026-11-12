@@ -988,6 +988,9 @@ export class MCPClient {
             if (!tool) {
                 throw new Error(`Tool not found: ${toolCall.name}`);
             }
+            if (toolCall.name === 'obsidian_app' && tool.source === 'built-in' && tool.screenshotEnabled === false && argsWithContext.action === 'screenshot') {
+                return { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'screenshot_disabled' } };
+            }
             if (toolCall.name === 'subagent_changes' && tool.source === 'built-in') {
                 const reviewContext = draftReviewContext({ plugin: this.plugin, registry: this.toolRegistry,
                     agentName: invocationAgentName ?? '', autonomy, opts, consent: this.sessionWriteConsent,

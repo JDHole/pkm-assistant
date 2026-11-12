@@ -226,7 +226,7 @@ test('screenshot capture validates, resizes and delivers media without disk writ
     const writes: string[] = [];
     const vault = { write: () => writes.push('write'), create: () => writes.push('create'), createBinary: () => writes.push('createBinary') };
     const workspace = { describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 300, y: 80, width: 900, height: 700 }, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
-    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(workspace, capture));
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(workspace, capture, { screenshot: 'enabled' }));
     const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault } as never, plugin as never, registry);
@@ -244,24 +244,24 @@ test('screenshot unavailable, quality fallback and timeout', async t => {
     const { createCapturePort } = await import('../obsidian-app/index.js');
     const workspace = { describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 300, y: 80, width: 900, height: 700 }, embeds: [], blocked: [], overlays: [] }), listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
     for (const loader of [() => ({}), () => { throw new Error('missing'); }]) {
-        const execute = createAppExecutor(workspace, undefined, createCapturePort(loader));
+        const execute = createAppExecutor(workspace, undefined, createCapturePort(loader), { screenshot: 'enabled' });
         t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) }), { ok: false, success: false, error: { code: 'capture_unavailable', message: 'capture_unavailable' } });
     }
     const qualities: number[] = []; let oversize = false;
     const frame = { getSize: () => ({ width: 800, height: 600 }), resize: () => { throw new Error('unexpected resize'); }, toJPEG: (q: number) => { qualities.push(q); return Buffer.alloc(q === 85 || oversize ? 1500001 : 3, 1); } };
-    const execute = createAppExecutor(workspace, undefined, { capture: async () => frame });
+    const execute = createAppExecutor(workspace, undefined, { capture: async () => frame }, { screenshot: 'enabled' });
     const result = await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) });
     t.deepEqual(result, { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 800x600', images: [{ mime: 'image/jpeg', base64: 'AQEB', width: 800, height: 600 }] });
     t.deepEqual(qualities, [85, 60]); oversize = true;
     t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) }), { ok: false, success: false, error: { code: 'too_large', message: 'too_large' } });
-    const timeout = createAppExecutor(workspace, 10, { capture: () => new Promise(() => {}) });
+    const timeout = createAppExecutor(workspace, 10, { capture: () => new Promise(() => {}) }, { screenshot: 'enabled' });
     t.deepEqual(await timeout({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: true }) }), { ok: false, success: false, error: { code: 'timeout', message: 'timeout' } });
 });
 
 test.serial('screenshot refuses restricted leaves and sub-agent before capture', async t => {
     let captures = 0;
     const port = { listLeaves: () => [{ visible: true, active: false, identity: { kind: 'file' as const, path: 'Secret/S.md' }, title: 'S', viewType: 'markdown' }], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
-    const execute = createAppExecutor(port, undefined, { capture: async () => { captures++; return null; } });
+    const execute = createAppExecutor(port, undefined, { capture: async () => { captures++; return null; } }, { screenshot: 'enabled' });
     t.deepEqual(await execute({ action: 'screenshot' }, { authorizeFileRead: () => ({ allowed: false }) }), { ok: false, success: false, error: { code: 'no_capturable_view', message: 'no_capturable_view' } });
     t.deepEqual(await execute({ action: 'screenshot', _invocationToolNames: [] }), { ok: false, success: false, error: { code: 'sub_agent_denied', message: 'sub_agent_denied' } });
     t.is(captures, 0);
@@ -270,7 +270,7 @@ test.serial('screenshot refuses restricted leaves and sub-agent before capture',
 test('screenshot requests approval through MCP with a scoped target', async t => {
     let captures = 0; const requests: Record<string, unknown>[] = [];
     const port = { listLeaves: () => [], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
-    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port, { capture: async () => { captures++; return null; } }));
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port, { capture: async () => { captures++; return null; } }, { screenshot: 'enabled' }));
     const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async (req: Record<string, unknown>) => { requests.push(req); return { result: 'deny' }; } } };
     const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
@@ -284,7 +284,7 @@ test.serial('MCP blocks screenshots for No-Go leaves and callerToolNames', async
     try {
         let captures = 0;
         const port = { listLeaves: () => [{ visible: true, active: false, identity: { kind: 'file' as const, path: 'Secret/S.md' }, title: 'S', viewType: 'markdown' }], getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
-        const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port, { capture: async () => { captures++; return null; } }));
+        const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port, { capture: async () => { captures++; return null; } }, { screenshot: 'enabled' }));
         const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
         const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
         const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
@@ -321,7 +321,7 @@ test('screenshot excludes background restricted tabs', async t => {
     const app = { workspace: { rootSplit: {}, getMostRecentLeaf: () => note, getActiveFile: () => ({ path: 'Notes/A.md' }), iterateAllLeaves: (fn: (value: unknown) => void) => [secret, note].forEach(fn) }, vault: {}, metadataCache: {} };
     const port = createWorkspacePort(app as never, (_value): _value is never => false);
     const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
-    const execute = createAppExecutor(port, 5000, { capture: async rect => { captures++; rectangles.push(rect); return frame; } });
+    const execute = createAppExecutor(port, 5000, { capture: async rect => { captures++; rectangles.push(rect); return frame; } }, { screenshot: 'enabled' });
     const context = { authorizeFileRead: (path: string) => ({ allowed: path === 'Notes/A.md' }) };
     t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
     t.is(captures, 1);
@@ -336,7 +336,7 @@ test('screenshot ignores background restricted leaves regardless of visibility',
         { visible: true, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' },
     ], getActivePath: () => 'Notes/A.md', fileExists: () => true, openPath: async () => {} };
     const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
-    const execute = createAppExecutor(port, 5000, { capture: async () => { captures++; return frame; } });
+    const execute = createAppExecutor(port, 5000, { capture: async () => { captures++; return frame; } }, { screenshot: 'enabled' });
     const context = { authorizeFileRead: (path: string) => ({ allowed: path === 'Notes/A.md' }) };
     t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
     t.is(captures, 1);
@@ -356,7 +356,7 @@ test('screenshot ignores No-Go tabs beside an active note', async t => {
     const adapter = createWorkspacePort(app as never, (_value): _value is never => false);
     const port = { ...adapter, describeCaptureTarget: () => ({ kind: 'ok' as const, leaf: { visible: true as const, active: true, identity: { kind: 'file' as const, path: 'Notes/A.md' }, title: 'A', viewType: 'markdown' }, rect: { x: 1, y: 1, width: 1, height: 1 }, embeds: [], blocked: [], overlays: [] }) };
     const frame = { getSize: () => ({ width: 1, height: 1 }), resize: () => frame, toJPEG: () => Buffer.from('a') };
-    const execute = createAppExecutor(port, 5000, { capture: async () => { captures++; return frame; } });
+    const execute = createAppExecutor(port, 5000, { capture: async () => { captures++; return frame; } }, { screenshot: 'enabled' });
     const context = { authorizeFileRead: (path: string) => ({ allowed: path === 'Notes/A.md' }) };
     t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
     t.is(captures, 1);
@@ -366,4 +366,21 @@ test('screenshot ignores No-Go tabs beside an active note', async t => {
         t.deepEqual(await execute({ action: 'screenshot' }, context), { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: 'Obsidian active note screenshot 1x1', images: [{ mime: 'image/jpeg', base64: 'YQ==', width: 1, height: 1 }] });
         t.is(captures, 1);
     }
+});
+
+
+test('default screenshot is hidden and rejected through MCP without approval or port access', async t => {
+    let portCalls = 0; let approvals = 0;
+    const port = { listLeaves: () => { portCalls++; return []; }, describeCaptureTarget: () => { portCalls++; return { kind: 'none' as const }; }, getActivePath: () => { portCalls++; return null; }, fileExists: () => false, openPath: async () => {} };
+    const tool = createObsidianAppTool(port, { capture: async () => { portCalls++; return null; } });
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
+    t.false(tool.description.includes('screenshot'));
+    const registry = new ToolRegistry(); registry.registerTool(tool);
+    const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => { approvals++; return { result: 'approve' }; } } };
+    const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
+    const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'screenshot_disabled' } };
+    t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola', { autonomy: 'edge' }), expected);
+    t.deepEqual(await createAppExecutor(port)({ action: 'screenshot' }), expected);
+    t.is(portCalls, 0); t.is(approvals, 0);
 });
