@@ -37,6 +37,7 @@ modules/models/
 ├── testing/harness.ts           # atrapy testów modułu (NIE kod produkcyjny, AVA go nie odpala)
 └── providers/                   # dziewięciu dostawców, jeden plik = jedna platforma
     ├── OpenAiCompatibleProvider.ts   # baza sześciu dostawców kształtu OpenAI
+    ├── toolImages.ts                 # przenoszenie obrazów narzędzi do wiadomości user
     ├── openai.ts  deepseek.ts  groq.ts  lm_studio.ts  open_router.ts  xai.ts
     ├── anthropic.ts                  # Messages API (własny kształt)
     ├── gemini.ts                     # generateContent (własny kształt, strumień = TABLICA JSON)
@@ -317,6 +318,12 @@ AWAITOWANE `done` → resolve. To WŁAŚCIWOŚĆ DOSTAWCY, nie podmiana klasy w 
 Wiadomość user złożona z samego obrazu na modelu bez vision idzie jako
 `t('model.image_stripped')` - nie blokuje wysyłki. Wiadomość MIESZANA traci TYLKO blok obrazu.
 Klucze modułu: `model.stream_aborted`, `model.image_stripped`.
+
+### Obraz w wyniku narzędzia - per provider
+
+OpenAI-compatible wysyła wynik tool jako tekst, a obrazy w wiadomości user za blokiem tool.
+Anthropic umieszcza image w `tool_result`; Ollama wysyła `images` na user za blokiem tool.
+Gemini pozostaje bez zmian; obsługa obrazów w wynikach narzędzi ma tam znane ograniczenie.
 
 ### 🟠 13. Step 4b (fallback ról sub) musi znać `agent.models.main`, nie tylko legacy `agent.model`
 

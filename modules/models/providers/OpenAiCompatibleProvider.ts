@@ -16,6 +16,7 @@ import { supportsEffort } from '../effort.js';
  * `decorateBody`, `decorateHeaders`, `acceptsModel`), a nie do kopiowania całej klasy.
  */
 import { t } from '../../../core/i18n/index.js';
+import { moveToolImagesToUser } from './toolImages.js';
 import { maskSensitiveData, normalizeError, redactSecretsDeep, redactSecretValues } from '../../../core/index.js';
 import { isVisionModel } from '../capabilities.js';
 import { resolveMaxOutputTokens } from '../cache_utils.js';
@@ -265,7 +266,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
     }
 
     /**
-     * Przygotowanie transkryptu przed wysyłką. Jedyna zmiana, jaką robimy, to wycięcie
+     * Przygotowanie transkryptu przed wysyłką: przeniesienie obrazów narzędzi i wycięcie
      * obrazów z wiadomości kierowanych do modelu bez obsługi obrazu — w miejsce obrazu
      * wchodzi komunikat z tłumaczeń, żeby model wiedział, czego nie dostał, a wysyłka
      * nie została zablokowana.
@@ -276,11 +277,11 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
         ctx: ProviderContext,
     ): OpenAiRequestMessage[] {
         if (!messages.some(hasImageBlock)) return messages;
-        if (this.acceptsImages(modelId, ctx)) return messages;
+        if (this.acceptsImages(modelId, ctx)) return moveToolImagesToUser(messages);
 
         ctx.log?.warn?.('models.image_stripped', { provider: this.info.id, model: modelId });
         const placeholder = t('model.image_stripped');
-        return messages.map(message => {
+        const stripped = messages.map(message => {
             if (!hasImageBlock(message)) return message;
             const blocks = message.content as ContentBlock[];
             const onlyImages = blocks.every(isImageBlock);
@@ -290,6 +291,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
                 content: blocks.map(block => (isImageBlock(block) ? { type: 'text', text: placeholder } : block)),
             };
         });
+        return moveToolImagesToUser(stripped);
     }
 
     /** Czy ten model przyjmie obraz. */

@@ -298,7 +298,7 @@ function wywolanieDlaOllamy(wywolanie: unknown): Json | null {
 }
 
 /**
- * Cały transkrypt na kształt Ollamy. Jedyna zmiana treści, jaką tu robimy, to wycięcie
+ * Cały transkrypt na kształt Ollamy: przeniesienie obrazów narzędzi i wycięcie
  * obrazów kierowanych do modelu, który ich nie przeczyta: w miejsce obrazu wchodzi
  * komunikat z tłumaczeń, żeby model wiedział, czego nie dostał, a wysyłka nie została
  * zablokowana.
@@ -313,8 +313,19 @@ function transkryptDlaOllamy(
     const zastepnik = t('model.image_stripped');
     const out: WiadomoscOllamy[] = [];
 
+    let obrazyNarzedzi: string[] = [];
+    let identyfikatory: string[] = [];
+    const dopiszObrazy = (): void => {
+        if (obrazyNarzedzi.length === 0) return;
+        out.push({ role: 'user', content: t('model.tool_image_intro', { ids: identyfikatory.join(', ') }), images: obrazyNarzedzi });
+        obrazyNarzedzi = [];
+        identyfikatory = [];
+    };
+
     for (const wiadomosc of wiadomosci) {
         if (!jestObiektem(wiadomosc)) continue;
+        const rola = rolaDlaOllamy(wiadomosc.role);
+        if (rola !== 'tool') dopiszObrazy();
         const rozbita = rozbijTresc(wiadomosc.content, obrazyDozwolone, zastepnik);
 
         // Ostrzeżenie leci RAZ na turę, nie raz na obraz — inaczej album zdjęć zalałby log.
@@ -323,8 +334,14 @@ function transkryptDlaOllamy(
             ctx.log?.warn?.('models.image_stripped', { provider: OLLAMA_INFO.id, model: modelId });
         }
 
-        const przelozona: WiadomoscOllamy = { role: rolaDlaOllamy(wiadomosc.role), content: rozbita.tekst };
-        if (rozbita.obrazy.length > 0) przelozona.images = rozbita.obrazy;
+        const przelozona: WiadomoscOllamy = { role: rola, content: rozbita.tekst };
+        if (rozbita.obrazy.length > 0 && rola === 'tool') {
+            obrazyNarzedzi.push(...rozbita.obrazy);
+            identyfikatory.push(jakoTekst(wiadomosc.tool_call_id));
+            przelozona.content = [rozbita.tekst, t('model.tool_image_marker')].filter(Boolean).join('\n');
+        } else if (rozbita.obrazy.length > 0) {
+            przelozona.images = rozbita.obrazy;
+        }
 
         const myslenie = jakoTekst(wiadomosc.reasoning_content);
         if (myslenie) przelozona.thinking = myslenie;
@@ -339,6 +356,7 @@ function transkryptDlaOllamy(
 
         out.push(przelozona);
     }
+    dopiszObrazy();
 
     return out;
 }
