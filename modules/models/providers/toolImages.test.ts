@@ -30,16 +30,19 @@ test('LM Studio przenosi obraz wyniku za blok narzędzi', t => {
 
 test('ciąg wyników zbiera obrazy i kończy się przed assistant', t => {
   const input = transcript();
-  input.push({ role: 'function', tool_call_id: 'c2', content: [image('REVG')] }, { role: 'assistant', content: 'dalej' });
+  input[1] = { role: 'assistant', content: '', function_call: { name: 'generate_image', arguments: '{}' } };
+  input[2] = { role: 'function', name: 'generate_image', content: [image('QUJD')] };
+  input.push({ role: 'assistant', content: 'dalej' });
   const messages = body(lmStudioProvider, 'gpt-5.6-terra', input).messages;
-  t.deepEqual(messages.map(m => m.role), ['user', 'assistant', 'tool', 'function', 'user', 'assistant']);
-  t.deepEqual(messages[4], { role: 'user', content: [{ type: 'text', text: 'Image(s) returned by tool call(s): c1, c2' }, image('QUJD'), image('REVG')] });
-  t.deepEqual(messages[3].content, '[Image attached in the next message.]');
-  t.deepEqual(input, [...transcript(), { role: 'function', tool_call_id: 'c2', content: [image('REVG')] }, { role: 'assistant', content: 'dalej' }]);
+  t.deepEqual(messages.map(m => m.role), ['user', 'assistant', 'function', 'user', 'assistant']);
+  t.deepEqual(messages[3], { role: 'user', content: [{ type: 'text', text: 'Image(s) returned by tool call(s): ' }, image('QUJD')] });
+  t.deepEqual(messages[2].content, '[Image attached in the next message.]');
+  t.deepEqual(input[2], { role: 'function', name: 'generate_image', content: [image('QUJD')] });
 });
 
 test('dwa wyniki tool tworzą jedną wiadomość z obrazami w kolejności', t => {
   const input = transcript();
+  input[1].tool_calls?.push({ id: 'c2', type: 'function', function: { name: 'generate_image', arguments: '{}' } });
   input.push({ role: 'tool', tool_call_id: 'c2', content: [image('REVG')] });
   const messages = body(lmStudioProvider, 'gpt-5.6-terra', input).messages;
   t.deepEqual(messages.map(m => m.role), ['user', 'assistant', 'tool', 'tool', 'user']);
@@ -65,6 +68,11 @@ test('helper zostawia tablicę bez obrazów narzędzi i załącznik usera', t =>
 test('Anthropic zachowuje obrazy i tekstowy wynik', t => {
   const build = (messages: OpenAiRequestMessage[]) => JSON.parse(anthropicProvider.buildRequest({ messages }, makeCtx({ modelId: 'claude-sonnet-4-20250514' }), false).body ?? '{}') as { messages: Array<{ content: Array<{ content: unknown }> }> };
   t.deepEqual(build(transcript()).messages[2].content[0].content, [{ type: 'text', text: 'ok' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }]);
+  for (const content of [[image('QUJD')], [{ type: 'text', text: '' }, image('QUJD')]]) {
+    const onlyImage = transcript();
+    onlyImage[2].content = content;
+    t.deepEqual(build(onlyImage).messages[2].content[0].content, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }]);
+  }
   const input = transcript();
   input[2].content = 'ok';
   t.is(build(input).messages[2].content[0].content, 'ok');

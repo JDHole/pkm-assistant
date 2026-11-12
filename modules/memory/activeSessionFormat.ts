@@ -280,24 +280,25 @@ export function unescapeEventFieldLabels(text: string): string {
     return text.replace(ESCAPED_FIELD_LABEL_LINE_RE, '$1$2');
 }
 
-export function redactInlineImages(value: unknown): unknown {
-    const placeholder = (mime: string, length: number) =>
-        `[image ${mime} ~${Math.max(1, Math.round(length * 3 / 4 / 1024))} kB]`;
-    if (typeof value === 'string') {
-        return value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)/g,
-            (_match, mime: string, base64: string) => placeholder(mime, base64.length));
+function sizeInKb(length: number): number {
+    return Math.max(1, Math.round(length * 3 / 4 / 1024));
+}
+
+/** Redaguje obrazy i pola base64 w tekstowej wartości wyniku lub argumentów. */
+export function redactInlineImages(value: string): string {
+    return value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)/g,
+        (_match, mime: string, base64: string) => `[image ${mime} ~${sizeInKb(base64.length)} kB]`)
+        .replace(/"base64"\s*:\s*"([A-Za-z0-9+/=]{16,})"/g,
+            (_match, base64: string) => `"base64":"[binary ~${sizeInKb(base64.length)} kB]"`);
+}
+
+function redactSessionValue(this: Record<string, unknown>, key: string, value: unknown): unknown {
+    if (key === 'base64' && typeof value === 'string' && value.length >= 16) {
+        const mime = typeof this.mime === 'string' && this.mime.startsWith('image/') ? this.mime
+            : typeof this.format === 'string' ? `image/${this.format}` : null;
+        return mime ? `[image ${mime} ~${sizeInKb(value.length)} kB]` : `[binary ~${sizeInKb(value.length)} kB]`;
     }
-    if (Array.isArray(value)) return value.map(redactInlineImages);
-    if (value === null || typeof value !== 'object') return value;
-    const prototype: unknown = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return value;
-    const object = value as Record<string, unknown>;
-    const mime = typeof object.mime === 'string' ? object.mime
-        : typeof object.format === 'string' ? `image/${object.format}` : 'image';
-    return Object.fromEntries(Object.entries(object).map(([key, entry]) => [key,
-        key === 'base64' && typeof entry === 'string' && entry.length >= 16
-            ? placeholder(mime, entry.length) : redactInlineImages(entry),
-    ]));
+    return typeof value === 'string' ? redactInlineImages(value) : value;
 }
 
 /**
@@ -332,8 +333,9 @@ export function formatSessionEvent(
             lines.push('**seq:**', '', String(value), '');
             return;
         }
-        const redacted = redactInlineImages(value);
-        const text = typeof redacted === 'string' ? redacted : JSON.stringify(redacted, null, 2);
+        const redact = label === 'result' || label === 'args';
+        const text = typeof value === 'string' ? (redact ? redactInlineImages(value) : value)
+            : JSON.stringify(value, redact ? redactSessionValue : undefined, 2);
         lines.push(`**${label}:**`);
         lines.push('');
         lines.push(escapeEventFieldText(text));

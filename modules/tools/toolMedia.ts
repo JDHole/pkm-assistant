@@ -1,3 +1,4 @@
+/** Obraz zwrócony przez narzędzie. */
 export interface ToolMediaImage {
     mime: string;
     base64: string;
@@ -5,6 +6,7 @@ export interface ToolMediaImage {
     height?: number;
 }
 
+/** Wynik narzędzia zawierający obrazy i opis. */
 export interface ToolMediaResult {
     kind: 'media';
     summary: string;
@@ -12,6 +14,7 @@ export interface ToolMediaResult {
     [k: string]: unknown;
 }
 
+/** Blok tekstu lub obrazu przekazywany modelowi. */
 export type ToolContentBlock =
     | { type: 'text'; text: string }
     | { type: 'image_url'; image_url: { url: string } };
@@ -22,36 +25,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isImage(value: unknown): value is ToolMediaImage {
     return isRecord(value) && typeof value.mime === 'string' && /^image\/.+/.test(value.mime)
-        && typeof value.base64 === 'string' && value.base64.length > 0;
+        && typeof value.base64 === 'string' && value.base64.length > 0
+        && (!('width' in value) || (typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0))
+        && (!('height' in value) || (typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0));
 }
 
+/** Rozpoznaje wynik mediów i dostosowuje wynik generatora obrazu. */
 export function asToolMedia(toolName: string, raw: unknown): ToolMediaResult | null {
     if (!isRecord(raw)) return null;
-    if (raw.kind === 'media' && Array.isArray(raw.images)
-        && raw.images.length > 0 && raw.images.every(isImage)) {
-        return raw as unknown as ToolMediaResult;
+    if (raw.kind === 'media') {
+        return Array.isArray(raw.images) && raw.images.length > 0 && raw.images.every(isImage)
+            ? raw as unknown as ToolMediaResult : null;
     }
     if (toolName === 'generate_image' && typeof raw.base64 === 'string' && raw.base64.length > 0) {
         const { base64, ...rest } = raw;
-        return { ...rest, kind: 'media', summary: '', images: [{ mime: `image/${String(raw.format || 'png')}`, base64 }] };
+        return { ...rest, kind: 'media', summary: '', images: [{ mime: `image/${typeof raw.format === 'string' && raw.format ? raw.format : 'png'}`, base64 }] };
     }
     return null;
 }
 
-export function mediaTextPart(toolName: string, raw: unknown): Record<string, unknown> {
-    if (!isRecord(raw)) return {};
-    if (raw.kind === 'media' && Array.isArray(raw.images)) {
-        return { ...raw, images: raw.images.filter(isImage).map(({ mime, width, height }) => ({
-            mime, ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }),
-        })) };
+function stripBinary(value: unknown): unknown {
+    if (typeof value === 'string') {
+        if (value.startsWith('data:image/')) {
+            const mime = /^data:(image\/[A-Za-z0-9.+-]+)/.exec(value)?.[1] ?? 'image';
+            return `[image ${mime}]`;
+        }
+        return value.replace(/data:(image\/[A-Za-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/g, '[image $1]');
     }
-    if (toolName === 'generate_image') {
-        const { base64: _base64, ...rest } = raw;
-        return rest;
-    }
-    return { ...raw };
+    if (Array.isArray(value)) return value.map(stripBinary);
+    if (!isRecord(value)) return value;
+    return Object.fromEntries(Object.entries(value)
+        .filter(([key]) => key !== 'base64')
+        .map(([key, entry]) => [key, stripBinary(entry)]));
 }
 
+/** Tworzy opis wyniku bez danych binarnych. */
+export function mediaTextPart(_toolName: string, raw: unknown): Record<string, unknown> {
+    if (!isRecord(raw)) return {};
+    const cleaned = stripBinary(raw) as Record<string, unknown>;
+    if (raw.kind === 'media' && Array.isArray(raw.images)) {
+        cleaned.images = raw.images.filter(isImage).map(({ mime, width, height }) => ({
+            mime, ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }),
+        }));
+    }
+    return cleaned;
+}
+
+/** Przygotowuje treść wyniku dla modelu z obsługą vision lub bez niej. */
 export function toToolMessageContent(
     media: ToolMediaResult,
     opts: { vision: boolean; textPart: Record<string, unknown> },

@@ -817,9 +817,17 @@ test('redakcja obrazów w zdarzeniach i po odczycie sesji', t => {
 });
 
 
-test('redactInlineImages kopiuje zagnieżdżone wartości i redaguje oba rodzaje danych', t => {
-    const input = { mime: 'image/jpeg', base64: 'C'.repeat(16), nested: ['tekst data:image/webp;base64,QUJD koniec'] };
-    const before = structuredClone(input);
-    t.deepEqual(redactInlineImages(input), { mime: 'image/jpeg', base64: '[image image/jpeg ~1 kB]', nested: ['tekst [image image/webp ~1 kB] koniec'] });
-    t.deepEqual(input, before);
+test('redakcja podczas serializacji zachowuje tekst rozmowy i toJSON', t => {
+    const timestamp = '2026-11-12T10:00:00.000Z';
+    const raw = { mime: 'image/png', base64: 'A'.repeat(2048) };
+    const serialized = formatSessionEvent('tool_result', { result: JSON.stringify(raw) }, timestamp);
+    t.is(serialized, '## 2026-11-12T10:00:00.000Z — tool result\n\n**result:**\n\n{"mime":"image/png","base64":"[binary ~2 kB]"}\n\n');
+    t.is(formatSessionEvent('mcp_call', { result: raw }, timestamp), '## 2026-11-12T10:00:00.000Z — mcp call\n\n**result:**\n\n{\n  "mime": "image/png",\n  "base64": "[image image/png ~2 kB]"\n}\n\n');
+    t.is(formatSessionEvent('user_message', { content: 'kod: "data:image/png;base64,QUJDQUJDQUJDQUJDQUJD"' }, timestamp), '## 2026-11-12T10:00:00.000Z — user message\n\n**content:**\n\nkod: "data:image/png;base64,QUJDQUJDQUJDQUJDQUJD"\n\n');
+    const cyclic: { text: string; self?: unknown; toJSON(): { text: string } } = { text: 'ok', toJSON() { return { text: this.text }; } };
+    cyclic.self = cyclic;
+    t.is(formatSessionEvent('tool_result', { result: cyclic }, timestamp), '## 2026-11-12T10:00:00.000Z — tool result\n\n**result:**\n\n{\n  "text": "ok"\n}\n\n');
+    t.is(formatSessionEvent('mcp_call', { args: { base64: 'Q'.repeat(32) } }, timestamp), '## 2026-11-12T10:00:00.000Z — mcp call\n\n**args:**\n\n{\n  "base64": "[binary ~1 kB]"\n}\n\n');
+    t.is(redactInlineImages('tekst data:image/webp;base64,QUJD koniec'), 'tekst [image image/webp ~1 kB] koniec');
+    t.is(raw.base64, 'A'.repeat(2048));
 });

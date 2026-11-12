@@ -1,6 +1,6 @@
 # modules/memory/
 
-Plik sesji nie przechowuje base64 obrazów: `formatSessionEvent` redaguje dane obrazów w polach zdarzeń przed zapisem.
+`formatSessionEvent` redaguje dane obrazów i pola base64 w `result` oraz `args` przed zapisem; tekst rozmowy pozostaje nietknięty.
 
 Zdarzenie `agent_loop_partial` zapisuje opcjonalne `question`; przy odczycie jego treść i rozstrzygnięcie są dodawane jako oznaczona część wiadomości dla modelu. Dorobek snapshotu pozostaje osobny.
 
