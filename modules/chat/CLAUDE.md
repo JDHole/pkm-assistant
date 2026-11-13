@@ -2106,6 +2106,17 @@ zmienną `.cs-root`. `_drawConnectorLines` nie wymaga zmiany: dla paddingu 6 px
 x = (6 + 20) - 20 + 9 = 15 px względem listy. Pseudo-elementy kompensują
 border-left 1/3 px, więc wszystkie kryształy zachowują tę samą oś.
 
+U8: zwykły dymek użytkownika na telefonie ma prawy margines 8 px i tekst bez
+wewnętrznego wcięcia rynny; `.cs-trim-bubble`, rynna agenta 20 px i geometria
+kryształów/łącznika pozostają bez zmian. Nagłówki Tile mają tytuł nad skrótem
+12 px, osobną prawą kolumnę kropki stanu i minimum 44 px wysokości; czas myślenia
+oraz opcjonalne oznaczenia sub-agenta zajmują kolejne wiersze kolumny tekstu.
+Pomiar U8 w Chrome 153, z produkcyjnymi fabrykami kafelków i atrapą hosta:
+przy 360x804 tekst użytkownika 274 -> 306 px, lista scrollWidth = clientWidth = 354,
+kod/tabela przewijane osobno. 48 wariantów (przed/po, PL/EN, jasny/ciemny,
+telefon 300/360, desktop 360/1024, tablet 360/768) potwierdziło układ nagłówków
+i brak zmian desktopu/tabletu oraz obcięcia kontekstu. To nie jest test WebView Androida.
+
 Na telefonie panel wpisywania jest elementem flex pod przewijaną listą, z marginesem
 4 px. Cała wysokość panelu (textarea/todo, chipy, kolejka i pasek) zajmuje miejsce
 w układzie; `ResizeObserver` nie dopisuje tam rezerwy. Desktop/tablet zachowują

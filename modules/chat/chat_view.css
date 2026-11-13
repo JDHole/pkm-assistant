@@ -4008,6 +4008,9 @@ body.is-phone .pkm-chat-view .cs-tab__name { font-size: 14px; }
 body.is-phone .pkm-chat-view .cs-tab--add { font-size: 20px; justify-content: center; }
 
 body.is-phone .pkm-chat-view .cs-message--user { padding: 8px 12px; }
+/* U8: only the agent needs the crystal gutter; keep the trim bubble unchanged. */
+body.is-phone .pkm-chat-view .cs-message--user:not(.cs-trim-bubble) { margin-right: 8px; }
+body.is-phone .pkm-chat-view .cs-message--user:not(.cs-trim-bubble) > .cs-message__text { padding-left: 0; }
 body.is-phone .pkm-chat-view .cs-message__text,
 body.is-phone .pkm-chat-view .cs-message--user,
 body.is-phone .pkm-chat-view .cs-tile__body {
@@ -4032,6 +4035,21 @@ body.is-phone .pkm-chat-view :is(.cs-tile__title, .cs-tile__summary, .cs-tile__m
   min-width: 0;
 }
 body.is-phone .pkm-chat-view .cs-tile__meta { flex-shrink: 1; }
+/* U8: title above summary, with a reserved status column. Optional sub-agent
+   badges and thinking time stay in the text column without squeezing the title. */
+body.is-phone .pkm-chat-view .cs-tile__head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 8px;
+  gap: 2px 8px;
+  align-items: start;
+  align-content: center;
+}
+body.is-phone .pkm-chat-view .cs-tile__head > * { grid-column: 2; min-width: 0; }
+body.is-phone .pkm-chat-view .cs-tile__head > .cs-tile__icon { grid-column: 1; grid-row: 1; margin-top: 2px; }
+body.is-phone .pkm-chat-view .cs-tile__head > .cs-tile__title { grid-row: 1; }
+body.is-phone .pkm-chat-view .cs-tile__head > .cs-tile__dot { grid-column: 3; grid-row: 1; margin: 6px 0 0; }
+body.is-phone .pkm-chat-view .cs-tile__summary { font-size: 12px; }
+body.is-phone .pkm-chat-view .cs-tile__meta { margin-left: 0; }
 body.is-phone :is(.pkm-chat-messages, .cs-session-close-modal, .cs-open-session-modal, .cs-save-session-modal, .cs-consolidation-modal) :is(pre, table) {
   max-width: 100%;
   overflow-x: auto;
