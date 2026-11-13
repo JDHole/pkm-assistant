@@ -12,6 +12,9 @@ const { ChatView } = await import('../chat_view.js');
 
 // Only the browser event boundary is replaced; renderView installs the real listeners.
 function browserEvents(el: HTMLElement): void {
+    const attributes = new Map<string, string>();
+    el.setAttribute = (name, value) => { attributes.set(name, value); };
+    el.getAttribute = name => attributes.get(name) ?? null;
     const target = new EventTarget();
     el.addEventListener = target.addEventListener.bind(target);
     el.removeEventListener = target.removeEventListener.bind(target);
@@ -19,15 +22,20 @@ function browserEvents(el: HTMLElement): void {
     const div = el.createDiv.bind(el), span = el.createSpan.bind(el), create = el.createEl.bind(el);
     el.createDiv = options => { const child = div(options); Object.defineProperty(child, 'parentElement', { configurable: true, value: el }); browserEvents(child); return child; };
     el.createSpan = options => { const child = span(options); Object.defineProperty(child, 'parentElement', { configurable: true, value: el }); browserEvents(child); return child; };
-    el.createEl = ((tag, options) => { const child = create(tag, options); Object.defineProperty(child, 'parentElement', { configurable: true, value: el }); browserEvents(child); return child; }) as typeof el.createEl;
+    el.createEl = ((tag, options) => { const child = create(tag, options); Object.defineProperty(child, 'parentElement', { configurable: true, value: el }); browserEvents(child);
+        if (options && typeof options === 'object' && options.attr) {
+            for (const [name, value] of Object.entries(options.attr)) child.setAttribute(name, String(value));
+        }
+        return child; }) as typeof el.createEl;
 }
 function key(key: string, shiftKey = false) {
     return Object.assign(new Event('keydown', { cancelable: true }), { key, shiftKey });
 }
-async function fixture(t: import('ava').ExecutionContext, mobile: boolean) {
+async function fixture(t: import('ava').ExecutionContext, mobile: boolean, phone = false, locale = 'en') {
     Platform.isMobile = mobile;
-    t.teardown(() => { Platform.isMobile = false; });
-    setLocale('en');
+    Platform.isPhone = phone;
+    t.teardown(() => { Platform.isMobile = false; Platform.isPhone = false; setLocale('en'); });
+    setLocale(locale);
     const events = new EventTarget();
     window.addEventListener = events.addEventListener.bind(events);
     window.removeEventListener = events.removeEventListener.bind(events);
@@ -88,3 +96,45 @@ for (const mobile of [true, false]) for (const selectionKey of ['Enter', 'Tab'])
         t.deepEqual(sent, []);
     });
 }
+
+for (const platform of ['phone', 'tablet', 'desktop']) for (const locale of ['en', 'pl']) {
+    test.serial(`U1 rendered Send/Stop labels and toolbar: ${platform}, ${locale}`, async t => {
+        const { view, sent } = await fixture(t, platform !== 'desktop', platform === 'phone', locale);
+        t.deepEqual([view.send_button.getAttribute('aria-label'), view.stop_button.getAttribute('aria-label')],
+            locale === 'pl' ? ['Wyślij wiadomość', 'Zatrzymaj odpowiedź'] : ['Send message', 'Stop response']);
+        t.is(view.send_button.parentElement?.className, platform === 'phone' ? 'cs-input-bar' : 'cs-input-bar__right');
+        t.is(view.stop_button.parentElement, view.send_button.parentElement);
+        t.is(view._autonomyBtn?.parentElement?.parentElement?.className,
+            platform === 'phone' ? 'cs-input-bar__controls' : 'cs-input-bar');
+        t.is(view._autonomyBtn?.getAttribute('aria-label'), locale === 'pl' ? 'Autonomia: Pytaj na krawędzi' : 'Autonomy: Ask at the edge');
+        view.input_area.value = 'First line\nSecond line';
+        view.send_button.dispatchEvent(new Event('click'));
+        t.deepEqual(sent, [{ text: 'First line\nSecond line', meta: { origin: 'human' } }]);
+    });
+}
+
+test.serial('U1 floating panel reserves its measured height on desktop/tablet; phone uses flow on re-render', async t => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver');
+    let resize: (height: number) => void = (_height: number) => { throw new Error('Observer not installed'); };
+    let disconnected = 0;
+    Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: class {
+        constructor(private callback: () => void) {}
+        observe(panel: HTMLElement) {
+            resize = height => { Object.defineProperty(panel, 'offsetHeight', { configurable: true, value: height }); this.callback(); };
+        }
+        disconnect() { disconnected++; }
+    } });
+    t.teardown(() => { if (descriptor) Object.defineProperty(globalThis, 'ResizeObserver', descriptor); else Reflect.deleteProperty(globalThis, 'ResizeObserver'); });
+    const { view } = await fixture(t, false);
+    resize(180);
+    t.is(view.messages_container.style.paddingBottom, '204px');
+    Platform.isMobile = true; // tablet keeps the floating panel, including queue/chip growth
+    await view.renderView();
+    resize(260);
+    t.is(view.messages_container.style.paddingBottom, '284px');
+    Platform.isPhone = true;
+    await view.renderView();
+    t.is(view.messages_container.style.paddingBottom, '');
+    t.is(view.send_button.parentElement?.className, 'cs-input-bar');
+    t.is(disconnected, 2);
+});

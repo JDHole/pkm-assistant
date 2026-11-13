@@ -219,3 +219,19 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
         : /Diagnostics: \d+ OK, 0 errors\. File: \.pkm-assistant\/diagnostics\//);
     if (missingAbort) t.true(content.includes('| AbortController | ERROR | 0 | Unavailable |'));
 });
+
+for (const locale of ['en', 'pl']) test.serial(`U1 embedding startup notice: mobile quiet, desktop unchanged (${locale})`, t => {
+    setLocale(locale);
+    const host = { env: { settings: { pkmAssistant: { embedding: { provider: '' } } } } };
+    Platform.isMobile = true;
+    Plugin.prototype._checkEmbeddingProviderConfigured.call(host as never);
+    t.deepEqual(notices, []);
+    Platform.isMobile = false;
+    Plugin.prototype._checkEmbeddingProviderConfigured.call(host as never);
+    t.deepEqual(notices, [locale === 'pl'
+        ? 'Embedding niedostępny.\nWybierz dostawcę w Ustawienia → Modele → Embedding\n(Ollama / OpenAI / Gemini / LM Studio).'
+        : 'Embedding is not configured.\nPick a provider in Settings → Models → Embedding\n(Ollama / OpenAI / Gemini / LM Studio).']);
+    host.env.settings.pkmAssistant.embedding.provider = 'openai';
+    Plugin.prototype._checkEmbeddingProviderConfigured.call(host as never);
+    t.is(notices.length, 1);
+});

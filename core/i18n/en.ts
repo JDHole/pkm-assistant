@@ -325,6 +325,8 @@ export const en: Record<string, string> = {
   // ── Chat UI ──
   'chat.eye': 'Eye - active note context',
   'chat.permissions': 'Permissions',
+  'chat.send': 'Send message',
+  'chat.stop': 'Stop response',
   'chat.attachment': 'Attachment',
   'chat.voice_record': 'Voice recording',
   'chat.mcp_tools': 'MCP Tools',

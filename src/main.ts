@@ -1257,6 +1257,8 @@ export default class PkmAssistantPlugin extends PluginBase {
    * Settings → Embedding". NIE auto-detect z env vars (eksplicytna decyzja userowska).
    */
   _checkEmbeddingProviderConfigured() {
+    // VaultIndexer.initialize disables the semantic index on every mobile device.
+    if (Platform.isMobile) return;
     try {
       const provider = this.env?.settings?.pkmAssistant?.embedding?.provider;
       if (!provider) {

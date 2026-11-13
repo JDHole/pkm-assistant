@@ -2046,3 +2046,36 @@ języka komunikatu. Dotychczasowy fallback tekstowy pozostaje dla starszych bł�
 Testy `chat_streaming.sameAgentTabs.test.ts` wykonują pełne `send_message` przez
 resolver i `FetchStreamTransport` z rzucającym fetch oraz rzeczywisty brak klucza
 agenta; sprawdzają końcowy tekst kafelka z literalną podpowiedzią w PL i EN.
+
+## Telefon: szuflada (M3 U1)
+
+Układ jest wyłącznie za `body.is-phone` / `Platform.isPhone`; tablet zachowuje desktop.
+`chat_view.css` pozostaje arkuszem adoptowanym. Rynna 20 px jest ustawiona na
+`.pkm-chat-messages.cs-root`: ustawienie na samym widoku przegrywa z lokalną
+zmienną `.cs-root`. `_drawConnectorLines` nie wymaga zmiany: dla paddingu 6 px
+x = (6 + 20) - 20 + 9 = 15 px względem listy. Pseudo-elementy kompensują
+border-left 1/3 px, więc wszystkie kryształy zachowują tę samą oś.
+
+Na telefonie panel wpisywania jest elementem flex pod przewijaną listą, z marginesem
+4 px. Cała wysokość panelu (textarea/todo, chipy, kolejka i pasek) zajmuje miejsce
+w układzie; `ResizeObserver` nie dopisuje tam rezerwy. Desktop/tablet zachowują
+absolutny panel i rezerwę `offsetHeight + 24`. Lista telefonu nie ma maski gradientowej.
+Nie przywracać absolutnego panelu bez ponownego rozwiązania rezerwy miejsca.
+
+Kontrolki mają minimum 44 px, Wyślij/Stop 48 px i etykiety i18n na obu platformach.
+Na telefonie kontrolki przewijają się poziomo w jednym rzędzie, Wyślij/Stop pozostają
+poza przewijaniem. Przy 300 px oraz po włączeniu mikrofonu/todo nie wszystkie kontrolki
+mieszczą się jednocześnie. Popovery kotwiczą na panelu, poza clippingiem przewijania:
+przyciski-anchor mają `position: static` i brak transformacji również po hover/active.
+Ukrywana jest tylko bezpośrednia etykieta autonomii, nie napisy w popoverach.
+
+Akcje dymków są stale widoczne w normalnym przepływie, z opacity 0.7; nie zasłaniają
+tekstu sąsiedniego dymka. `_renderUserText` nadal tworzy bezpieczne węzły tekstowe
+wewnątrz `p`, z osobnymi badge'ami wzmianek. Telefon zachowuje LF przez `pre-wrap`;
+desktopowe Shift+Enter nadal zapisuje LF, lecz zwykły dymek wizualnie skleja linie.
+Menu cytatu nadal nasłuchuje wyłącznie `mouseup`/`keyup`. `selectionchange`/`touchend`
+i współpracę z natywnym menu Androida zostawiono następnej paczce zgodnie z zakresem U1.
+
+Testy TS: `chat/chat_ui.mobile.test.ts` (etykiety PL/EN i DOM trzech platform,
+wysyłka wielolinijkowa, rezerwa desktop/tablet i przejście na telefon).
+Pomiary Chrome i granice dowodu: [raport U1](../../audyt/mobile-m3-u1.md).

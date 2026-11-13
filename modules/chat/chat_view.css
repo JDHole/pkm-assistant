@@ -3959,3 +3959,130 @@ span.cs-note-link {
     color: var(--text-muted);
     font-size: var(--font-ui-small);
 }
+
+/* M3 U1: phone drawer. Tablet and desktop keep the floating panel above. */
+body.is-phone .pkm-chat-view.view-content {
+  padding: 0;
+  margin: 0;
+}
+
+/* cs-root defines the gutter on the messages element itself, not its ancestor. */
+body.is-phone .pkm-chat-view .pkm-chat-messages {
+  --cs-bubble-gutter: 20px;
+  min-height: 0;
+  padding: 10px 6px 6px;
+  gap: 6px;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
+body.is-phone .pkm-chat-view .pkm-chat-body { padding: 0; }
+body.is-phone .pkm-chat-view .cs-chat-topbar { padding: 0 4px; min-height: 44px; }
+body.is-phone .pkm-chat-view .cs-tab { min-width: 44px; min-height: 44px; padding-inline: 10px; }
+body.is-phone .pkm-chat-view .cs-tab__name { font-size: 14px; }
+body.is-phone .pkm-chat-view .cs-tab--add { font-size: 20px; justify-content: center; }
+
+body.is-phone .pkm-chat-view .cs-message--user { padding: 8px 12px; }
+body.is-phone .pkm-chat-view .cs-message__text,
+body.is-phone .pkm-chat-view .cs-message--user,
+body.is-phone .pkm-chat-view .cs-tile__body {
+  font-size: 15.5px;
+  line-height: 1.5;
+}
+body.is-phone .pkm-chat-view .cs-message__text p { margin-block: 0.45em; }
+/* _renderUserText creates text nodes, including literal LF and mention badges. */
+body.is-phone .pkm-chat-view .cs-message--user .cs-message__text { white-space: pre-wrap; }
+body.is-phone .pkm-chat-view .cs-tile__head { min-width: 44px; min-height: 44px; font-size: 14px; }
+body.is-phone .pkm-chat-view .pkm-device-model-label { font-size: 12px; padding-left: 4px; }
+
+/* In-flow panel: its actual height reserves space, even without ResizeObserver.
+   Keep overflow visible: mention autocomplete is positioned above the textarea. */
+body.is-phone .pkm-chat-view .cs-input-panel {
+  position: relative;
+  flex-shrink: 0;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  margin: 4px;
+  width: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-image: none;
+  border-radius: 14px;
+  background: var(--background-secondary);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+body.is-phone .pkm-chat-view .cs-input-panel::before,
+body.is-phone .pkm-chat-view .cs-input-panel::after { display: none; }
+body.is-phone .pkm-chat-view .cs-input-row { padding: 0; }
+body.is-phone .pkm-chat-view .cs-input-textarea {
+  font-size: 16px;
+  line-height: 1.4;
+  min-height: 48px;
+  padding: 12px 14px;
+}
+body.is-phone .pkm-chat-view .cs-input-bar {
+  min-height: 56px;
+  padding: 4px;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+body.is-phone .pkm-chat-view .cs-input-bar__controls {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  overflow-x: auto;
+  align-items: center;
+}
+body.is-phone .pkm-chat-view .cs-input-bar__left,
+body.is-phone .pkm-chat-view .cs-input-bar__right {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 2px;
+}
+body.is-phone .pkm-chat-view .cs-input-bar button {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+body.is-phone .pkm-chat-view .cs-input-ctrl--anchor > span { display: none; }
+/* Popovers use the panel as their containing block, outside the controls' clip.
+   Hover/active transforms would establish a new containing block on the button. */
+body.is-phone .pkm-chat-view .cs-input-ctrl--anchor { position: static; transform: none; }
+body.is-phone .pkm-chat-view .cs-mode-popover,
+body.is-phone .pkm-chat-view .cs-perm-popover,
+body.is-phone .pkm-chat-view .cs-tools-popover { max-width: 100%; white-space: normal; }
+body.is-phone .pkm-chat-view .cs-input-ctrl svg { width: 18px; height: 18px; }
+body.is-phone .pkm-chat-view .cs-input-bar .cs-input-send,
+body.is-phone .pkm-chat-view .cs-input-bar .cs-input-stop {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 50%;
+  transform: none;
+}
+body.is-phone .pkm-chat-view .cs-input-send {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+body.is-phone .pkm-chat-view .cs-input-send svg { width: 22px; height: 22px; transform: none; opacity: 1; }
+
+/* Touch actions are always visible, in flow so they cannot cover nearby text. */
+body.is-phone .pkm-chat-view .cs-message__meta {
+  display: flex;
+  position: static;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+body.is-phone .pkm-chat-view .cs-message__meta-btn,
+body.is-phone .pkm-chat-view .cs-tile__action {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  opacity: 0.7;
+}
+body.is-phone .pkm-chat-view .cs-tile__actions { flex-wrap: wrap; }

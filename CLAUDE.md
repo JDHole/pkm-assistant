@@ -158,3 +158,11 @@ wynik połączenia. Moduł diagnostics waliduje nazwy/kształty faktów i skład
 objaśnienia bez komunikatów adaptera lub dostawcy. Zmiana raportu dotyczy obu
 platform zgodnie z D1; zachowanie rozmowy nie zmienia się. Szczegółowy kontrakt
 prywatności i warunki rozszerzania raportu: `modules/diagnostics/CLAUDE.md`.
+
+## Mobile M3 U1 - szuflada rozmowy
+
+Wygląd telefonu jest ograniczony do `body.is-phone` / `Platform.isPhone` w module
+chat. `_checkEmbeddingProviderConfigured` pomija notice na `Platform.isMobile`,
+zgodnie z bezwarunkowym `disabled_mobile` w inicjalizacji VaultIndexer; desktopowy
+komunikat pozostaje bez zmian. Test obu języków i platform: `src/main.mobile.test.ts`.
+Pomiary i ograniczenia weryfikacji: [raport U1](audyt/mobile-m3-u1.md).

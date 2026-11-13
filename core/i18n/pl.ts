@@ -324,6 +324,8 @@ export const pl: Record<string, string> = {
   // ── Chat UI ──
   'chat.eye': 'Oczko - kontekst otwartej notatki',
   'chat.permissions': 'Uprawnienia',
+  'chat.send': 'Wyślij wiadomość',
+  'chat.stop': 'Zatrzymaj odpowiedź',
   'chat.attachment': 'Załącznik',
   'chat.voice_record': 'Nagrywanie głosu',
   'chat.mcp_tools': 'Narzędzia MCP',

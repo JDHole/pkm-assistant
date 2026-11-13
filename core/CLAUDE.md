@@ -495,3 +495,6 @@ w `modules/diagnostics/CLAUDE.md`; transport i logowanie zwykłego czatu bez zmi
 D2 dodaje `diagnostics.provider_error_other`: stałe `inny` / `other` dla typu
 błędu spoza jawnego słownika diagnostics. Brak typu nadal nie dodaje etykiety;
 reguły transportu i normalizacji błędów w core pozostają bez zmian.
+
+M3 U1 dodaje `chat.send` i `chat.stop` w PL/EN jako dostępne nazwy przycisków czatu
+na obu platformach. Test rzeczywistego renderu: `modules/chat/chat/chat_ui.mobile.test.ts`.

@@ -224,8 +224,10 @@ export async function renderView(this: ChatViewLike, container = this.container)
 
     // Bottom bar: left controls + right actions
     const bar = bottomPanel.createDiv({ cls: 'cs-input-bar' });
-    const barLeft = bar.createDiv({ cls: 'cs-input-bar__left' });
-    const barRight = bar.createDiv({ cls: 'cs-input-bar__right' });
+    // Phone controls can scroll horizontally; Send/Stop stay outside that scroller.
+    const controls = Platform.isPhone ? bar.createDiv({ cls: 'cs-input-bar__controls' }) : bar;
+    const barLeft = controls.createDiv({ cls: 'cs-input-bar__left' });
+    const barRight = controls.createDiv({ cls: 'cs-input-bar__right' });
 
     // ── LEFT: Todo, Autonomy, Oczko, Skills, Artifacts, Permissions, Tokens ──
     // Chip-przełącznik widoku slotu (textarea ↔ lista todo). Pierwszy w rzędzie, bo dotyczy
@@ -289,11 +291,12 @@ export async function renderView(this: ChatViewLike, container = this.container)
     });
 
     // Diamond send button
-    this.send_button = barRight.createEl('button', { cls: 'cs-input-send' });
+    const sendParent = Platform.isPhone ? bar : barRight;
+    this.send_button = sendParent.createEl('button', { cls: 'cs-input-send', attr: { 'aria-label': t('chat.send') } });
     setSvg(this.send_button, UiIcons.send(12));
 
     // Stop button (hidden by default)
-    this.stop_button = barRight.createEl('button', { cls: 'cs-input-stop hidden' });
+    this.stop_button = sendParent.createEl('button', { cls: 'cs-input-stop hidden', attr: { 'aria-label': t('chat.stop') } });
     setSvg(this.stop_button, '<svg viewBox="0 0 12 12" width="12" height="12"><rect x="2" y="2" width="8" height="8" rx="1" fill="currentColor"/></svg>');
 
     // Attachment manager — wire to chip bar
@@ -354,7 +357,9 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // (środowiska bez ResizeObserver — m.in. testy node'owe).
     this._bottomPanelObserver?.disconnect();
     this._bottomPanelObserver = null;
-    if (typeof ResizeObserver !== 'undefined') {
+    // On phones the panel participates in flex layout, including chips, todo and queue.
+    // No overlay means no reserved padding (or stale reservation after a resize).
+    if (!Platform.isPhone && typeof ResizeObserver !== 'undefined') {
         const reserveSpace = () => {
             const height = bottomPanel.offsetHeight || 0;
             if (height > 0 && this.messages_container) {
