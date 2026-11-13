@@ -166,6 +166,9 @@ flagą, nigdy go nie wywołujemy.
   musi zawierać siedem literalnych czasów i czas całkowity, zarówno po udanym
   starcie, jak i po SkinManager rzucającym po 10000 ms (AgentManager nadal 50 ms).
   Zegar `performance.now` jest przywracany po każdym przypadku.
+  U13 dodaje na obu platformach awarie AgentManager i MCP po 10000 ms, sprawdzając
+  w zapisanym raporcie siedem literalnych faz i czas całkowity oraz brak
+  przeniesienia czasu awarii do następnej fazy.
 - `diagnostics.test.ts`: odczyt pliku z adaptera RAM, kolejność i liczniki,
   kryptografia, awarie rename/mkdir/rmdir, brak append i cichy błąd dopisania,
   izolowane sprzątanie i odmowa bez żądania. D1: prywatny komunikat EACCES znika

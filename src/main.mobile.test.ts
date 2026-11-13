@@ -92,8 +92,12 @@ test.serial('inline comment waits for first chat view and preserves formatted me
     ]]);
 });
 
-for (const mobile of [false, true]) for (const skinFails of [false, true]) {
-    test.serial(`U12 production startup: ${mobile ? 'mobile' : 'desktop'}, skin failure=${skinFails}`, async t => {
+for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agents', 'mcp'] as const) {
+    const skinFails = failure === 'skin';
+    const scenario = failure === 'agents' || failure === 'mcp'
+        ? `U13 production startup: ${mobile ? 'mobile' : 'desktop'}, ${failure} failure`
+        : `U12 production startup: ${mobile ? 'mobile' : 'desktop'}, skin failure=${skinFails}`;
+    test.serial(scenario, async t => {
         Platform.isMobile = mobile;
         // Reuse the host fixture located by the AVA preload, without changing the harness.
         const supportDir = process.env.PKM_TEST_SUPPORT_DIR;
@@ -140,10 +144,12 @@ for (const mobile of [false, true]) for (const skinFails of [false, true]) {
         });
         const agents = AgentManager.prototype.initialize;
         mock.method(AgentManager.prototype, 'initialize', async function(this: InstanceType<typeof AgentManager>) {
+            if (failure === 'agents') { now += 10000; throw new Error('Controlled agents failure'); }
             await agents.call(this); now += 50;
         });
         const servers = ServerManager.prototype.initialize;
         mock.method(ServerManager.prototype, 'initialize', async function(this: ServerManager) {
+            if (failure === 'mcp') { now += 10000; throw new Error('Controlled MCP failure'); }
             await servers.call(this); now += 60;
         });
         const theme = plugin._loadCrystalSoulTheme.bind(plugin);
@@ -163,13 +169,18 @@ for (const mobile of [false, true]) for (const skinFails of [false, true]) {
         const content = await app.vault.adapter.read(reports[0]);
         t.deepEqual(content.split('\n').filter(line => /^\| (startup\.|plugin.startupMs)/.test(line))
             .map(line => line.replace(/\| OK \| \d+ \|/, '| OK | <collection-ms> |')), [
-            skinFails ? '| plugin.startupMs | OK | <collection-ms> | 11194 |' : '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+            {
+                none: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+                skin: '| plugin.startupMs | OK | <collection-ms> | 11194 |',
+                agents: '| plugin.startupMs | OK | <collection-ms> | 11184 |',
+                mcp: '| plugin.startupMs | OK | <collection-ms> | 11174 |',
+            }[failure],
             '| startup.layoutWaitMs | OK | <collection-ms> | 1000 |',
             '| startup.runtimeMs | OK | <collection-ms> | 20 |',
             '| startup.secretsMs | OK | <collection-ms> | 30 |',
             skinFails ? '| startup.skinMs | OK | <collection-ms> | 10000 |' : '| startup.skinMs | OK | <collection-ms> | 40 |',
-            '| startup.agentsMs | OK | <collection-ms> | 50 |',
-            '| startup.toolsMs | OK | <collection-ms> | 60 |',
+            failure === 'agents' ? '| startup.agentsMs | OK | <collection-ms> | 10000 |' : '| startup.agentsMs | OK | <collection-ms> | 50 |',
+            failure === 'mcp' ? '| startup.toolsMs | OK | <collection-ms> | 10000 |' : '| startup.toolsMs | OK | <collection-ms> | 60 |',
             '| startup.finishMs | OK | <collection-ms> | 34 |',
         ]);
     });
