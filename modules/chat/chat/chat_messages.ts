@@ -15,6 +15,7 @@ import {
     createSubAgentBlock,
     createNoteLink,
 } from '../../ui-components/index.js';
+import { renderDeviceModelLabel } from './deviceModelUi.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { buildParentConversationView } from './parentConversationView.js';
 import type { ParentConversationMetadata } from '../../sub-agents/index.js';
@@ -176,6 +177,9 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
 
 export async function render_messages(this: ChatViewLike, createDelegateBlock: typeof createSubAgentBlock = createSubAgentBlock): Promise<void> {
     this.messages_container.empty();
+    if (this.env?.settings?.pkmAssistant?.useDeviceModels === true) {
+        renderDeviceModelLabel(this.messages_container, this.get_chat_model());
+    }
     const notificationTaskIdsAfter = new Map<number, Set<string>>();
     const laterNotificationIds = new Set<string>();
     for (let i = this.rollingWindow.messages.length - 1; i >= 0; i--) {

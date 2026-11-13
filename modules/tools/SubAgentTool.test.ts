@@ -590,3 +590,24 @@ test('a pre-run refusal keeps a reusable thread conversation', async t => {
     t.deepEqual(thread.transcript, priorTranscript);
     t.is(thread.runIds.length, 1);
 });
+
+
+test('device model policy preserves the frozen model of a reusable sub-thread', async t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const { owner, thread } = seedIdleThread(registry);
+    (thread.config.subConfig as SubAgentConfigLike).role = 'worker';
+    const modelIds: string[] = [];
+    const plugin = makePlugin(registry, modelId => modelIds.push(modelId));
+    const pkm = plugin.env!.settings!.pkmAssistant!;
+    pkm.useDeviceModels = true;
+    pkm.modelLibrary = { main: [
+        { platform: 'ollama', model: 'worker-model', isDefault: false },
+        { platform: 'ollama', model: 'new-device-model', isDefault: true },
+    ] };
+    const result = await createSubAgentTool({}).execute({ action: 'task', sub_id: thread.threadId,
+        task: 'Continue', background: false, _invocationOrigin: owner, _invocationTurnKind: 'user' }, {}, plugin) as Record<string, unknown>;
+    t.is(result.success, true);
+    t.deepEqual(modelIds, ['worker-model']);
+    t.is(thread.phase, 'idle');
+});

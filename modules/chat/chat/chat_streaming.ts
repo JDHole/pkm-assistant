@@ -67,6 +67,7 @@ import { queueChatMessage, readQueuedMessage, queuedOwnerMatches, evaluateQueued
 import type { QueueOwner } from './queuedMessage.js';
 import { evaluateSubTaskDelivery } from './subTaskDelivery.js';
 import { safeErrorText } from './safeErrorText.js';
+import { addDeviceModelHint, renderDeviceModelLabel } from './deviceModelUi.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { getCachedToolTokenBreakdown } from './ToolTokenCache.js';
 import { getLimits } from '../../../config/limits.js';
@@ -91,7 +92,7 @@ import type { ChatServerManager, ChatTab, ChatViewLike } from './chatViewShape.j
 type ChatToolDefinition = OpenAiToolDefinition & { name?: string };
 import type { Agent } from '../../agents/index.js';
 import type { AutonomyMode, StreamWatchdog as StreamWatchdogType, TokenTracker } from '../../../core/index.js';
-import type { CacheMetadata, ChatModel } from '../../models/index.js';
+import type { CacheMetadata, ChatModel, ResolverAgentLike } from '../../models/index.js';
 import type { OpenAiToolDefinition, ServerVisibilityAgent, ToolDefinition } from '../../tools/index.js';
 import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolExecutionContext, ToolResultEntry, Usage } from '../../agent-loop/index.js';
 import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
@@ -1271,6 +1272,11 @@ export function _ensureAgentMessageContainer(this: ChatViewLike, streamAgent: Ag
     this.current_message_container.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(streamColor));
     this.current_message_container.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(streamAgent || agName, streamColor));
 
+    if (this.env?.settings?.pkmAssistant?.useDeviceModels === true) {
+        const modelContext = [...this._streamCtxMap.values()].find(ctx =>
+            ctx.rollingWindow === this.rollingWindow && ctx.agent === streamAgent);
+        renderDeviceModelLabel(this.current_message_container, modelContext?.chatModel);
+    }
     this.current_message_bubble = this.current_message_container.createDiv({ cls: 'cs-tool-calls-wrapper' });
     this.current_message_text = this.current_message_container.createDiv({ cls: 'cs-message__text' });
 }
@@ -2222,7 +2228,9 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     // padzie strumienia `error.message` bywa zrzutem całego zdarzenia streamera razem z
     // `source.headers.Authorization` - czyli SUROWYM kluczem API. Obrona w głąb: normalizacja
     // → maska → sufit, niezależnie od tego, co robi źródło zdarzenia.
-    const safeText = safeErrorText(error) || 'Unknown error occurred';
+    const modelContext = ownerTabKey ? this._streamCtxMap.get(ownerTabKey) : undefined;
+    const safeText = addDeviceModelHint(safeErrorText(error) || 'Unknown error occurred',
+        this.env?.settings?.pkmAssistant, modelContext?.agent as ResolverAgentLike, modelContext?.chatModel);
     log.error('Chat', 'Chat error:', safeErrorText(error));
 
     // Determine which tab this error belongs to

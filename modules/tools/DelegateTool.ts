@@ -1943,8 +1943,8 @@ export function prepareDelegateExecution(
     // tylko przy dokładnej zgodności z wątkiem, a w pozostałych przypadkach podaje
     // zamrożoną parę jako jawny wybór.
     const model: StreamingModelLike | null = frozen
-        ? pinnedAgentModel ?? createModelForRole(plugin, role, { name: activeAgent.name,
-            models: { [role]: { platform: frozenProviderId, model: frozenModelId } } }, null)
+        ? pinnedAgentModel ?? createModelForRole(plugin, role, { name: activeAgent.name }, null, false,
+            { platform: frozenProviderId, model: frozenModelId })
         : createModelForRole(plugin, role, activeAgent, subAgentConfig);
     // Brak modelu roli nowego suba: użyj konfiguracji main, ale z osobną instancją dla biegu.
     // Wspólny env.chatModel należy do czatu, więc Stop suba nie może do niego trafić.

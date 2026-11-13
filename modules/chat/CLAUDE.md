@@ -2019,3 +2019,23 @@ warunek nie używa `isPhone`. Obsługa `@` i `/` ma nadal pierwszeństwo.
 `chat/chat_ui.mobile.test.ts` renderuje prawdziwy ChatView i wywołuje zdarzenia pola
 oraz przycisku: obie platformy, Shift, wielowierszowa wiadomość i wybór podpowiedzi
 Enter/Tab. Test uzupełnia relację parentElement w atrapie DOM bez zmiany harnessu.
+
+## Mobile M1 P2 - modele urządzenia w czacie
+
+Gdy `pkmAssistant.useDeviceModels === true`, `get_chat_model` zawsze pyta resolver
+przed użyciem runtime cache, także gdy agent nie ma własnego modelu. Null nie
+uruchamia starej instancji agenta. Przy wyłączonym ustawieniu dotychczasowa drabinka
+i zachowanie desktopu zostają. Czat nie ma osobnego ręcznego pickera modelu.
+
+Wcześniej czat nie pokazywał stałej etykiety modelu agenta. Przy opt-inie nowa
+etykieta nad strumieniowaną odpowiedzią bierze providerId/modelId z instancji
+właściciela tury. Po przerysowaniu historii nagłówek pokazuje bieżący model
+urządzenia, nie przypisuje go dawnym odpowiedziom. Token Viewer pomija YAML
+przy szacowaniu okna subów. `deviceModelUi.test.ts` wykonuje oba rendery i mapper
+podpowiedzi; `TokenViewerWidget.test.ts` sprawdza zmianę limitu na model biblioteki.
+
+`handle_error` dopisuje i18n po dotychczasowej normalizacji i maskowaniu błędu,
+wyłącznie dla brakującego klucza nadpisania agenta lub rozpoznanego błędu połączenia
+modelu zgodnego z nadpisaniem. Przy włączonej polityce i błędach niezwiązanych
+z modelem tekst się nie zmienia. Nie klasyfikujemy wszystkich błędów dostawców:
+nieznany komunikat lub błąd poza tym mapperem zachowuje oryginalną treść.

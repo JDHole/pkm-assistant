@@ -9,7 +9,7 @@
  * klucze API pustką. Dlatego `SettingsIo` w ogóle nie ma metody `exists`.)
  */
 import { migrateNamespace } from '../utils/settingsNamespaceMigration.js';
-import { cloneConfig, deepMergeMissing } from './configMerge.js';
+import { cloneConfig, deepMergeMissing, isPlainObject } from './configMerge.js';
 import { migrateLegacySettings } from './legacySettingsMigration.js';
 import {
     DEFAULT_UI_LANGUAGE,
@@ -89,6 +89,9 @@ export async function loadSettingsWithArmor(deps: SettingsArmorDeps): Promise<Se
     wynik.migrations.namespace = przemianujNamespace(worek, log);
     wynik.migrations.legacyKeys = przenienStareKlucze(worek, log);
     wynik.settings = deepMergeMissing(cloneConfig(worek) as SettingsBag, cloneConfig(defaults ?? {}));
+    // Validate only this opt-in at the disk boundary; never coerce "true" or 1.
+    const pkm = wynik.settings.pkmAssistant;
+    if (isPlainObject(pkm)) pkm.useDeviceModels = pkm.useDeviceModels === true;
     wynik.source = source;
 
     // Awans na kopię i backup dzienny robimy WYŁĄCZNIE z treści głównego pliku, która się

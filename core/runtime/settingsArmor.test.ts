@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'ava';
+import { defaultSettings } from '../../config/defaultSettings.js';
 
 import { createVaultSettingsIo, loadSettingsWithArmor, readUiLanguage } from './settingsArmor.js';
 import {
@@ -380,3 +381,18 @@ test('createVaultSettingsIo: adapter zwracający śmieci z list nie wywraca rota
 
     t.deepEqual(await io.list('x'), { files: [], folders: [] });
 });
+
+for (const [label, value, expected] of [
+    ['absent', undefined, false], ['enabled', true, true], ['disabled', false, false],
+    ['string', 'true', false], ['number', 1, false], ['null', null, false],
+] as const) {
+    test(`device models: armor loads ${label}, preserves original file`, async t => {
+        const original = JSON.stringify({ pkmAssistant: { useDeviceModels: value, language: 'pl' } });
+        const fake = makeIo({ [SETTINGS_PATH]: original });
+        const result = await loadSettingsWithArmor({ io: fake.io, defaults: defaultSettings() });
+        t.is(result.settings.pkmAssistant?.useDeviceModels, expected);
+        t.is(result.settings.pkmAssistant?.language, 'pl');
+        t.is(fake.files[SETTINGS_PATH], original);
+        t.is(fake.files[SETTINGS_LAST_GOOD_PATH], original);
+    });
+}

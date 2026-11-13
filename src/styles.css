@@ -1505,3 +1505,24 @@ input.pkm-onboarding-key-input {
 .cs-subdraft__summary { flex-basis: 100%; color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; }
 .cs-subdraft__details, .pkm-substrip__draft-details { white-space: pre-wrap; overflow-wrap: anywhere; }
 .pkm-substrip__draft, .pkm-substrip__draft-backlog { color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; }
+
+/* Device model opt-in: description above the control, including narrow settings panes. */
+.cs-root .pkm-device-model-setting {
+  flex-direction: column;
+  align-items: stretch;
+}
+.cs-root .pkm-device-model-setting .setting-item-info {
+  margin-right: 0;
+  min-width: 0;
+}
+.cs-root .pkm-device-model-setting .setting-item-control {
+  justify-content: flex-start;
+  margin-top: var(--size-4-2);
+}
+
+.pkm-device-model-label {
+  color: var(--text-muted);
+  font-size: var(--font-smallest);
+  overflow-wrap: anywhere;
+  margin-bottom: var(--size-4-2);
+}

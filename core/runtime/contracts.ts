@@ -231,6 +231,8 @@ export interface PkmAssistantSettings {
     komunikatorEnabled?: boolean;
     obsidianAppEnabled?: boolean;
     onboardingCompleted?: number | boolean;
+    /** Use this device's model library instead of agent/sub-agent YAML overrides. */
+    useDeviceModels?: boolean;
     modelLibrary?: unknown;
     vaultGroups?: unknown;
     security?: Record<string, unknown>;

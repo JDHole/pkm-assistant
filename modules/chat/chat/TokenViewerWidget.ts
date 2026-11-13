@@ -175,7 +175,7 @@ export class TokenViewerWidget {
         // lookup below.
         const legacyKey = ({ researcher: 'minion', strategist: 'master' } as Record<string, string>)[role];
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
-        const configured: ConfiguredModel | null = agent?.models?.[role]
+        const configured: ConfiguredModel | null = (pkm.useDeviceModels === true ? null : agent?.models?.[role])
             || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null;
         // `configured` bywa `null` (agent bez modelu dla tej roli I pusty `modelLibrary`) -
         // `typeof null === 'object'` też jest `true`, więc goły `typeof` wysyłał `null` w gałąź

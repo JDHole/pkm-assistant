@@ -976,3 +976,15 @@ odczyt desktopowy), `ExternalMcpManager.test.ts` (stdio connect/preview/autostar
 HTTP, oba języki), `ObsidianAppTool.test.ts` (MCP i bezpośrednia odmowa, brak zgody
 oraz portu), `runnerDrafts.test.ts` (delegate i kontynuacja sub_agent, odmowa PL/EN,
 odczyt bez kopii i niezmieniony plik), `src/main.mobile.test.ts` (podłączenie produkcyjne).
+
+## Mobile M1 P2 - delegacja a modele urządzenia
+
+Nowa delegacja (builtin worker/explorer, generyczna, własny sub, szablon) przechodzi
+przez wspólny `createModelForRole`: opt-in `useDeviceModels` ignoruje nadpisania
+agenta i konfiguracji suba. Sam argument `delegate` nie zawiera wyboru modelu.
+Kontrakt kontynuacji pozostaje: sprawdzamy dostępność zamrożonej pary, przekazujemy
+ją szóstym argumentem resolvera, a nie jako sztuczne nadpisanie agenta. Dzięki temu
+zmiana domyślnego modelu urządzenia nie podmienia modelu istniejącej rozmowy.
+Niedostępny model nadal zamyka wątek i kieruje do nowej delegacji.
+Test `SubAgentTool.test.ts` uruchamia kontynuację prawdziwym runnerem przy opt-inie
+oraz innym domyślnym modelu; sprawdza model wykonania i powrót wątku do idle.

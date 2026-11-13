@@ -649,6 +649,7 @@ export interface ModelLibraryEntry {
  */
 export interface PkmModelSettings {
     chat?: ChatSettingsSlice;
+    useDeviceModels?: boolean;
     modelLibrary?: Record<string, ModelLibraryEntry[] | undefined>;
     /** Legacy slot sub-agentów. */
     minionModel?: string;
@@ -695,7 +696,7 @@ export interface ChatModelDeps {
 // i `scheduleGateRelease` - żyje w JSDoc tamtego pliku. Typ jest re-eksportowany w sekcji 0.
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 10. Fabryka per rola (`modelResolver`) - logika własna, sygnatura ZOSTAJE
+// 10. Fabryka per rola (`modelResolver`) - logika własna
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -747,7 +748,8 @@ export type ResolverPluginLike = { env?: ResolverRuntimeLike | null } | null | u
 // Fabryka per rola - `getModelsForRole`, `createModelForRole`, `clearModelCache`,
 // `isLocalPlatform`, `DEFAULT_MODELS`, `PLATFORM_DETECTION_ORDER`, `LOCAL_PLATFORMS`
 // - mieszka w `modules/models/modelResolver.ts` (logika WŁASNA, sygnatura ZOSTAJE
-// 5-argumentowa, pinuje ją strażnik po źródle `chatModelSkipCache.test.ts`).
+// z zachowaniem pięciu dotychczasowych argumentów; szósty to zaufana para modelu
+// zamrożonego w istniejącym wątku suba (nie argument YAML ani LLM).
 // Drabinka rozstrzygania modelu jest opisana w JSDoc tamtego pliku.
 
 // ═══════════════════════════════════════════════════════════════════════════════

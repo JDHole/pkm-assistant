@@ -466,3 +466,12 @@ stdio i zrzutu ekranu na telefonie oraz komunikat błędu otwierania czatu. Desk
 odmowy magazynu i zrzutu zachowują dotychczasowe teksty. Testy zachowania są w
 `src/main.mobile.test.ts`, `modules/tools/runnerDrafts.test.ts`,
 `ExternalMcpManager.test.ts` i `ObsidianAppTool.test.ts` w module tools.
+
+## Mobile M1 P2 - ustawienie modeli urządzenia
+
+`PkmAssistantSettings.useDeviceModels?: boolean` ma fabryczny default false w
+`config/defaultSettings.ts`. `settingsArmor` akceptuje wyłącznie boolean true;
+brak, null, liczba i string oznaczają false. Walidacja działa w RAM po wczytaniu
+primary/last-good, bez migracji i bez zapisu do głównego settings.json. Kopie
+zachowują oryginalne bajty. Testy nowych wariantów: `runtime/settingsArmor.test.ts`.
+I18n PL/EN dodaje przełącznik, opis, etykietę faktycznego modelu i podpowiedź błędu.

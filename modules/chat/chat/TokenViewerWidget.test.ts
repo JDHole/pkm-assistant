@@ -106,3 +106,13 @@ test('resolveRoleMax: agent null (brak agenta aktywnego) też dostaje fallback, 
     const widget = new TokenViewerWidget(view, document.createElement('div') as unknown as HTMLElement);
     t.is(widget.resolveRoleMax('researcher'), 200000);
 });
+
+
+test('device models: token viewer uses the device sub-agent library', t => {
+    const view = makeFakeView({ agent: { models: { researcher: { platform: 'anthropic', model: 'claude-sonnet-4-5' } } },
+        modelLibrary: { minion: [{ platform: 'gemini', model: 'gemini-2.5-pro', isDefault: true }] } });
+    const widget = new TokenViewerWidget(view, createDiv());
+    t.is(widget.resolveRoleMax('researcher'), 200000);
+    view.env.settings.pkmAssistant!.useDeviceModels = true;
+    t.is(widget.resolveRoleMax('researcher'), 1048576);
+});

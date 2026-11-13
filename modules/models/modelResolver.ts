@@ -151,9 +151,11 @@ function normalizeAgentModelOverride(value: ModelOverride | undefined | null): s
  *   dwa taby czatu tego samego agenta dzieliłyby jedną instancję adaptera w trakcie `stream()`,
  *   patrz gotcha 2 w CLAUDE.md). Rolom sub i tak zawsze skipuje (linia niżej) — ten parametr
  *   dokłada wymuszenie TEŻ dla `main`.
+ * @param pinnedModel - trusted frozen sub-thread selection; takes precedence over device
+ *   policy. Never supplied from YAML or LLM tool arguments.
  * @returns ChatModel instance or null
  */
-export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, agent: ResolverAgentLike = null, delegateConfig: DelegateConfigLike = null, callerSkipCache = false): ChatModel | null {
+export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, agent: ResolverAgentLike = null, delegateConfig: DelegateConfigLike = null, callerSkipCache = false, pinnedModel?: { platform: string; model: string }): ChatModel | null {
     const env = plugin?.env;
     if (!env) return null;
 
@@ -171,6 +173,8 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
 
     const chat: ChatSettingsSlice = env.settings?.pkmAssistant?.chat || {};
     const pkm: PkmModelSettings = env.settings?.pkmAssistant || {};
+
+    const allowAgentOverrides = pkm.useDeviceModels !== true;
 
     // --- Resolution chain ---
     let platform: string | null = null;
@@ -191,10 +195,14 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
         }
     };
 
+    // A running sub-thread retains its already selected model, even after settings change.
+    // This trusted runtime argument is never read from YAML or tool arguments.
+    if (pinnedModel) applyOverride(pinnedModel);
+
     // Step 0 (tylko `sub_worker`): model z configu suba (YAML `model:`) wygrywa nad CAŁĄ
     // drabinką rodzica. Dla `sub_worker` „model rodzica" jest domyślnym wyborem, nie przymusem —
     // user, który jawnie wpisał model w SUB_AGENT.yaml, ma dostać dokładnie ten model.
-    if (isSubWorker && delegateConfig?.model) applyOverride(delegateConfig.model);
+    if (!modelId && allowAgentOverrides && isSubWorker && delegateConfig?.model) applyOverride(delegateConfig.model);
 
     // Step 1: Per-agent override. Top-level `agent.model` counts ONLY for the main role —
     // for sub roles it is the last resort (Step 4b), AFTER the model library. Otherwise any
@@ -204,10 +212,10 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
         || agent?.models?.[effectiveRole]
         || (effectiveRole === 'main' ? agent?.model : null)
         || null;
-    if (!modelId && agentOverride) applyOverride(agentOverride);
+    if (!modelId && allowAgentOverrides && agentOverride) applyOverride(agentOverride);
 
     // Step 2: Delegate config override (SUB_AGENT.yaml .model field)
-    if (!modelId && delegateConfig?.model) {
+    if (!modelId && allowAgentOverrides && delegateConfig?.model) {
         modelId = delegateConfig.model;
     }
 
@@ -239,7 +247,7 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
     // shape before falling through to `applyOverride` — models CANNOT import from agents
     // (agents imports models; the reverse would cycle), so this is a small local copy of the
     // same normalization `modelFieldSync.ts` does, not a shared import.
-    if (!modelId && effectiveRole !== 'main') {
+    if (!modelId && allowAgentOverrides && effectiveRole !== 'main') {
         const lastResort = normalizeAgentModelOverride(agent?.model) || normalizeAgentModelOverride(agent?.models?.main);
         if (lastResort) applyOverride(lastResort);
     }

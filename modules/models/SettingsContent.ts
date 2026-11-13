@@ -1,5 +1,5 @@
 import { t } from '../../core/i18n/index.js';
-import { isLocalPlatform } from './modelResolver.js';
+import { clearModelCache, isLocalPlatform } from './modelResolver.js';
 import { setSvg, setSvgLabel } from '../../modules/crystal-soul/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { computeSemanticStatusText } from './semanticStatusText.js';
@@ -63,13 +63,14 @@ export type ModelsSectionCtx = {
     chat: ChatSettingsSlice;
     /** slice `settings.pkmAssistant` */
     pkm: {
+        useDeviceModels?: boolean;
         modelLibrary?: Record<string, ModelLibraryEntry[]>;
         maxTokens?: Record<string, number>;
         ollama_keep_alive?: string;
     };
     /** platformy z wpisanym kluczem API (liczy je shell) */
     availablePlatforms: Array<{ id: string; name: string }>;
-    env: { settings: { pkmAssistant: { embedding?: EmbedModelSettings } } };
+    env: { settings: { pkmAssistant: { embedding?: EmbedModelSettings } }; chatModel?: unknown };
     owner: ModelsSettingsOwner;
     /** `oramaDb` - publikowany przez `VaultIndexer`; `unknown` bo `AnyOrama` nie jest publicznym typem `models`. */
     plugin?: { vaultIndexer?: VaultIndexerLike | null; oramaDb?: unknown } | null;
@@ -85,6 +86,19 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
         const h2Models = container.createEl('h2', { cls: 'cs-settings-section' });
         setSvgLabel(h2Models, icons.robot(18), t('settings.models_title'));
         container.createEl('p', { text: t('settings.models_desc'), cls: 'setting-item-description' });
+
+        const deviceModels = new Setting(container)
+            .setName(t('settings.use_device_models'))
+            .setDesc(t('settings.use_device_models_desc'))
+            .setClass('pkm-device-model-setting');
+        deviceModels.addToggle(toggle => toggle
+            .setValue(pkm.useDeviceModels === true)
+            .onChange(async value => {
+                pkm.useDeviceModels = value;
+                clearModelCache();
+                env.chatModel = null;
+                await save();
+            }));
 
         // Initialize library if missing
         if (!pkm.modelLibrary) pkm.modelLibrary = { main: [], minion: [] };

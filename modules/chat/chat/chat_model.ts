@@ -76,6 +76,13 @@ export function get_chat_model(
     const activeAgent = (agent || this.plugin?.agentManager?.getActiveAgent?.()) as ResolverAgentLike;
     const hasAgentModel = activeAgent?.models?.main || activeAgent?.model;
 
+    // Device policy must also bypass the old runtime singleton (including on failure).
+    if (this.env?.settings?.pkmAssistant?.useDeviceModels === true) {
+        const model = createModelForRole(this.plugin, 'main', activeAgent, null, skipCache);
+        if (!skipCache) this.env.chatModel = model;
+        return model;
+    }
+
     if (hasAgentModel) {
         // `skipCache` musi dojść do resolvera, nie tylko decydować czy podmienić `env.chatModel`
         // niżej - inaczej dwie tury roli main (dwa taby tego samego agenta, albo tura +

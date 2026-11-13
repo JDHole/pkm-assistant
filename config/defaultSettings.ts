@@ -31,6 +31,7 @@ export function defaultSettings(): SettingsBag {
     return {
         pkmAssistant: {
             defaultAutonomy: DEFAULT_AUTONOMY,
+            useDeviceModels: false,
             chat: {
                 platform: '',
                 apiKeys: {},

@@ -57,7 +57,7 @@ bebechach. Ten moduł je KONSUMUJE przez `core/index.js` (wstrzykiwane w `ChatMo
 
 | Eksport | Po co |
 |---|---|
-| `createModelForRole(plugin, role, agent?, delegateConfig?, callerSkipCache?)` | Fabryka modelu per rola - pięciostopniowa drabinka + cache instancji |
+| `createModelForRole(plugin, role, agent?, delegateConfig?, callerSkipCache?, pinnedModel?)` | Fabryka modelu per rola - pięciostopniowa drabinka + cache instancji |
 | `getModelsForRole(pkmSettings, role)` | Lista modeli dla roli z biblioteki modeli |
 | `isLocalPlatform(platform)` | `true` dla `ollama`/`lm_studio` (dane zostają na maszynie usera) |
 | `clearModelCache()` | Czyści cache instancji (zmiana ustawień, przełączenie agenta) |
@@ -385,3 +385,33 @@ potem dodatnie `max_input_tokens` wybranego modelu z katalogu, a na końcu walid
 flagę szacunku. Odczyt katalogu jest ograniczony do 1500 ms i cache'owany per instancja modelu,
 także po braku wyniku; inna instancja ma osobny cache. Estymator jest deterministyczny i nie
 stanowi gwarancji liczby tokenów providera. Testy: `contextBudget.test.ts`.
+
+## Mobile M1 P2 - modele tego urządzenia
+
+`pkmAssistant.useDeviceModels` jest opt-inem (default `false`), także na desktopie.
+Sekcja Modele ma przełącznik z opisem nad kontrolką; zapis czyści cache resolvera
+oraz `env.chatModel`. Ustawienie żyje w settings.json, nie zmienia YAML-i agentów.
+Jest per urządzenie tylko wtedy, gdy użytkownik nie synchronizuje tego pliku.
+
+Jedyny punkt polityki wyboru to `createModelForRole`. Przy `false` kolejność zostaje:
+- worker: własny `delegateConfig.model`, potem nadpisania agenta dla roli/main;
+- pozostałe role: `agent.models[role]`, alias slotu, dla main legacy `agent.model`,
+  potem `delegateConfig.model`;
+- domyślny wpis biblioteki (pierwszy, jeśli brak isDefault), legacy ustawienia;
+- dla ról sub na końcu legacy `agent.model` lub kanoniczny `agent.models.main`.
+
+Przy `true` pomijamy wszystkie nadpisania YAML, również ostatni fallback agenta.
+Pozostaje biblioteka urządzenia i dotychczasowy fallback legacy ustawień.
+`researcher` używa slotu `minion`, `sub_worker` slotu `main`. Brak klucza/modelu
+zwraca null; czat przy tej polityce nie wraca do starego singletonu.
+Klucze API i hosty nadal pochodzą z ustawień urządzenia.
+
+Szósty opcjonalny argument `pinnedModel: {platform, model}` ma pierwszeństwo:
+przekazuje go wyłącznie runtime kontynuacji istniejącego wątku suba po sprawdzeniu
+jego dostępności. To nie jest pole YAML ani argument narzędzia. Chroni kontrakt
+niezmienności modelu rozmowy suba. Nowy `delegate` zawsze stosuje bieżącą politykę.
+W obecnym czacie nie ma ręcznego pickera modelu; `delegate` również nie przyjmuje
+argumentu model. Edytory profili zapisują YAML, nie wybór lokalny dla tury.
+
+Testy P2: `deviceModels.test.ts` (literalne modele, delegacja, cache, fallback),
+`SettingsContent.deviceModels.test.ts` (interakcja i zapis przełącznika).

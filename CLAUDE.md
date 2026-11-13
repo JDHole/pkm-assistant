@@ -141,3 +141,11 @@ widoku ani nie planuje wysłania po oczekiwaniu. Błąd hosta ma log i komunikat
 Test `src/main.mobile.test.ts` wykonuje metody produkcyjne z kontrolowanym workspace,
 sprawdza widoczność, komentarz, unload oraz cichy start mobile i rzeczywisty magazyn
 desktopowy. AVA nie zastępuje testu klawiatury i szuflady na fizycznym telefonie.
+
+## Mobile M1 P2 - modele tego urządzenia
+
+Opcjonalne `pkmAssistant.useDeviceModels` zastępuje wybory YAML biblioteką modeli
+ustawioną na danym urządzeniu. Default false, również desktop pozostaje bez zmian
+zachowania do jawnego włączenia. Reguła i wyjątek kontynuacji suba: `modules/models/CLAUDE.md`.
+`src/styles.css` układa opis nowego przełącznika nad kontrolką, bez stałej szerokości;
+etykieta modelu w czacie zawija długie identyfikatory. Dane agentów nie są przepisywane.
