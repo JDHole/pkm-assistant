@@ -1147,3 +1147,20 @@ archiwum z nazwy aktywnej sesji. `.active_session.json` pozostaje `{path, update
 epoka jest w pliku wskazanym przez `path`, nie w nowym polu wskaźnika czy `.state.json`.
 Testy: `AgentMemory.archiveCollision.test.ts` oraz F4 w
 `../chat/chat/chat_session.archiveFlow.test.ts` (produkcyjne wejścia i nasłuchy).
+
+
+### Mobile M1 R2 - zapisy startowe
+
+`StateManager` przed zapisem porównuje wartości JSON ze świeżym odczytem dysku przez
+`readIfExists`. Kolejność kluczy obiektów, wcięcia i końcowy newline nie stanowią zmiany;
+kolejność tablic i pola spoza schematu są istotne. Równy stan oznacza zero zapisów i
+zachowanie oryginalnych bajtów. Faktyczny zapis zawsze kończy się `\n`. Błąd odczytu
+blokuje zapis; dotychczasowe odrzucenie uszkodzonego JSON przez mutatory zostaje.
+Kolejka jest nadal lokalna dla instancji, nie zapewnia blokady między urządzeniami.
+Testy: `StateManager.test.ts` (pruning pustej sesji, zmiana, równość, zewnętrzny zapis,
+bootstrap i awaria I/O).
+
+Migracja `weekly/` do `summaries/L1/` sprawdza teraz cel przez `probeFile` pod kolejką.
+Zajęty lub niepewny cel pozostawia oba pliki bez zmiany, jak migracja płaskich sesji.
+Nie wybiera nowej nazwy, bo istniejące L2 mogą odwoływać się do starej.
+Testy startu w `AgentMemory.test.ts` sprawdzają kolizję, kłamiące exists i wolny cel.

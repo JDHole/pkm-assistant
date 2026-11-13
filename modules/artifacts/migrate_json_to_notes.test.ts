@@ -47,6 +47,23 @@ function makeStore(typesByName: Record<string, { statusy: string[] }> = {}) {
 
 const jsonFile = (obj: Record<string, unknown>) => JSON.stringify(obj, null, 2);
 
+test('startup without migration marker preserves existing backups and colliding source basenames', async t => {
+    const backup = '.pkm-assistant/artifacts-backup-2026-07-23';
+    const { adapter, files } = makeAdapter({
+        [`${backup}/same.json`]: 'previous backup\n',
+        '.pkm-assistant/artifacts/same.json': '{ first broken JSON\n',
+        '.pkm-assistant/artifacts/plan_review/same.json': '{ second broken JSON\n',
+    });
+    const { store } = makeStore();
+    const result = await migrateJsonArtifactsToNotes({ adapter, store, now: NOW });
+    t.deepEqual(result, { migrated: 0, backedUp: 2, skipped: false });
+    t.is(files.get(`${backup}/same.json`), 'previous backup\n');
+    t.is(files.get(`${backup}/same.json.2`), '{ first broken JSON\n');
+    t.is(files.get(`${backup}/same.json.3`), '{ second broken JSON\n');
+    t.false(files.has('.pkm-assistant/artifacts/same.json'));
+    t.false(files.has('.pkm-assistant/artifacts/plan_review/same.json'));
+});
+
 test('plan_review JSON → notatka typu plan (kroki jako checkboxy) + źródło skasowane + marker', async t => {
     const { adapter, files } = makeAdapter({
         '.pkm-assistant/artifacts/plan-1.json': jsonFile({

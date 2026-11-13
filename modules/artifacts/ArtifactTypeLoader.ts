@@ -25,7 +25,7 @@
  * `artifactSections.ts` - ten sam rejestr, z którego korzystają alias `plan_review` i drzewo
  * decyzyjne, żeby adres patcha zgadzał się z nagłówkiem na dysku.
  */
-import { parseFrontmatter } from '../../core/index.js';
+import { parseFrontmatter, probeFile } from '../../core/index.js';
 import { getLocale } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { statusLiteral } from './artifactStatuses.js';
@@ -117,7 +117,7 @@ sprzatanie: 30
  * mają jawny fallback na podsekcję `### Białe plamy` w „Ustaleniach".
  *
  * (Od 2.2.5 `ensureBuiltinTypes` podmienia plik też wtedy, gdy jest CO DO ZNAKU tekstem
- * fabrycznym drugiego języka - ale tylko wtedy. Vault z RĘCZNIE zmienionym szablonem nadal
+ * fabrycznym drugiego języka i język został jawnie wybrany w ustawieniach. Vault z RĘCZNIE zmienionym szablonem nadal
  * nie dostaje niczego automatycznie, więc fallback zostaje.)
  */
 export const RAPORT_TYPE_CONTENT = `---
@@ -369,17 +369,21 @@ export class ArtifactTypeLoader {
      *
      * Trzy przypadki, w tej kolejności:
      *  1. plik nie istnieje → zapis tekstu fabrycznego w bieżącym języku;
-     *  2. plik istnieje i jest CO DO ZNAKU tekstem fabrycznym DRUGIEGO języka (user go nigdy
-     *     nie tknął, a język interfejsu się zmienił) → podmiana na bieżący język;
+     *  2. język został jawnie wybrany i plik jest tekstem fabrycznym DRUGIEGO języka
+     *     (po normalizeSeed) → podmiana na wybrany język;
      *  3. cokolwiek innego → plik zostaje nietknięty. Szablon typu to dokument usera
      *     (wolno mu tam mieć nawet dataviewjs) i nikt go nie nadpisuje.
+     *
+     * `selectedLanguage` pochodzi z ustawień, BEZ fallbacku. Brak/niepoprawny
+     * wybór pozwala tylko dosiać brakujące pliki w języku UI, bez przepisywania wspólnego vaulta.
      */
-    async ensureBuiltinTypes() {
+    async ensureBuiltinTypes(selectedLanguage?: string) {
         try {
             if (!await this.vault.adapter.exists(ARTIFACT_TYPES_PATH)) {
                 await this.vault.adapter.mkdir(ARTIFACT_TYPES_PATH);
             }
-            const locale = getLocale();
+            const explicitLanguage = selectedLanguage === 'pl' || selectedLanguage === 'en';
+            const locale = explicitLanguage ? selectedLanguage : getLocale();
             const otherLocale = locale === 'pl' ? 'en' : 'pl';
             const names: BuiltinTypeName[] = [
                 BUILTIN_PLAN_TYPE_NAME,
@@ -389,11 +393,12 @@ export class ArtifactTypeLoader {
             for (const name of names) {
                 const path = `${ARTIFACT_TYPES_PATH}/${name}.md`;
                 const content = builtinTypeContent(name, locale);
-                if (!await this.vault.adapter.exists(path)) {
+                if (await probeFile(this.vault.adapter, path) === 'missing') {
                     await this.vault.adapter.write(path, content);
                     log.debug('ArtifactTypeLoader', `Zaseedowano wbudowany typ „${name}"`);
                     continue;
                 }
+                if (!explicitLanguage) continue;
                 const current = await this.vault.adapter.read(path);
                 if (normalizeSeed(current) !== normalizeSeed(builtinTypeContent(name, otherLocale))) continue;
                 await this.vault.adapter.write(path, content);

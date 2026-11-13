@@ -218,7 +218,7 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
   błędu - Agent sam nic o uśpieniu nie wie), `modules/prompts/decisionTree.test.ts` (wyrenderowany
   prompt nie zawiera literału `agent_delegate`, gdy narzędzie jest niedostępne).
 - ⚠️ `ServerManager.getActiveToolDefinitions` filtruje serwery, a `preferred_servers[]` nadal służy do auto-connect. Dawna preferencja narzędzi nie działała: `AgentLoader` pomija tylko jej klucz przy wczytywaniu nadpisań wbudowanego agenta. Pozostałe nieznane klucze nadal wywołują ostrzeżenie z `Agent.update()`. Stare YAML-e przechodzą walidację, lecz usunięte pole nie trafia do zapisu profilu.
-- ⚠️ **Indeks artefaktów „w toku" w prompcie (`_buildBaseContext`) domyka przez `isClosedStatus`, nie przez literał PL na sztywno.** `isClosedStatus(status, statusy)` (`modules/artifacts/artifactButtons.ts`, reeksportowany z barrela `modules/artifacts/index.js` WYŁĄCZNIE dla tego wołacza) rozpoznaje domknięcie w OBU językach (`'zamkniety'`/`'closed'`) plus fallback pozycyjny dla typu WŁASNEGO (ostatni status listy). Stare porównanie `a.status !== 'zamkniety'` zostawiałoby artefakty typu EN (status `'closed'`, bo `ensureBuiltinTypes` reseeduje NIETKNIĘTY plik typu do bieżącego języka UI przy starcie) i typu własnego (np. `'done'`) w indeksie "w toku" na zawsze, mimo że są domknięte.
+- ⚠️ **Indeks artefaktów „w toku" w prompcie (`_buildBaseContext`) domyka przez `isClosedStatus`, nie przez literał PL na sztywno.** `isClosedStatus(status, statusy)` (`modules/artifacts/artifactButtons.ts`, reeksportowany z barrela `modules/artifacts/index.js` WYŁĄCZNIE dla tego wołacza) rozpoznaje domknięcie w OBU językach (`'zamkniety'`/`'closed'`) plus fallback pozycyjny dla typu WŁASNEGO (ostatni status listy). Stare porównanie `a.status !== 'zamkniety'` zostawiałoby artefakty typu EN (status `'closed'`, bo `ensureBuiltinTypes` reseeduje NIETKNIĘTY plik typu do jawnie wybranego języka UI przy starcie) i typu własnego (np. `'done'`) w indeksie "w toku" na zawsze, mimo że są domknięte.
 
 ---
 
@@ -238,3 +238,10 @@ blokuje przegląd kopii; samo włączenie nadal nie przyznaje prawa do źródło
 writera ani ścieżki. Te kontrole wykonuje narzędzie przeglądu.
 
 The `app` tool group contains `obsidian_app` and is disabled for fresh agents. The plugin-level switch separately controls registration and defaults off.
+
+
+M1 R2: `AgentManager.initialize()` przekazuje do `ensureBuiltinTypes` surowe pole
+`settings.pkmAssistant.language`, bez domyślnego `en`. Brak wyboru oznacza dosiewanie
+brakujących typów, bez przepisywania istniejących. `AgentManager.startup.test.ts`
+sprawdza start, zapis klucza API i restart z rzeczywistym pancerzem/defaultami oraz
+jawny wybór EN. Pozostałe seedy i migracje zachowują własne markery w plikach vaulta.

@@ -2725,3 +2725,30 @@ for (const fail of [false, true]) test(`owner switch A→B→A cannot publish ep
     t.is(f.files[path], before);
     t.deepEqual((await memory.loadActiveSession(path)).messages, [{ role: 'user', content: 'Historia', seq: null }]);
 });
+
+for (const targetState of ['present', 'hidden-by-exists', 'missing'] as const) {
+    test(`startup weekly migration preserves occupied L1 (${targetState})`, async t => {
+        const f = makeVault();
+        await new AgentMemory(f.vault, 'Jaskier').initialize();
+        const base = '.pkm-assistant/agents/jaskier/memory';
+        const source = `${base}/weekly/week.md`;
+        const target = `${base}/summaries/L1/week.md`;
+        await f.vault.adapter.write(source, '# Dawne podsumowanie\n');
+        if (targetState !== 'missing') await f.vault.adapter.write(target, '# Nowsze L1\n');
+        const exists = f.vault.adapter.exists;
+        if (targetState === 'hidden-by-exists') {
+            f.vault.adapter.exists = async path => path === target ? false : exists(path);
+        }
+        f.touched.write.length = 0;
+        await new AgentMemory(f.vault, 'Jaskier').initialize();
+        if (targetState === 'missing') {
+            t.is(f.files[target], '# Dawne podsumowanie\n');
+            t.false(Object.hasOwn(f.files, source));
+            t.deepEqual(f.touched.write, [target]);
+        } else {
+            t.is(f.files[source], '# Dawne podsumowanie\n');
+            t.is(f.files[target], '# Nowsze L1\n');
+            t.is(f.touched.write.length, 0);
+        }
+    });
+}

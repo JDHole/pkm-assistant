@@ -185,7 +185,8 @@ export class AgentManager {
                     log.debug('AgentManager', `Szablony: ${this.skillTemplateStore.count()} skilli / ${this.subAgentTemplateStore.count()} subów`);
                 })(),
                 (async () => {
-                    await this.artifactTypeLoader.ensureBuiltinTypes();
+                    // Brak pola oznacza default UI, nie zgodę na przepisanie wspólnych typów.
+                    await this.artifactTypeLoader.ensureBuiltinTypes(this.settings.pkmAssistant?.language);
                     await this.artifactTypeLoader.loadAllTypes();
                     log.debug('AgentManager', `Artifact types: ${this.artifactTypeLoader.cache?.size || 0} załadowanych`);
                 })(),

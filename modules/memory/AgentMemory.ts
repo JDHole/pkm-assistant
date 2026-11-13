@@ -1387,9 +1387,14 @@ epoch: ${epoch}
             for (const filePath of listed.files) {
                 const fileName = filePath.split('/').pop() as string;
                 const newPath = `${this.paths.l1}/${fileName}`;
-                const content = await this.vault.adapter.read(filePath);
-                await this.vault.adapter.write(newPath, content);
-                await this.vault.adapter.remove!(filePath);
+                await this._enqueuePathWrite(filePath, () => this._enqueuePathWrite(newPath, async () => {
+                    // A synced vault may already have L1 under this name. Preserve both
+                    // copies on collision/uncertain I/O, like the legacy session migration.
+                    if (await probeFile(this.vault.adapter, newPath) !== 'missing') return;
+                    const content = await this.vault.adapter.read(filePath);
+                    await this.vault.adapter.write(newPath, content);
+                    await this.vault.adapter.remove!(filePath);
+                }));
             }
         } catch (e) {
             log.warn(`AgentMemory:${this.agentName}`, `Migration failed (non-fatal):`, e);

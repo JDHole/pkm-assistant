@@ -14,6 +14,7 @@
  */
 import { formatYmd } from './artifactParser.js';
 import { pendingStatusOf, acceptedStatusOf } from './artifactStatuses.js';
+import { probeFile } from '../../core/index.js';
 
 const ARTIFACTS_BASE = '.pkm-assistant/artifacts';
 const MIGRATED_MARKER = `${ARTIFACTS_BASE}/.migrated-v2`;
@@ -73,7 +74,7 @@ interface MigrationDependencies {
          * pominąć. Woła się WYŁĄCZNIE po `statusy` docelowego typu, żeby `mapStatus` zmapowała
          * stary rekord na literał w JĘZYKU, w którym typ DZIŚ deklaruje swoje statusy (mogły
          * zmienić się od czasu powstania starego JSON-a - `ensureBuiltinTypes` podmienia
-         * nietknięty plik typu na język UI przy każdym starcie).
+         * nietknięty plik typu na jawnie wybrany język UI przy starcie).
          */
         typeLoader?: { getType(name: string): { statusy?: string[] } | null } | null;
     };
@@ -98,7 +99,7 @@ function classify(record: LegacyArtifactRecord): string | null {
  * Zmapuj stary status na status DZISIEJSZEGO typu docelowego (plan/notatka). `typeStatusy` to
  * `statusy` typu TAKI, JAKI JEST TERAZ w bibliotece - `pendingStatusOf`/`acceptedStatusOf`
  * (`artifactStatuses.ts`) rozpoznają rolę w KTÓRYMKOLWIEK języku, więc typ zaseedowany dziś po
- * angielsku (`ensureBuiltinTypes` podmienia nietknięty plik na język UI przy każdym starcie)
+ * angielsku (`ensureBuiltinTypes` podmienia nietknięty plik na jawnie wybrany język UI przy starcie)
  * dostaje notatkę z literałem EN, nie polskim `'do-akceptacji'` na sztywno wewnątrz EN typu.
  * Fallback na historyczny literał PL, gdy typ nie deklaruje rozpoznanej roli wcale (nie powinno
  * się zdarzyć dla `plan`/`notatka` - `classify()` migruje tylko w te dwa typy).
@@ -254,7 +255,14 @@ async function moveToBackup(adapter: MigrationAdapter, path: string, raw: string
         if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
         const name = path.split('/').pop();
         const content = raw != null ? raw : (await safeRead(adapter, path));
-        await adapter.write(`${backupDir}/${name}`, content ?? '');
+        // Top-level and plan_review/ may share a basename; a previous partial migration
+        // may also have left a backup. Never overwrite that copy when the marker is absent.
+        let target = `${backupDir}/${name}`;
+        for (let suffix = 2; await probeFile(adapter, target) !== 'missing'; suffix++) {
+            if (suffix > 1000) throw new Error('No free artifact backup filename');
+            target = `${backupDir}/${name}.${suffix}`;
+        }
+        await adapter.write(target, content ?? '');
         await adapter.remove(path);
     } catch { /* best-effort — nie wywalaj migracji przez jeden plik */ }
 }

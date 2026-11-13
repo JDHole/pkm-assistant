@@ -81,7 +81,7 @@ export function computeArtifactButtons(status: string, statusy: string[] = []): 
     const unrestricted = list.length === 0;
     // „Czeka na decyzję" = albo pasuje do statusu wyliczonego z DZISIEJSZEJ listy typu, albo
     // sam ma rozpoznaną rolę `pending` w KTÓRYMKOLWIEK języku - drugi warunek jest KLUCZOWY:
-    // `ensureBuiltinTypes` podmienia NIETKNIĘTY plik typu na język UI przy KAŻDYM starcie, więc
+    // `ensureBuiltinTypes` podmienia NIETKNIĘTY plik typu na jawnie wybrany język UI przy starcie, więc
     // istniejąca instancja `do-akceptacji` (PL) pod typem, który w międzyczasie stał się EN
     // (`pendingStatusOf(list)` = `'pending-approval'`), inaczej przestawałaby być rozpoznana
     // jako „czeka na decyzję" i dostawałaby tylko generyczne „Przywołaj agenta" (bug zgłoszony

@@ -83,7 +83,7 @@ test('resolveSkillConfig i resolveSubAgentConfig wołają wspólny _applyPromptA
 });
 
 // _buildBaseContext filtrował artefakty "w toku" hardkodowanym literałem PL `!== 'zamkniety'`.
-// `ensureBuiltinTypes` reseeduje NIETKNIĘTY plik typu do BIEŻĄCEGO języka UI przy każdym starcie
+// `ensureBuiltinTypes` reseeduje NIETKNIĘTY plik typu do jawnie wybranego języka UI przy starcie
 // (modules/artifacts/CLAUDE.md, "Reguła nietknięty tekst fabryczny idzie za językiem") - agent
 // pracujący na typie EN ma w pliku status `'closed'`, nigdy `'zamkniety'`, więc jego domknięte
 // artefakty wisiałyby w indeksie "w toku" w prompcie NA ZAWSZE. To samo dla typu WŁASNEGO usera

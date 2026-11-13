@@ -1,4 +1,4 @@
-import { probeFile } from '../../core/index.js';
+import { probeFile, readIfExists } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 
 /** Adapter FS vaulta w zakresie potrzebnym `.state.json` (typowany strukturalnie). */
@@ -90,12 +90,24 @@ export class StateManager {
         }
     }
 
-    /** Raw write (no queue) - only call inside a serialized block or via write(). */
+    /** Raw write (no queue). Compare disk values, preserving formatting on a no-op. */
     private async _writeRaw(state: Partial<MemoryState> | null | undefined): Promise<void> {
-        await this.vault.adapter.write(this.statePath, JSON.stringify({
+        const content = JSON.stringify({
             ...this.defaultState(),
             ...(state || {})
-        }, null, 2));
+        }, null, 2) + '\n';
+        const previous = await readIfExists(this.vault.adapter, this.statePath);
+        if (previous.state === 'unreadable') {
+            log.warn('StateManager', `Nie mogę porównać ${this.statePath} - nie ruszam pliku`, previous.cause);
+            throw previous.cause instanceof Error ? previous.cause : new Error(`Cannot read ${this.statePath}`);
+        }
+        if (previous.state === 'content') {
+            let parsed: unknown;
+            try { parsed = JSON.parse(previous.content); }
+            catch { /* Jawne write() nadal pozwala zastąpić uszkodzony JSON; mutatory odrzuca _readRaw. */ }
+            if (equalJson(parsed, JSON.parse(content))) return;
+        }
+        await this.vault.adapter.write(this.statePath, content);
     }
 
     /**
@@ -176,4 +188,19 @@ export class StateManager {
             return state;
         });
     }
+}
+
+/** JSON objects ignore key order; arrays retain order. Includes unknown state fields. */
+function equalJson(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (Array.isArray(a) || Array.isArray(b)) {
+        return Array.isArray(a) && Array.isArray(b)
+            && a.length === b.length && a.every((value: unknown, i: number) => equalJson(value, b[i]));
+    }
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length
+        && keys.every(key => Object.prototype.hasOwnProperty.call(right, key) && equalJson(left[key], right[key]));
 }

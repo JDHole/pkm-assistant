@@ -58,7 +58,22 @@ Typ = plik `.pkm-assistant/artifacts/types/<nazwa>.md`: frontmatter meta (`nazwa
 
 Szablon typu wbudowanego ma DWA warianty: polski (`PLAN_TYPE_CONTENT` itd.) i angielski (`*_CONTENT_EN`). Różnią się tekstem dla człowieka - opisem typu, nagłówkami sekcji i podpowiedziami w nawiasach - **oraz, od 19.09, WARTOŚCIAMI STATUSÓW** (patrz sekcja "Statusy w obu językach" niżej). Klucze frontmattera (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`) i identyfikatory typów (`plan`/`notatka`/`raport`) zostają **wspólne dla obu języków** - to semantyka silnika, nie tłumaczenie. Wybiera `builtinTypeContent(name, locale = getLocale())`; nazwy sekcji mieszkają w `artifactSections.ts`, bo ten sam napis wypisują też aliasy `plan_review`/`idea_review` (`modules/tools`) oraz drzewo decyzyjne i blok aktywnego artefaktu (`modules/prompts`) - rozjazd = ciche `not_found` przy patchu. Same teksty fabryczne rejestru NIE wołają (są statyczne), więc przed dryfem broni ich test `nagłówki tekstów fabrycznych zgadzają się z rejestrem sekcji` w `ArtifactTypeLoader.test.ts`.
 
-**Reguła „nietknięty tekst fabryczny idzie za językiem":** `ensureBuiltinTypes` przy starcie (a) pisze plik, gdy go nie ma, (b) PODMIENIA plik, który jest co do znaku tekstem fabrycznym DRUGIEGO języka (porównanie po normalizacji CRLF→LF i obcięciu białych znaków na końcach linii/pliku), (c) w każdym innym przypadku zostawia plik w spokoju. Czyli: user, który nigdy nie ruszył szablonu, po przełączeniu języka dostaje szablon w nowym języku (statusy w pliku włącznie); user, który dopisał choćby jedną linię, nie traci nic - żadna migracja statusów w istniejącej treści nigdy się nie dzieje.
+**Reguła „nietknięty tekst fabryczny idzie za jawnie wybranym językiem” (M1 R2):** `ensureBuiltinTypes` przy starcie (a) pisze plik, gdy go nie ma, (b) tylko z jawnym `selectedLanguage` (`pl`/`en`) PODMIENIA plik, który jest co do znaku tekstem fabrycznym DRUGIEGO języka (porównanie po normalizacji CRLF→LF i obcięciu białych znaków na końcach linii/pliku), (c) w każdym innym przypadku zostawia plik w spokoju. Czyli: user, który nigdy nie ruszył szablonu, po przełączeniu języka dostaje szablon w nowym języku (statusy w pliku włącznie); user, który dopisał choćby jedną linię, nie traci nic - żadna migracja statusów w istniejącej treści nigdy się nie dzieje.
+
+`ensureBuiltinTypes(selectedLanguage?: string)` dostaje pole `settings.pkmAssistant.language`
+z `AgentManager`, bez fallbacku. Brak lub nieobsługiwany kod pozwala wyłącznie dosiać
+brakujące pliki w bieżącym języku UI; istniejące zachowują dokładne bajty. Brak pliku
+potwierdza `probeFile`, więc samo fałszywe `exists() === false` nie uprawnia do nadpisania.
+Nie dodajemy markera w ustawieniach: produkcyjne `defaultSettings()` nie zawierają
+`language`, a jedyny pisarz wyboru UI to `renderAppearanceSection.onChange`.
+Zapis klucza API nie materializuje języka. Test `AgentManager.startup.test.ts` wykonuje
+rzeczywisty load/merge/save/reload i start managera; testy loadera pokrywają brak wyboru,
+jawny wybór, brakujący plik i niezgodne sygnały adaptera. Dotyczy obu platform.
+
+Audyt R2: migrator JSON ma marker w vaulcie, nie w ustawieniach. Gdy markera nie ma,
+backup omija zajęte nazwy przez sufiks `.2`, `.3` itd. (maksymalnie 1000 prób), również
+przy identycznej nazwie źródła w `artifacts/` i `artifacts/plan_review/`. Zachowuje
+wcześniejsze kopie; test kolizji w `migrate_json_to_notes.test.ts` czyta wszystkie trzy treści.
 
 ### Statusy w obu językach (19.09)
 

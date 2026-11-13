@@ -17,6 +17,7 @@ import { setLocale } from '../../core/i18n/index.js';
 
 // ── In-memory adapter (wzór mocków vaulta) ──
 function makeVault(files: Map<string, string> = new Map<string, string>()) {
+    const writes: string[] = [];
     const adapter = {
         async exists(path: string) {
             if (files.has(path)) return true;
@@ -36,10 +37,10 @@ function makeVault(files: Map<string, string> = new Map<string, string>()) {
             if (!files.has(path)) throw new Error('ENOENT ' + path);
             return files.get(path)!;
         },
-        async write(path: string, data: string) { files.set(path, data); },
+        async write(path: string, data: string) { writes.push(path); files.set(path, data); },
         async mkdir() { /* noop */ },
     };
-    return { vault: { adapter }, files };
+    return { vault: { adapter }, files, writes };
 }
 
 const typePath = (name: string) => `${ARTIFACT_TYPES_PATH}/${name}.md`;
@@ -180,7 +181,7 @@ test.serial('locale en + NIETKNIĘTY polski plik fabryczny (nawet z CRLF) → po
     const zCrlf = PLAN_TYPE_CONTENT.replace(/\n/g, '\r\n');
     const { vault, files } = makeVault(new Map([[typePath('plan'), zCrlf]]));
     const loader = new ArtifactTypeLoader(vault);
-    await loader.ensureBuiltinTypes();
+    await loader.ensureBuiltinTypes('en');
     t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT_EN);
 });
 
@@ -191,7 +192,7 @@ test.serial('locale pl + NIETKNIĘTY angielski plik fabryczny → podmiana na po
         [typePath('raport'), RAPORT_TYPE_CONTENT_EN],
     ]));
     const loader = new ArtifactTypeLoader(vault);
-    await loader.ensureBuiltinTypes();
+    await loader.ensureBuiltinTypes('pl');
     t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT);
     t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT);
 });
@@ -201,7 +202,7 @@ test.serial('locale en + plik RUSZONY przez usera → zostaje bajt w bajt', asyn
     const mojaWersja = PLAN_TYPE_CONTENT + '\n## Moja sekcja\n(moje notatki)\n';
     const { vault, files } = makeVault(new Map([[typePath('plan'), mojaWersja]]));
     const loader = new ArtifactTypeLoader(vault);
-    await loader.ensureBuiltinTypes();
+    await loader.ensureBuiltinTypes('en');
     t.is(files.get(typePath('plan')), mojaWersja);
 });
 
@@ -312,4 +313,67 @@ test('loadAllTypes on an empty vault yields no types (no crash)', async t => {
     const loader = new ArtifactTypeLoader(vault);
     await loader.loadAllTypes();
     t.is(loader.getAllTypes().length, 0);
+});
+
+for (const selectedLanguage of [undefined, '', 'de']) {
+    test.serial(`no supported language choice (${selectedLanguage}): shared Polish types stay byte-identical`, async t => {
+        useLocale(t, 'en');
+        const { vault, files, writes } = makeVault(new Map([
+            [typePath('plan'), PLAN_TYPE_CONTENT],
+            [typePath('notatka'), NOTATKA_TYPE_CONTENT],
+            [typePath('raport'), RAPORT_TYPE_CONTENT],
+        ]));
+        const loader = new ArtifactTypeLoader(vault);
+        await loader.ensureBuiltinTypes(selectedLanguage);
+        await loader.loadAllTypes();
+        t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT);
+        t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT);
+        t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT);
+        t.deepEqual(loader.getType('plan')!.statusy, ['do-akceptacji', 'uwagi', 'zaakceptowany', 'zamkniety']);
+        t.is(writes.length, 0);
+    });
+}
+
+test.serial('explicit en replaces all untouched Polish types, then performs no further writes', async t => {
+    useLocale(t, 'en');
+    const { vault, files, writes } = makeVault(new Map([
+        [typePath('plan'), PLAN_TYPE_CONTENT],
+        [typePath('notatka'), NOTATKA_TYPE_CONTENT],
+        [typePath('raport'), RAPORT_TYPE_CONTENT],
+    ]));
+    const loader = new ArtifactTypeLoader(vault);
+    await loader.ensureBuiltinTypes('en');
+    await loader.ensureBuiltinTypes('en');
+    t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT_EN);
+    t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT_EN);
+    t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT_EN);
+    t.deepEqual(writes, [typePath('plan'), typePath('notatka'), typePath('raport')]);
+});
+
+test.serial('no language choice seeds only the missing type', async t => {
+    useLocale(t, 'en');
+    const { vault, files, writes } = makeVault(new Map([
+        [typePath('plan'), PLAN_TYPE_CONTENT],
+        [typePath('notatka'), NOTATKA_TYPE_CONTENT],
+    ]));
+    await new ArtifactTypeLoader(vault).ensureBuiltinTypes();
+    t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT);
+    t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT);
+    t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT_EN);
+    t.deepEqual(writes, [typePath('raport')]);
+});
+
+test.serial('default language cannot overwrite an existing type hidden by exists()', async t => {
+    useLocale(t, 'en');
+    const { vault, files, writes } = makeVault(new Map([
+        [typePath('plan'), PLAN_TYPE_CONTENT],
+        [typePath('notatka'), NOTATKA_TYPE_CONTENT],
+        [typePath('raport'), RAPORT_TYPE_CONTENT],
+    ]));
+    vault.adapter.exists = async () => false;
+    await new ArtifactTypeLoader(vault).ensureBuiltinTypes();
+    t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT);
+    t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT);
+    t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT);
+    t.is(writes.length, 0);
 });
