@@ -1,9 +1,10 @@
 import test from 'ava';
 import { register } from 'node:module';
 import * as fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { mock } from 'node:test';
 import Obsidian, { Platform, Notice } from 'obsidian';
-import { ToolRegistry } from '../modules/tools/index.js';
+import { ToolRegistry, ServerManager } from '../modules/tools/index.js';
 import { SubTaskRegistry } from '../modules/sub-agents/index.js';
 import { log } from '../core/utils/Logger.js';
 import { setLocale } from '../core/i18n/index.js';
@@ -11,6 +12,10 @@ import { setLocale } from '../core/i18n/index.js';
 // Replace only browser assets; execute the actual composition root against host ports.
 register('data:text/javascript,' + encodeURIComponent(`
 import { readFile } from 'node:fs/promises';
+export async function resolve(specifier, context, next) {
+    if (specifier.startsWith('@plugin/')) return next(new URL(specifier.slice(8), ${JSON.stringify(new URL('../', import.meta.url).href)}).href, context);
+    return next(specifier, context);
+}
 export async function load(url, context, next) {
     if (url.endsWith('.css')) return { format: 'module', source: 'export default {}', shortCircuit: true };
     if (url.endsWith('.md')) return { format: 'module', source: 'export default ' + JSON.stringify(await readFile(new URL(url), 'utf8')), shortCircuit: true };
@@ -21,6 +26,8 @@ Obsidian.Notice = class extends Notice {
     constructor(message: string | DocumentFragment, timeout?: number) { super(message, timeout); notices.push(message); }
 };
 const { default: Plugin } = await import('./main.js');
+const { SkinManager } = await import('../modules/crystal-soul/index.js');
+const { AgentManager } = await import('../modules/agents/index.js');
 test.after(() => { Obsidian.Notice = Notice; });
 test.beforeEach(() => { notices.length = 0; setLocale('en'); });
 test.afterEach.always(() => { Platform.isMobile = false; mock.restoreAll(); });
@@ -84,6 +91,89 @@ test.serial('inline comment waits for first chat view and preserves formatted me
         { meta: { origin: 'machine' } },
     ]]);
 });
+
+for (const mobile of [false, true]) for (const skinFails of [false, true]) {
+    test.serial(`U12 production startup: ${mobile ? 'mobile' : 'desktop'}, skin failure=${skinFails}`, async t => {
+        Platform.isMobile = mobile;
+        // Reuse the host fixture located by the AVA preload, without changing the harness.
+        const supportDir = process.env.PKM_TEST_SUPPORT_DIR;
+        if (!supportDir) throw new Error('AVA harness preload is required');
+        const supportUrl = pathToFileURL(`${supportDir}/`);
+        const { createMockApp } = await import(new URL('../mock/app.ts', supportUrl).href);
+        const { shutdownHarnessRuntime } = await import(new URL('obsidian.ts', supportUrl).href);
+        const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
+        const app: Obsidian.App = createMockApp(root);
+        const plugin = new Plugin(app, {
+            id: 'pkm-assistant', name: 'PKM Assistant', version: '2.4.1',
+            minAppVersion: '1.11.0', author: 'Test', description: 'Startup test',
+        });
+        const layouts: Array<() => unknown> = [];
+        mock.method(app.workspace, 'onLayoutReady', (callback: () => unknown) => { layouts.push(callback); });
+        let now = 100;
+        const clock = mock.method(performance, 'now', () => now);
+        const requireDescriptor = Object.getOwnPropertyDescriptor(window, 'require');
+        Object.defineProperty(window, 'require', mobile
+            ? { configurable: true, get() { throw new Error('Node reached on mobile'); } }
+            : { configurable: true, value: () => fs });
+        t.teardown(async () => {
+            clock.mock.restore();
+            plugin.onunload();
+            await plugin.env?.dispose();
+            await plugin.traceLog?.dispose();
+            await log.disposeFileSink();
+            shutdownHarnessRuntime();
+            if (requireDescriptor) Object.defineProperty(window, 'require', requireDescriptor);
+            else Reflect.deleteProperty(window, 'require');
+            fs.rmSync(root, { recursive: true, force: true });
+        });
+        // Time advances in actual work, never in StartupTimer or a test-owned mark().
+        const gitignore = plugin.ensureGitignoreEntries.bind(plugin);
+        mock.method(plugin, 'ensureGitignoreEntries', async (...args: Parameters<typeof gitignore>) => {
+            await gitignore(...args); now += 20;
+        });
+        const unlock = plugin._unlockSecureStorageAtStartup.bind(plugin);
+        mock.method(plugin, '_unlockSecureStorageAtStartup', async () => { await unlock(); now += 30; });
+        const skin = SkinManager.initialize.bind(SkinManager);
+        mock.method(SkinManager, 'initialize', async (...args: Parameters<typeof skin>) => {
+            if (skinFails) { now += 10000; throw new Error('Controlled skin failure'); }
+            await skin(...args); now += 40;
+        });
+        const agents = AgentManager.prototype.initialize;
+        mock.method(AgentManager.prototype, 'initialize', async function(this: InstanceType<typeof AgentManager>) {
+            await agents.call(this); now += 50;
+        });
+        const servers = ServerManager.prototype.initialize;
+        mock.method(ServerManager.prototype, 'initialize', async function(this: ServerManager) {
+            await servers.call(this); now += 60;
+        });
+        const theme = plugin._loadCrystalSoulTheme.bind(plugin);
+        mock.method(plugin, '_loadCrystalSoulTheme', async () => { await theme(); now += 34; });
+        const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
+        mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) {
+            this.onOpen(); this.onClose();
+        });
+
+        await plugin.onload();
+        now = 1100;
+        await Promise.all(layouts.map(callback => callback()));
+        t.true(plugin._ready);
+        await plugin.runDeviceDiagnostics();
+        const reports = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
+        t.is(reports.length, 1);
+        const content = await app.vault.adapter.read(reports[0]);
+        t.deepEqual(content.split('\n').filter(line => /^\| (startup\.|plugin.startupMs)/.test(line))
+            .map(line => line.replace(/\| OK \| \d+ \|/, '| OK | <collection-ms> |')), [
+            skinFails ? '| plugin.startupMs | OK | <collection-ms> | 11194 |' : '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+            '| startup.layoutWaitMs | OK | <collection-ms> | 1000 |',
+            '| startup.runtimeMs | OK | <collection-ms> | 20 |',
+            '| startup.secretsMs | OK | <collection-ms> | 30 |',
+            skinFails ? '| startup.skinMs | OK | <collection-ms> | 10000 |' : '| startup.skinMs | OK | <collection-ms> | 40 |',
+            '| startup.agentsMs | OK | <collection-ms> | 50 |',
+            '| startup.toolsMs | OK | <collection-ms> | 60 |',
+            '| startup.finishMs | OK | <collection-ms> | 34 |',
+        ]);
+    });
+}
 
 test.serial('openChatView reports failed host operation without rejecting command callback', async t => {
     mock.method(log, 'error', () => {});

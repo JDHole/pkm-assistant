@@ -129,10 +129,12 @@ Prace uruchomione w tle nadal nie są oczekiwane przez start. Nie zmieniono
 kolejności wywołań ani obliczenia czasu całkowitego. Suma kompletnych faz jest
 równa `plugin.startupMs` z dokładnością niezależnych zaokrągleń do ms.
 Pierwszy `mark` danej fazy wygrywa: duplikat jest idempotentny i nie przesuwa
-granicy kolejnej fazy. Brak znacznika (także wyjątek przed końcem try SkinManager,
-AgentManager lub MCP) oznacza brak wartości, nigdy zero. Następny znacznik liczy
-czas od ostatniej zapisanej granicy, więc obejmuje również pominięty przedział;
-przy takim raporcie nie można przypisać całego tego czasu tylko kolejnej fazie.
+granicy kolejnej fazy. U12 zamyka fazy SkinManager, AgentManager i MCP pierwszą
+instrukcją po ich try/catch, również po złapanym wyjątku: czas nieudanej próby
+należy do jej fazy, a nie do następnej. Liczba mierzy czas, nie sukces inicjalizacji.
+Brak znacznika oznacza brak wartości, nigdy zero. W produkcyjnym starcie oznacza
+to, że wykonanie nie doszło do granicy fazy ani do kolejnych granic. Sam licznik
+nadal liczy każdy przedział od ostatniej zapisanej granicy.
 PL/EN dodają stałe objaśnienie rozdziału oczekiwania na Obsidiana i pracy pluginu.
 
 Kryptografia używa świeżego `SecretsStorage(null)`, testowego hasła/próbki i `lock`
@@ -158,6 +160,12 @@ flagą, nigdy go nie wywołujemy.
   string/Infinity/ujemnej/braku, pomijanie obcej nazwy i objaśnienie PL/EN.
   `src/main.mobile.test.ts`: kontrolowany zegar licznika i literalne wiersze faz
   przez produkcyjną komendę raportu na desktopie, mobile i bez AbortController.
+- U12 w `src/main.mobile.test.ts`: produkcyjne `onload()` i `initialize()` przez
+  callback layoutu na atrapie hosta z harnessu; czas przesuwany przez pracę
+  zależności, bez oznaczania faz w teście. Na desktopie i mobile zapisany raport
+  musi zawierać siedem literalnych czasów i czas całkowity, zarówno po udanym
+  starcie, jak i po SkinManager rzucającym po 10000 ms (AgentManager nadal 50 ms).
+  Zegar `performance.now` jest przywracany po każdym przypadku.
 - `diagnostics.test.ts`: odczyt pliku z adaptera RAM, kolejność i liczniki,
   kryptografia, awarie rename/mkdir/rmdir, brak append i cichy błąd dopisania,
   izolowane sprzątanie i odmowa bez żądania. D1: prywatny komunikat EACCES znika

@@ -634,10 +634,10 @@ export default class PkmAssistantPlugin extends PluginBase {
       await SkinManager.initialize(this as Parameters<typeof SkinManager.initialize>[0]);
       this.skinManager = SkinManager;
       log.info('Plugin', `SkinManager OK: aktywny skin ${SkinManager.getActiveSkinId()}`);
-      this.diagnosticStartupPhases?.mark('skinMs');
     } catch (e) {
       log.warn('Plugin', 'SkinManager init failed:', e);
     }
+    this.diagnosticStartupPhases?.mark('skinMs');
 
     // Migrate old model settings to modelLibrary (one-time)
     this._migrateToModelLibrary();
@@ -657,10 +657,10 @@ export default class PkmAssistantPlugin extends PluginBase {
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';
       log.info('Plugin', `AgentManager OK: ${agentCount} agentów, aktywny: ${activeAgent}`);
-      this.diagnosticStartupPhases?.mark('agentsMs');
     } catch (e) {
       log.error('Plugin', 'AgentManager FAIL:', e);
     }
+    this.diagnosticStartupPhases?.mark('agentsMs');
 
     // Stary ArtifactManager (JSON w .pkm-assistant/artifacts/*.json) + towarzyszące store'y RAM
     // są skasowane. Migrator przenosi stare JSONy na notatki; artefakty żywe żyją jako notatki
@@ -875,10 +875,10 @@ export default class PkmAssistantPlugin extends PluginBase {
         // do `.message`, bez zmiany runtime (asercja, nie guard; `?.` zostaje jak było).
         log.warn('Plugin', 'External MCP autostart problem (ignorowane):', (e as { message?: string } | null)?.message);
       }
-      this.diagnosticStartupPhases?.mark('toolsMs');
     } catch (e: unknown) {
       log.error('Plugin', 'MCP system FAIL:', e);
     }
+    this.diagnosticStartupPhases?.mark('toolsMs');
 
     // Context menu: "Send to assistant" + "Inline comment"
     this.registerEvent(
