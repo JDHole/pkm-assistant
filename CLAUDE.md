@@ -54,6 +54,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/agent-loop/` | **The core tool loop, no UI.** `runAgentLoop()`, `ArrayMessageStore`, canonical `parseToolCalls()` (handles several response shapes) + `splitConcatenatedToolCalls()` (anti-merging for model output) + `sanitizeToolTranscript()`. Consumers: sub-agents, chat, `tools/MCPClient` |
 | `modules/ui-components/` | Shared UI primitives: `ToolCallDisplay`, `ThinkingBlock`, `SubAgentBlock`, `AttachmentManager`, `MentionAutocomplete` |
 | `modules/vault-drafts/` | 2.4.7 draft storage, review and layered view: immutable first-touch bases, durable blobs/manifests, predecessor provenance and restart recovery; injected I/O only |
+| `modules/diagnostics/` | M1 P3: komenda diagnostyki urządzenia, raport przez adapter vaulta, test kryptografii i opcjonalny pomiar strumienia, build marker |
 | `modules/web/` | Web access layer: `WebSearchProvider` (several providers), `urlRegistry` (URL provenance), search settings |
 
 ## Commands and gates

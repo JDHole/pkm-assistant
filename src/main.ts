@@ -11,8 +11,12 @@ import { parseYaml, stringifyYaml } from "obsidian";
 const {
   Notice,
   Platform,
+  apiVersion,
 } = Obsidian;
 
+import { BUILD_MARKER, runDeviceDiagnostics, diagnosticRedactor, probeConnection, DiagnosticsConsentModal, showDiagnosticReport } from '../modules/diagnostics/index.js';
+import { createModelForRole, getModelsForRole } from '../modules/models/index.js';
+import type { ChatProvider, PkmModelSettings, ResolverPluginLike } from '../modules/models/index.js';
 import { PluginRuntime } from '../core/runtime/PluginRuntime.js';
 import { buildRuntimeConfig } from '../config/runtimeConfig.js';
 import { readUiLanguage } from '../core/runtime/settingsArmor.js';
@@ -183,6 +187,10 @@ export default class PkmAssistantPlugin extends PluginBase {
   /** TS-boundary: nic w repo nie przypisuje `_api` (getter `api` jest martwy, zawsze `undefined`
    * w runtime) - `unknown` jest jedynym prawdziwym typem, który tego nie kłamie. */
   declare _api: unknown;
+  readonly diagnosticBuildMarker = BUILD_MARKER;
+  private diagnosticStartedAt = 0;
+  private diagnosticStartupMs: number | null = null;
+  private diagnosticController: { abort: () => void } | null = null;
   declare _readyCallbacks: Array<() => void>;
   declare _crystalSoulSheet: CSSStyleSheet | null;
   declare _komunikatorCleanupUnsub: (() => void) | null;
@@ -242,6 +250,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   get obsidian() { return Obsidian; }
   get api() { return this._api; }
   async onload() {
+    this.diagnosticStartedAt = performance.now();
     log.info('Plugin', `=== PKM Assistant v${this.manifest.version} START ===`);
     log.debug('Plugin', 'onload() - rejestracja komponentów');
     this._ready = false;
@@ -307,6 +316,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // nic nie znalazł.
     setLocale(await readUiLanguage(this.app?.vault?.adapter as unknown as VaultAdapterLike));
     this.registerCommands();
+    this.addCommand({ id: 'run-device-diagnostics', name: t('diagnostics.run'), callback: () => { void this.runDeviceDiagnostics(); } });
     this.registerRibbonIcons();
     log.debug('Plugin', 'onload() zakończone — czekam na layoutReady → initialize()');
   }
@@ -434,6 +444,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   onunload() {
+    this.diagnosticController?.abort();
     log.debug('Main', "Unloading PKM Assistant plugin");
     // Obsidian does not await onunload. Start every tab's pending writes while
     // agent memories still exist; beforeunload and view close use the same save.
@@ -895,6 +906,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     await this._loadCrystalSoulTheme();
 
     // Signal that plugin is fully initialized
+    this.diagnosticStartupMs = Math.round(performance.now() - this.diagnosticStartedAt);
     this._ready = true;
     for (const cb of this._readyCallbacks) {
       try { cb(); } catch (e) { log.error('Plugin', 'onReady callback error:', e); }
@@ -912,6 +924,86 @@ export default class PkmAssistantPlugin extends PluginBase {
       t('main.ready', { time: elapsed, count: agentCount, plural: agentCount === 1 ? '' : 's', active: activeAgent?.name || '—' }),
       { type: 'success', timeout: 3000 }
     );
+  }
+
+  async runDeviceDiagnostics(): Promise<void> {
+    if (this.diagnosticController) { new Notice(t('diagnostics.running')); return; }
+    const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
+    let consentModal: DiagnosticsConsentModal | undefined;
+    const run = { cancelled: false, abort: () => { run.cancelled = true; controller?.abort(); consentModal?.close(); } };
+    this.diagnosticController = run;
+    try {
+      const settings = this.env?.settings ?? {};
+      const pkm = settings.pkmAssistant;
+      const chat = pkm?.chat;
+      // Composition boundary: core's runtime registry deliberately knows only provider IDs.
+      // buildRuntimeConfig installs ChatProviders; the model resolver uses the same boundary.
+      const model = createModelForRole(this as unknown as ResolverPluginLike, 'main', null, null, true);
+      const library = getModelsForRole(pkm as PkmModelSettings | undefined, 'main');
+      const configured = library.find(entry => entry.isDefault) ?? library[0];
+      const providerId = model?.providerId ?? configured?.platform ?? chat?.platform;
+      const modelId = model?.modelId ?? configured?.model ?? (providerId ? chat?.models?.[providerId] : undefined);
+      const providers = this.runtimeConfig.chat.providers as Record<string, ChatProvider>;
+      const servers = this.externalMcpManager?.listServersForUi();
+      const flags = {
+        isMobile: Platform.isMobile, isPhone: Platform.isPhone, isTablet: Platform.isTablet,
+        isAndroidApp: Platform.isAndroidApp, isIosApp: Platform.isIosApp, isDesktopApp: Platform.isDesktopApp,
+      };
+      // Raw engine identification only; all platform decisions use Platform above.
+      const { userAgent } = navigator;
+      const redact = diagnosticRedactor(settings);
+      const report = await runDeviceDiagnostics({
+        adapter: this.app.vault.adapter, settings,
+        platform: flags.isAndroidApp ? 'android' : flags.isIosApp ? 'ios' : flags.isMobile ? 'mobile' : 'desktop',
+        facts: {
+          'plugin.version': this.manifest.version, 'plugin.build': BUILD_MARKER, 'obsidian.apiVersion': apiVersion ?? null,
+          ...flags, 'navigator.userAgent': userAgent, 'window.size': `${window.innerWidth}x${window.innerHeight}`,
+          'vault.configDir': this.app.vault.configDir,
+          'plugin.ready': this._ready, 'plugin.startupMs': this.diagnosticStartupMs,
+          'agents.count': this.agentManager?.agents.size ?? null, 'tools.count': this.toolRegistry?.getAllTools().length ?? null,
+          'mcp.total': servers?.length ?? null, 'mcp.stdio': servers?.filter(server => server.transport === 'stdio').length ?? null,
+          'mcp.http': servers?.filter(server => server.transport === 'http').length ?? null,
+          'embedding.status': this.vaultIndexer?.getStatus().status ?? null,
+          'drafts.available': !!this.vaultDraftRuntime,
+          'vault.markdownCount': this.app.vault.getMarkdownFiles().length,
+          'model.default': providerId && modelId ? `${providerId}/${modelId}` : null,
+          'model.useDeviceModels': pkm?.useDeviceModels === true,
+          ...Object.fromEntries(Object.keys(providers).map(id => [
+            `provider.${id}`, t('diagnostics.key_set', { value: t(
+              chat?.apiKeys?.[id] || pkm?.secureStorage?.refs?.[`pkmAssistant.chat.apiKeys.${id}`]
+                ? 'diagnostics.yes' : 'diagnostics.no') }),
+          ])),
+        },
+        capabilities: {
+          structuredClone: typeof structuredClone === 'function', 'Array.prototype.at': typeof Array.prototype.at === 'function',
+          'crypto.subtle': typeof crypto !== 'undefined' && !!crypto.subtle,
+          ReadableStream: typeof ReadableStream !== 'undefined', TextDecoder: typeof TextDecoder !== 'undefined',
+          AbortController: typeof AbortController !== 'undefined', visualViewport: !!window.visualViewport,
+          MediaRecorder: typeof MediaRecorder !== 'undefined', 'navigator.mediaDevices': !!navigator.mediaDevices,
+          'navigator.clipboard': !!navigator.clipboard, 'window.require': 'require' in window,
+        },
+        consent: async () => {
+          if (run.cancelled) return false;
+          consentModal = new DiagnosticsConsentModal(this.app, controller?.signal);
+          consentModal.open();
+          return consentModal.decision;
+        },
+        connection: async () => {
+          if (!controller || run.cancelled) return { status: 'skipped', detail: t('diagnostics.no_abort_controller') };
+          const provider = providerId ? providers[providerId] : undefined;
+          if (!provider || !modelId) return { status: 'skipped', detail: t('diagnostics.no_model') };
+          if (provider.info.needsApiKey && !chat?.apiKeys?.[provider.info.id]) return { status: 'skipped', detail: t('diagnostics.no_key') };
+          return probeConnection(provider, {
+            modelId, apiKey: chat?.apiKeys?.[provider.info.id], endpoint: chat?.hosts?.[provider.info.id], log,
+          }, this.runtimeConfig.chat.transport, redact, controller.signal);
+        },
+      });
+      if (!run.cancelled) showDiagnosticReport(this.app, report);
+    } catch {
+      // Adapter errors can contain full system paths; keep notices/logs fixed and local.
+      log.error('Diagnostics', 'Could not save device diagnostics');
+      if (!run.cancelled) new Notice(t('diagnostics.failed'));
+    } finally { this.diagnosticController = null; }
   }
 
   registerObsidianAppTool(toolRegistry: ToolRegistry): boolean {

@@ -151,3 +151,71 @@ test.serial('mobile Obsidian App registers state/open with no Electron and repor
     t.deepEqual(result, { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'Screenshots are not available on mobile. Use workspace state or open a note instead.' } });
     t.is(nodeReads, 0);
 });
+
+for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, { mobile: true, missingAbort: false }, { mobile: true, missingAbort: true }]) test.serial(`device diagnostics composition: ${mobile ? 'mobile' : 'desktop'}, missing AbortController=${missingAbort}`, async t => {
+    Platform.isMobile = mobile;
+    const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
+    // The host modal stub does not run lifecycle hooks. Simulate closing the real consent UI.
+    mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) { this.onOpen(); this.onClose(); });
+    let reportSummary = '';
+    mock.method(Obsidian.Modal.prototype, 'open', function(this: Obsidian.Modal) {
+        reportSummary = this.contentEl.children[0]?.textContent ?? '';
+    });
+    const files = new Map<string, string>();
+    const dirs = new Set<string>();
+    const adapter = {
+        exists: async (path: string) => dirs.has(path) || files.has(path),
+        mkdir: async (path: string) => { dirs.add(path); },
+        write: async (path: string, text: string) => { files.set(path, text); },
+        read: async (path: string) => files.get(path) ?? '',
+        append: async (path: string, text: string) => { files.set(path, (files.get(path) ?? '') + text); },
+        stat: async (path: string) => ({ type: 'file', size: files.get(path)?.length ?? 0 }),
+        rename: async (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
+        list: async (path: string) => ({ files: [...files.keys()].filter(p => p.startsWith(path + '/')), folders: [] }),
+        remove: async (path: string) => { files.delete(path); },
+        rmdir: async (path: string) => { for (const dir of dirs) if (dir.startsWith(path)) dirs.delete(dir); },
+    };
+    const { buildRuntimeConfig } = await import('../config/runtimeConfig.js');
+    const runtimeConfig = buildRuntimeConfig({ app: { vault: { adapter } } as never });
+    let requests = 0;
+    runtimeConfig.chat.transport = { open: async () => { requests++; throw new Error('Unexpected request'); } };
+    runtimeConfig.chat.http = { send: async () => { requests++; throw new Error('Unexpected request'); } };
+    const settings = { pkmAssistant: {
+        chat: { apiKeys: { openai: 'composition-secret-123456' } },
+        modelLibrary: { main: [{ platform: 'openai', model: 'test-model', isDefault: true }] }, useDeviceModels: true,
+    } };
+    const host = {
+        app: { vault: { adapter, configDir: '.custom-config', getMarkdownFiles: () => [{}, {}, {}] } },
+        manifest: { version: '2.4.1' }, runtimeConfig,
+        env: { settings, config: runtimeConfig },
+        _ready: true, diagnosticStartupMs: 1234, diagnosticController: null,
+        agentManager: { agents: new Map([['one', {}], ['two', {}]]) },
+        toolRegistry: { getAllTools: () => [{}, {}, {}, {}] },
+        externalMcpManager: { listServersForUi: () => [{ transport: 'stdio' }, { transport: 'http' }] },
+        vaultIndexer: { getStatus: () => ({ status: mobile ? 'disabled_mobile' : 'ready' }) },
+        vaultDraftRuntime: mobile ? undefined : {},
+    };
+    const abortDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'AbortController')!;
+    try {
+        if (missingAbort) Object.defineProperty(globalThis, 'AbortController', { configurable: true, value: undefined });
+        await Plugin.prototype.runDeviceDiagnostics.call(host as never);
+    } finally { Object.defineProperty(globalThis, 'AbortController', abortDescriptor); }
+    const reports = [...files.entries()].filter(([path]) => path.endsWith('.md'));
+    t.is(reports.length, 1);
+    const [path, content] = reports[0];
+    t.true(path.endsWith(mobile ? '-mobile.md' : '-desktop.md'));
+    for (const fragment of [
+        `| isMobile | OK |`, '| .custom-config |', '| plugin.startupMs | OK |', '| 1234 |',
+        '| agents.count | OK |', '| tools.count | OK |', '| mcp.stdio | OK |', '| mcp.http | OK |',
+        `| ${mobile ? 'disabled_mobile' : 'ready'} |`, '| openai/test-model |', '| Key set: Yes |',
+        '| model.useDeviceModels | OK |', '| model.connection | SKIPPED | 0 | No consent; no request sent |',
+    ]) t.true(content.includes(fragment), fragment);
+    t.regex(content, mobile ? /\| isMobile \| OK \| \d+ \| true \|/ : /\| isMobile \| OK \| \d+ \| false \|/);
+    t.false(content.includes('composition-secret-123456'));
+    t.is(requests, 0);
+    t.is(host.diagnosticController, null);
+    t.regex(reportSummary, missingAbort
+        ? /Diagnostics: \d+ OK, 1 errors\. File: \.pkm-assistant\/diagnostics\//
+        : /Diagnostics: \d+ OK, 0 errors\. File: \.pkm-assistant\/diagnostics\//);
+    if (missingAbort) t.true(content.includes('| AbortController | ERROR | 0 | Unavailable |'));
+});

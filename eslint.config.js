@@ -56,6 +56,7 @@ export const MODULE_NAMES = [
   'artifacts',
   'chat',
   'crystal-soul',
+  'diagnostics',
   'embedding',
   'komunikator',
   'memory',

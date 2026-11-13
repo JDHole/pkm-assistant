@@ -1,7 +1,7 @@
 /**
  * `utils/buildManifest.ts` — czyste funkcje builda wyjęte z `esbuild.js`:
  * stemplowanie manifestu wersją z `package.json`, rozbiór zmiennej deployu i
- * wyliczenie katalogu docelowego wtyczki w vaultcie.
+ * wyliczenie katalogu docelowego wtyczki w vaultcie i znacznik hash/czas builda.
  *
  * Po co osobny plik: `esbuild.js` jest skryptem CLI (czyta dysk, odpala esbuild),
  * więc pod AVA nie da się go uruchomić. Logika, która ma bramkę, mieszka tutaj.
@@ -93,4 +93,12 @@ export function parseDestinationVaults(raw: string | undefined): string[] {
  */
 export function pluginDeployDir(vaultPath: string, configDir: string, pluginId: string, join: (...parts: string[]) => string): string {
     return join(vaultPath, configDir, 'plugins', pluginId);
+}
+
+/** Build-only helper. Git access is injected by esbuild.js, never shipped to the plugin. */
+export function createBuildMarker(readHash: () => string, date = new Date()): string {
+    let hash = 'dev';
+    try { hash = readHash().trim() || 'dev'; }
+    catch { /* Source archives and environments without git still build. */ }
+    return `${hash} ${date.toISOString()}`;
 }

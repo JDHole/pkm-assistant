@@ -41,6 +41,8 @@ interface ApprovalManagerLike {
 /** Plugin widziany przez sekcje core — bez martwych gałęzi wykluczeń i kolekcji źródeł. */
 interface SettingsPluginLike {
     manifest: { version: string };
+    readonly diagnosticBuildMarker?: string;
+    runDeviceDiagnostics?: () => Promise<void>;
     secretsStorage?: SecretsStorage;
     approvalManager?: ApprovalManagerLike;
     env?: { settings?: { pkmAssistant?: { no_go_folders?: string[] } } | null } | null;
@@ -511,13 +513,20 @@ export function renderInfoSection(container: HTMLElement, ctx: SettingsSectionCt
     infoDiv.addClass('pkm-info-block');
 
     infoDiv.createSpan({
-        text: t('settings.version', { version: plugin.manifest.version }),
+        text: t('settings.version', { version: `${plugin.manifest.version} (${plugin.diagnosticBuildMarker ?? 'dev'})` }),
         cls: 'setting-item-description'
     });
     infoDiv.createSpan({
         text: t('settings.author'),
         cls: 'setting-item-description'
     });
+
+    if (plugin.runDeviceDiagnostics) {
+        new Setting(container)
+            .setName(t('diagnostics.title'))
+            .setDesc(t('diagnostics.settings_desc'))
+            .addButton(button => button.setButtonText(t('diagnostics.run')).onClick(() => { void plugin.runDeviceDiagnostics?.(); }));
+    }
 
     const linkEl = infoDiv.createEl('a', {
         text: 'GitHub: JDHole/pkm-assistant',

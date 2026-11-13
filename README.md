@@ -321,3 +321,5 @@ Copyright (C) 2026 Jakub Dziura
 PKM Assistant is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed WITHOUT ANY WARRANTY; see the full text in [LICENSE](LICENSE) (GPL-3.0-or-later).
 
 Licences of the libraries bundled into `main.js`: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+
+The **Run device diagnostics** command (also in Settings > Information) saves a private device report in `.pkm-assistant/diagnostics/`, with an optional model connection test requiring explicit consent.

@@ -475,3 +475,10 @@ brak, null, liczba i string oznaczają false. Walidacja działa w RAM po wczytan
 primary/last-good, bez migracji i bez zapisu do głównego settings.json. Kopie
 zachowują oryginalne bajty. Testy nowych wariantów: `runtime/settingsArmor.test.ts`.
 I18n PL/EN dodaje przełącznik, opis, etykietę faktycznego modelu i podpowiedź błędu.
+
+## Mobile M1 P3 - diagnostyka w Informacjach
+
+`SettingsPluginLike` w `SettingsContent.ts` dopuszcza `diagnosticBuildMarker` i
+`runDeviceDiagnostics` wstrzykiwane przez composition root. Informacje pokazują
+znacznik obok wersji i przycisk komendy; core nie importuje modułu diagnostics.
+I18n PL/EN obejmuje komendę, zgodę, wyniki, kopiowanie i komunikaty błędów.

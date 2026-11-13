@@ -14,12 +14,14 @@
 // dałaby `dist/manifest.json` zgodny z `package.json` i źródłowy manifest w rozjeździe,
 // czyli dokładnie ten fałszywy zielony, który łapie w CI `git diff --exit-code`.
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
 import { buildBanner } from './utils/banner.ts';
 import {
+    createBuildMarker,
     DIST_ARTIFACTS,
     DIST_DIR_NAME,
     HOT_RELOAD_MARKER,
@@ -257,6 +259,7 @@ async function main() {
         treeShaking: true,
         logLevel: 'info',
         banner: { js: buildBanner(pkg) },
+        define: { __PKM_BUILD__: JSON.stringify(createBuildMarker(() => execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))) },
         // Runtime hosta, nie paczka z npm — musi zostac poza bundlem, inaczej wciagnelibysmy
         // caly Obsidian. Lista jest LITERALEM czytanym regexem przez trzech niezaleznych
         // straznikow (core/deps_kontrakt, core/dead_code_zasieg, build_kontrakt) — nie sklejaj

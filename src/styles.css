@@ -1526,3 +1526,7 @@ input.pkm-onboarding-key-input {
   overflow-wrap: anywhere;
   margin-bottom: var(--size-4-2);
 }
+
+/* Diagnostics owns these touch targets on both desktop and mobile. */
+.pkm-diagnostics-actions { display: flex; flex-direction: column; gap: 12px; }
+.pkm-diagnostics-actions button { min-height: 48px; width: 100%; white-space: normal; height: auto; }
