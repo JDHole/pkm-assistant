@@ -49,7 +49,8 @@ export function connectionDetail(result: ConnectionResult): string {
         error: explanation,
     });
     if (result.status === 'ok') return detail;
-    const type = providerErrorType(result.providerErrorType);
+    const validatedType = providerErrorType(result.providerErrorType);
+    const type = validatedType === 'unknown' ? t('diagnostics.provider_error_other') : validatedType;
     return `${detail}; ${t('diagnostics.connection_kind', { kind: result.kind })}${type === null ? '' : `; ${t('diagnostics.provider_error_type', { type })}`}`;
 }
 

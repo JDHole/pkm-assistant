@@ -1,5 +1,5 @@
 import { SecretsStorage, ensureAdapterFolder } from '../../core/index.js';
-import { capabilities, diagnosticFacts, errorField, field } from './values.js';
+import { capabilities, diagnosticFacts, errorName, errorCode, field } from './values.js';
 import { connectionDetail, renderDiagnosticMarkdown, secretFilter } from './report.js';
 import type { ConnectionResult } from './connection.js';
 import { t } from '../../core/i18n/index.js';
@@ -44,7 +44,7 @@ export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<Diag
             return true;
         } catch (error) {
             const detail = error instanceof VerificationError ? t('diagnostics.mismatch') : t('diagnostics.local_error', {
-                name: errorField(field(error, 'name')), code: errorField(field(error, 'code')),
+                name: errorName(field(error, 'name')), code: errorCode(field(error, 'code')),
             });
             checks.push({ name, status: 'error', ms: Math.round(now() - start), detail });
             return false;

@@ -8,6 +8,7 @@ export const pl: Record<string, string> = {
   "diagnostics.local_error": "Klasa: {{name}}; kod: {{code}}",
   "diagnostics.connection_kind": "Rodzaj: {{kind}}",
   "diagnostics.provider_error_type": "Typ błędu dostawcy: {{type}}",
+  "diagnostics.provider_error_other": "inny",
   "diagnostics.connection.authentication": "Klucz API odrzucony",
   "diagnostics.connection.not_found": "Nieznany model albo adres",
   "diagnostics.connection.rate_limit": "Osiągnięto limit",

@@ -491,3 +491,7 @@ D1 diagnostyki dodaje parzyste teksty PL/EN dla klas/kodów błędów, zastępcz
 identyfikatora i stałych objaśnień połączenia (status HTTP/rodzaj). Komunikaty
 zewnętrzne nie są już interpolowane w raport. Kontrakt zamkniętego słownika jest
 w `modules/diagnostics/CLAUDE.md`; transport i logowanie zwykłego czatu bez zmian.
+
+D2 dodaje `diagnostics.provider_error_other`: stałe `inny` / `other` dla typu
+błędu spoza jawnego słownika diagnostics. Brak typu nadal nie dodaje etykiety;
+reguły transportu i normalizacji błędów w core pozostają bez zmian.

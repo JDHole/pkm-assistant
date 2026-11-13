@@ -2,6 +2,10 @@ import test from 'ava';
 import { runDeviceDiagnostics } from './diagnostics.js';
 import type { DiagnosticAdapter, DiagnosticInput } from './diagnostics.js';
 import { setLocale } from '../../core/i18n/index.js';
+import { FetchStreamTransport } from '../../core/index.js';
+import { CHAT_PROVIDERS } from '../models/index.js';
+import { log } from '../../core/utils/Logger.js';
+import { probeConnection } from './connection.js';
 
 /** Enforces parent existence and file/folder separation, like a vault adapter. */
 function memoryAdapter() {
@@ -135,7 +139,7 @@ test('adapter messages never enter the saved report; class and EACCES survive li
 });
 
 for (const bad of ['Error private', 'x'.repeat(200), 'Error\n', 'Cookie: session=abc']) {
-    test(`adapter class and code reject invalid shapes: ${JSON.stringify(bad.slice(0, 24))}`, async t => {
+    test(`adapter class and code reject unknown literals: ${JSON.stringify(bad.slice(0, 24))}`, async t => {
         const f = fixture();
         f.adapter.rename = async () => { throw { name: bad, code: bad, message: privateMessage }; };
         const report = await runDeviceDiagnostics(f.input);
@@ -144,11 +148,81 @@ for (const bad of ['Error private', 'x'.repeat(200), 'Error\n', 'Cookie: session
     });
 }
 
+for (const key of ['name', 'code']) for (const getter of [false, true]) {
+    test(`adapter rejects token-shaped secret in ${getter ? 'getter' : 'property'} ${key}`, async t => {
+        const f = fixture();
+        const error = { name: 'Error', code: 'EACCES' };
+        Object.defineProperty(error, key, getter ? { get: () => 'reviewsession849201' } : { value: 'reviewsession849201' });
+        f.adapter.rename = async () => { throw error; };
+        const report = await runDeviceDiagnostics(f.input);
+        const expected = key === 'name'
+            ? '| fs.rename | ERROR | 0 | Class: unknown; code: EACCES |'
+            : '| fs.rename | ERROR | 0 | Class: Error; code: unknown |';
+        for (const output of [await f.adapter.read(report.path), report.markdown]) {
+            t.is(output.split('\n').find(row => row.startsWith('| fs.rename |')), expected);
+            t.false(output.includes('reviewsession849201'));
+        }
+    });
+}
+
+for (const [name, code, expected] of [
+    ['TypeError', 'ENOENT', 'Class: TypeError; code: ENOENT'],
+    ['DOMException', 0, 'Class: DOMException; code: 0'],
+    ['QuotaExceededError', 22, 'Class: QuotaExceededError; code: 22'],
+    ['Error', 999, 'Class: Error; code: 999'],
+    ['Error', -1, 'Class: Error; code: unknown'],
+    ['Error', 1000, 'Class: Error; code: unknown'],
+    ['Error', 1.5, 'Class: Error; code: unknown'],
+    ['Error', NaN, 'Class: Error; code: unknown'],
+    ['Error', Infinity, 'Class: Error; code: unknown'],
+    ['Error', '22', 'Class: Error; code: unknown'],
+    ['Error', 'enoent', 'Class: Error; code: unknown'],
+    ['error', 'EACCES', 'Class: unknown; code: EACCES'],
+    ['ENOENT', 'Error', 'Class: unknown; code: unknown'],
+    ['HttpTransportError', 'transport', 'Class: HttpTransportError; code: transport'],
+    ['HttpTransportError', 'timeout', 'Class: HttpTransportError; code: timeout'],
+    ['HttpTransportError', 'aborted', 'Class: HttpTransportError; code: aborted'],
+] as const) {
+    test(`adapter dictionaries and numeric code boundary: ${name}/${code}`, async t => {
+        const f = fixture();
+        f.adapter.rename = async () => { throw { name, code }; };
+        const report = await runDeviceDiagnostics(f.input);
+        for (const output of [await f.adapter.read(report.path), report.markdown]) {
+            t.is(output.split('\n').find(row => row.startsWith('| fs.rename |')),
+                `| fs.rename | ERROR | 0 | ${expected} |`);
+        }
+    });
+}
+
+for (const locale of ['pl', 'en'] as const) for (const key of ['type', 'code']) for (const status of [401, 200]) {
+    test.serial(`saved ${locale} report rejects provider ${key} secret through production Anthropic HTTP ${status}`, async t => {
+        setLocale(locale);
+        try {
+            const f = fixture();
+            const payload = JSON.stringify({ type: 'error', error: { [key]: 'sk-ant-api03-abcdefghijklmnopqrstuvwx' } });
+            const transport = new FetchStreamTransport(async () => new Response(
+                status === 200 ? `event: error\ndata: ${payload}\n\n` : payload, { status }));
+            f.input.consent = async () => true;
+            // No key in settings or context: exact-secret redaction cannot hide a dictionary failure.
+            f.input.connection = () => probeConnection(CHAT_PROVIDERS.anthropic, { modelId: 'test', log }, transport, new AbortController().signal);
+            const report = await runDeviceDiagnostics(f.input);
+            t.is(report.errors, 1);
+            for (const output of [await f.adapter.read(report.path), report.markdown]) {
+                const row = output.split('\n').find(line => line.startsWith('| model.connection |'));
+                if (locale === 'pl') {
+                    t.regex(row ?? '', /\| model.connection \| BŁĄD \| 0 \| HTTP: (401|200); porcje: 1;/);
+                    t.regex(row ?? '', /; Typ błędu dostawcy: inny \|$/);
+                } else {
+                    t.regex(row ?? '', /\| model.connection \| ERROR \| 0 \| HTTP: (401|200); chunks: 1;/);
+                    t.regex(row ?? '', /; Provider error type: other \|$/);
+                }
+                t.false(output.includes('sk-ant'));
+            }
+        } finally { setLocale('en'); }
+    });
+}
+
 test('HTTP 401 through production transport records type and fixed explanation without the message', async t => {
-    const { FetchStreamTransport } = await import('../../core/index.js');
-    const { CHAT_PROVIDERS } = await import('../models/index.js');
-    const { log } = await import('../../core/utils/Logger.js');
-    const { probeConnection } = await import('./connection.js');
     const f = fixture();
     let requests = 0;
     const transport = new FetchStreamTransport(async () => {
@@ -275,12 +349,12 @@ for (const [kind, status, explanation] of [
     });
 }
 
-for (const bad of ['contains spaces', 'a'.repeat(200)]) test(`invalid provider type is omitted from the complete report: ${bad.slice(0, 20)}`, async t => {
+for (const bad of ['contains spaces', 'a'.repeat(200), 'Authentication_Error']) test(`unknown provider type has a fixed replacement in the complete report: ${bad.slice(0, 20)}`, async t => {
     const f = fixture(); f.input.consent = async () => true;
     f.input.connection = async () => ({ status: 'error', kind: 'http', httpStatus: 401, providerErrorType: bad, chunks: 1, firstChunkMs: 2, totalMs: 3 });
     const report = await runDeviceDiagnostics(f.input);
     t.is(report.checks.find(c => c.name === 'model.connection')?.detail,
-        'HTTP: 401; chunks: 1; first chunk (ms): 2; total (ms): 3; error: API key rejected; Kind: http');
+        'HTTP: 401; chunks: 1; first chunk (ms): 2; total (ms): 3; error: API key rejected; Kind: http; Provider error type: other');
     t.is(await f.adapter.read(report.path), report.markdown);
     t.false(report.markdown.includes(bad));
 });

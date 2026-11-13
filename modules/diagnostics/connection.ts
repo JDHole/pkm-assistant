@@ -15,7 +15,7 @@ export type ConnectionResult =
 
 /** Only metadata fields; never infer a code from a message or serialize an error. */
 function errorType(error: unknown): string | null {
-    return providerErrorType(field(error, 'type')) ?? providerErrorType(field(error, 'code'));
+    return providerErrorType(field(error, 'type') ?? field(error, 'code'));
 }
 
 /** One request, no retries. External text stays inside the decoder/response boundary. */
@@ -34,7 +34,10 @@ export async function probeConnection(provider: ChatProvider, context: ProviderC
         for (const event of events) {
             if (event.type === 'error') {
                 failure = 'provider';
-                type = errorType(event.error) ?? errorType(field(event.error, 'details'));
+                // Production decoders preserve the source error in details. Read it
+                // before the normalized code, whose synthetic UNKNOWN is not a provider type.
+                const details = field(event.error, 'details');
+                type = errorType(details === undefined ? event.error : details);
             }
             if (event.type === 'done' || ((event.type === 'text' || event.type === 'reasoning') && event.delta.length > 0)) modelResponse = true;
         }

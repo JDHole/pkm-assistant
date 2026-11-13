@@ -1,6 +1,6 @@
 # modules/diagnostics
 
-Lokalna diagnostyka urządzenia na desktopie i telefonie (M1 P3, kontrakt D1).
+Lokalna diagnostyka urządzenia na desktopie i telefonie (M1 P3, kontrakt D1/D2).
 Osobny moduł, bo to samodzielna funkcja, nie infrastruktura core ani część rozmowy.
 
 ## Struktura i publiczne API
@@ -32,6 +32,9 @@ Dopuszcza wyłącznie poniższe źródła i kształty; nieznane nazwy w `facts` 
 - Stałe nazwy sprawdzeń, etykiety i teksty i18n pluginu, status `ok/error/skipped`.
 - Flagi wyłącznie boolean; czasy/liczniki wyłącznie skończone nieujemne liczby
   zaokrąglane do całkowitych. Rozmiar okna: dwie liczby do 6 cyfr rozdzielone `x`.
+  Wzorzec rozmiaru pozostaje celowo: composition root składa go z liczbowych
+  `innerWidth/innerHeight`, a granica odrzuca wszelkie dopiski i wolny tekst.
+  To ograniczony pomiar wymiarów, nie identyfikator ani pole błędu.
 - Wersje pluginu i API Obsidiana: trzy człony po 1-5 cyfr, opcjonalny sufiks
   `-`/`+` i 1-32 znaków `[A-Za-z0-9.-]`, łącznie do 64 znaków.
 - Build: `dev` albo 7-40 małych cyfr hex, opcjonalnie spacja i czas UTC
@@ -46,14 +49,25 @@ Dopuszcza wyłącznie poniższe źródła i kształty; nieznane nazwy w `facts` 
 - Model: po oddzieleniu dostawcy pełne dopasowanie do
   `^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,99}$`; inaczej stały tekst i18n
   `niestandardowy identyfikator`. Nieznany dostawca też daje ten zamiennik.
-- Błąd lokalny: tylko `name` i `code`, każde w całości
-  `^[A-Za-z][A-Za-z0-9_]{0,39}$`, inaczej `unknown`. Wewnętrzna niezgodność odczytu
-  ma własny typ i stałe objaśnienie; cudzy `message` nigdy nie jest odczytywany.
+- Błąd lokalny: tylko `name` i `code`, dwa osobne, jawne zbiory literałów
+  w `values.ts`. Klasy JS/DOM oraz `HttpTransportError`; kody errno i trzy kody
+  transportu pluginu (`aborted/timeout/transport`). Dokładne dopasowanie zachowuje
+  wielkość liter, bez wzorców, prefiksów i podciągów; reszta daje `unknown`.
+  Liczbowy `code` dopuszcza wyłącznie liczby całkowite 0-999 (nie string liczby).
+  Nie zgadujemy kodów Filesystem Capacitora: nieznane pozostają `unknown` do
+  sprawdzenia literałów adaptera używanego na prawdziwym telefonie.
+  Wewnętrzna niezgodność odczytu ma własny typ i stałe objaśnienie;
+  cudzy `message` nigdy nie jest odczytywany.
 - Połączenie: rodzaj z wyniku transportu (`transport/timeout/aborted/http`),
   status HTTP i liczniki. Rozpoznany błąd dekodera to `provider`; brak porcji lub
   zdarzeń modelu to odpowiednio `empty_stream/invalid_stream`. Kod/typ dostawcy
   z pól `type/code` dekodera (także jego `details`) albo JSON odpowiedzi HTTP musi
-  pasować w całości do `^[a-z][a-z0-9_.-]{0,59}$`, inaczej jest pomijany.
+  należeć do jawnego słownika typów Anthropic, OpenAI/zgodnych i Gemini w
+  `values.ts`, z dokładną wielkością liter. Nieznana wartość daje wewnętrzne
+  `unknown`, a w raporcie stałe i18n `inny` / `other`; brak obu pól pomija etykietę.
+  `type` ma pierwszeństwo przed `code`. Dla dekoderów pierwszeństwo ma zachowany
+  obiekt źródłowy `details`, aby syntetyczne `code: UNKNOWN` z normalizacji nie
+  zasłaniało oryginalnego typu ani nie udawało obecności typu w odpowiedzi.
   Ogólny `type:error` koperty nie zastępuje odrzuconego typu z pola `error`.
   Status/rodzaj dobiera stałe objaśnienie (401/403, 404, 429, 5xx, sieć/CORS,
   timeout, abort, błędny strumień). Żadnego wnioskowania z treści komunikatu.
@@ -73,14 +87,18 @@ Filtrowanie obejmuje szczegóły i końcowy Markdown, także przed escapowaniem 
 **Rozszerzenie raportu wymaga nowej jawnej nazwy/źródła, wzorca pełnego kształtu
 lub zamkniętego słownika i testu literalnych wartości poprawnych oraz odrzuconych
 w zapisanym raporcie.** Nie dodawaj `message`, `String(error)`, serializacji błędu,
-URL-a ani ogólnego pola `detail` do kontraktu połączenia. Nowy kod błędu musi
-pochodzić z pola struktury, nigdy z regexu nad komunikatem. Dostawca dostaje logger
+URL-a ani ogólnego pola `detail` do kontraktu połączenia. **Trzy pola błędów D2
+rozszerzamy wyłącznie przez nowy literał w odpowiednim zbiorze `values.ts` oraz
+test literalnego wyniku w zapisanym raporcie (także odrzucenia wariantu spoza
+słownika).** Literał musi mieć potwierdzenie w dokumentacji API albo kodzie
+adaptera/transportu; nie wystarcza jego kształt. Nowy kod błędu musi pochodzić
+z pola struktury, nigdy z regexu nad komunikatem. Dostawca dostaje logger
 zamieniający jego wpisy na stałe zdarzenie diagnostyczne; główny catch loguje tylko
 stałą informację o braku zapisu. Nie zmieniamy logowania zwykłej rozmowy.
 
 ## Zachowane decyzje i granice
 
-D1 świadomie zmienia zawartość diagnostyki na obu platformach. Zwykła rozmowa,
+D1/D2 świadomie zmienia zawartość diagnostyki na obu platformach. Zwykła rozmowa,
 transport core i dekodery dostawców pozostają bez zmian. Composition root zbiera
 flagi wyłącznie z Obsidian `Platform`, rejestruje komendę po ustawieniu języka
 oraz mierzy start od `onload` do `_ready`. Informacje w core dostają build i callback
@@ -111,9 +129,16 @@ flagą, nigdy go nie wywołujemy.
   odrzucenie klas/kodów, stałe objaśnienia, krótkie i nieenumerowalne sekrety,
   długie komunikaty oraz mediana kosztu składania raportu z 30 sekretami < 50 ms
   (bez kryptografii/I/O, rozgrzane serie ograniczają wpływ planisty/GC).
+  D2: `reviewsession849201` w `name/code` i getterach, osobne słowniki klas/kodów,
+  granice liczbowego kodu, wielkość liter, kody transportu pluginu, token `sk-ant`
+  w `type/code` przez produkcyjny transport i dekoder Anthropic (401 i SSE 200).
+  W zapisanym pliku i Markdown sprawdzane są brak sekretu i dodatni, stały wynik
+  PL/EN `inny/other`; poprawne `Error/EACCES/authentication_error` pozostają.
 - `connection.test.ts`: prawdziwy FetchStreamTransport i dekodery, dwie porcje,
   jedno krótkie żądanie, brak retry na 429, błędy HTTP i HTTP 200, typy poprawne
   i odrzucone, HTML/keepalive/obcy JSON, EOF NDJSON, abort, timeout, izolacja loggera.
+  D2: zachowanie wielkich liter w `RESOURCE_EXHAUSTED` i odrzucenie
+  `Authentication_Error`; odrzucony typ daje `unknown`, brak typu nadal `null`.
 - `ui.test.ts`: zgoda, odmowa, zamknięcie, abort i spóźnione kliknięcie.
 - `src/main.mobile.test.ts`: composition root desktop/mobile i brak AbortController.
   `core/diagnosticsSettings.test.ts`: wersja/build i przycisk. `utils/buildMarker.test.ts`:

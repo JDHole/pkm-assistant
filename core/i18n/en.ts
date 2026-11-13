@@ -8,6 +8,7 @@ export const en: Record<string, string> = {
   "diagnostics.local_error": "Class: {{name}}; code: {{code}}",
   "diagnostics.connection_kind": "Kind: {{kind}}",
   "diagnostics.provider_error_type": "Provider error type: {{type}}",
+  "diagnostics.provider_error_other": "other",
   "diagnostics.connection.authentication": "API key rejected",
   "diagnostics.connection.not_found": "Unknown model or address",
   "diagnostics.connection.rate_limit": "Rate limit reached",

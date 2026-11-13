@@ -93,7 +93,8 @@ test('NDJSON completion buffered until EOF is recognized by the provider decoder
 for (const [type, expected] of [
     ['authentication_error', 'authentication_error'], ['invalid_api_key', 'invalid_api_key'],
     ['not_found_error', 'not_found_error'], ['rate_limit_error', 'rate_limit_error'],
-    ['private type kuba@example.com', null], ['a'.repeat(200), null], ['valid\n', null],
+    ['private type kuba@example.com', 'unknown'], ['a'.repeat(200), 'unknown'], ['valid\n', 'unknown'],
+    ['Authentication_Error', 'unknown'], ['RESOURCE_EXHAUSTED', 'RESOURCE_EXHAUSTED'],
 ] as const) {
     for (const httpStatus of [401, 200]) test(`provider type ${JSON.stringify(type.slice(0, 24))} in HTTP ${httpStatus}`, async t => {
         const payload = JSON.stringify({ type: 'error', error: { type, message: 'invalid x-api-key sk-ant-secret for kuba@example.com' } });

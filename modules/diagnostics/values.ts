@@ -5,11 +5,51 @@ import { t } from '../../core/i18n/index.js';
 function shaped(value: unknown, pattern: RegExp, limit: number): string | null {
     return typeof value === 'string' && value.length <= limit && pattern.exec(value)?.[0] === value ? value : null;
 }
-export function errorField(value: unknown): string {
-    return shaped(value, /^[A-Za-z][A-Za-z0-9_]{0,39}$/, 40) ?? 'unknown';
+// Exact, case-sensitive vocabularies. A token-shaped string can still be a secret.
+const errorNames = new Set([
+    'Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'EvalError',
+    'URIError', 'AggregateError', 'DOMException', 'AbortError', 'NotFoundError',
+    'NotAllowedError', 'NotSupportedError', 'SecurityError', 'QuotaExceededError',
+    'InvalidStateError', 'InvalidAccessError', 'InvalidModificationError', 'TimeoutError',
+    'NetworkError', 'DataError', 'DataCloneError', 'OperationError',
+    'NoModificationAllowedError', 'TypeMismatchError', 'EncodingError', 'NotReadableError',
+    'UnknownError', 'VersionError', 'ConstraintError',
+    // core/http/transportErrors.ts sets this name on transport exceptions.
+    'HttpTransportError',
+]);
+const errorCodes = new Set([
+    'ENOENT', 'EACCES', 'EPERM', 'EEXIST', 'ENOTDIR', 'EISDIR', 'ENOTEMPTY', 'EBUSY',
+    'ENOSPC', 'EROFS', 'EMFILE', 'ENFILE', 'ENAMETOOLONG', 'EINVAL', 'EIO', 'EXDEV',
+    'ELOOP', 'EAGAIN', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EPIPE',
+    'ERR_NETWORK',
+    // The three literal codes emitted by core/http/transportErrors.ts.
+    'aborted', 'timeout', 'transport',
+]);
+const providerErrorTypes = new Set([
+    // Anthropic Messages API.
+    'invalid_request_error', 'authentication_error', 'billing_error', 'permission_error',
+    'not_found_error', 'request_too_large', 'rate_limit_error', 'api_error',
+    'overloaded_error', 'timeout_error',
+    // OpenAI and compatible APIs (shared literals above are intentionally not repeated).
+    'invalid_api_key', 'insufficient_quota', 'model_not_found', 'rate_limit_exceeded',
+    'context_length_exceeded', 'server_error', 'permission_denied',
+    'unsupported_country_region_territory', 'tokens', 'requests',
+    // Gemini API.
+    'UNAUTHENTICATED', 'PERMISSION_DENIED', 'NOT_FOUND', 'RESOURCE_EXHAUSTED',
+    'INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'UNAVAILABLE', 'INTERNAL',
+    'DEADLINE_EXCEEDED', 'API_KEY_INVALID',
+]);
+export function errorName(value: unknown): string {
+    return typeof value === 'string' && errorNames.has(value) ? value : 'unknown';
 }
+export function errorCode(value: unknown): string {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 999) return String(value);
+    return typeof value === 'string' && errorCodes.has(value) ? value : 'unknown';
+}
+/** null means absent; unknown means present but outside the public vocabulary. */
 export function providerErrorType(value: unknown): string | null {
-    return shaped(value, /^[a-z][a-z0-9_.-]{0,59}$/, 60);
+    if (value === undefined || value === null) return null;
+    return typeof value === 'string' && providerErrorTypes.has(value) ? value : 'unknown';
 }
 export function field(value: unknown, key: string): unknown {
     if (!value || typeof value !== 'object') return undefined;
