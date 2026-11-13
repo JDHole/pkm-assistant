@@ -225,6 +225,8 @@ export interface ChatTabState {
     tokenTracker: TokenTracker;
     autonomy: AutonomyMode;
     scrollTop: number;
+    /** Phone: zero is a saved reading position only after leaving a rendered tab. */
+    hasScrollPosition?: boolean;
     currentArtifactId?: string | null;
     isGenerating?: boolean;
 }

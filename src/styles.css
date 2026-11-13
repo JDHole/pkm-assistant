@@ -1700,16 +1700,43 @@ body.is-phone .pkm-skill-pq-overlay {
   overflow-wrap: anywhere;
 }
 body.is-phone .pkm-skill-pq-input { min-height: 44px; }
-/* M3 U7: native Modals are siblings of .app-container, so its keyboard limit
-   does not apply. Keep the original content/decision order and scroll surfaces. */
-body.is-phone .modal-container:has(:is(.pkm-approval-modal, .pkm-master-password__buttons, .cs-save-session-modal, .inline-comment-modal)) {
+/* M3 U7/U9: native Modals are siblings of .app-container. Query the actual
+   space above the keyboard, including rotation, rather than viewport width. */
+body.is-phone .modal-container:has(:is(.pkm-approval-modal, .pkm-diff-modal, .pkm-master-password__buttons, .cs-save-session-modal, .inline-comment-modal)) {
   bottom: var(--keyboard-height, 0px);
+  container: pkm-phone-dialog / size;
 }
-body.is-phone .modal:has(:is(.pkm-approval-modal, .pkm-master-password__buttons, .cs-save-session-modal)) {
+body.is-phone .modal:has(:is(.pkm-approval-modal, .pkm-diff-modal, .pkm-master-password__buttons, .cs-save-session-modal)) {
   max-height: min(calc(100dvh - 24px), calc(100% - 24px));
 }
 body.is-phone .modal:has(.inline-comment-modal) {
   max-height: min(var(--dialog-max-height), 100%);
+}
+/* Unusually large labels/fields must never clip the non-shrinking decisions. */
+body.is-phone :is(.pkm-approval-modal, .pkm-diff-modal) { overflow-y: auto; }
+@container pkm-phone-dialog (max-height: 480px) {
+  /* In a short window use one scroller for the complete form, including preview
+     and decisions. Portrait with 504px available keeps the U7 layout. */
+  body.is-phone .modal:has(:is(.pkm-approval-modal, .pkm-diff-modal, .pkm-master-password__buttons, .cs-save-session-modal, .inline-comment-modal)) {
+    overflow-y: auto;
+  }
+  body.is-phone .modal-content:is(.pkm-approval-modal, .pkm-diff-modal, .cs-save-session-modal, .inline-comment-modal),
+  body.is-phone .modal-content:has(.pkm-master-password__buttons) {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  body.is-phone :is(.pkm-approval-modal, .pkm-diff-modal) > .pkm-decision-body {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+}
+@container pkm-phone-dialog (max-height: 96px) {
+  /* Leave room for a full touch target even at 360px with a 300px keyboard. */
+  body.is-phone .modal:has(:is(.pkm-approval-modal, .pkm-diff-modal, .pkm-master-password__buttons, .cs-save-session-modal, .inline-comment-modal)) {
+    max-height: 100%;
+    min-height: 0;
+    padding-block: 0;
+  }
 }
 body.is-phone .cs-ask-user { min-width: 0; overflow-wrap: anywhere; }
 body.is-phone .cs-ask-user :is(.cs-ask-user__options, .cs-ask-user__custom) {

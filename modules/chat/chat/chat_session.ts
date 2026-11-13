@@ -7,7 +7,8 @@ import { cancelMessageEdit } from './messageEdit.js';
  * Session management — save, load, consolidate, rolling window creation.
  * Methods mixed into ChatView.prototype.
  */
-import { Notice } from 'obsidian';
+import { Notice, Platform } from 'obsidian';
+import { renderPhoneHistory } from './phoneHistoryScroll.js';
 import { RollingWindow } from './RollingWindow.js';
 import { IdleScheduler, sessionMessageId } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
@@ -373,7 +374,8 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
         }
         this.rollingWindow = active.rollingWindow;
         this.tokenTracker = active.tokenTracker;
-        void this.render_messages();
+        if (Platform.isPhone) void renderPhoneHistory(this);
+        else void this.render_messages();
         this.updateTokenCounter();
         this._updateTokenPanel();
         if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);

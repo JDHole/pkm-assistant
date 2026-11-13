@@ -2160,8 +2160,13 @@ jego border-box nie zależy od paddingu, a lista kurczy się we flexie. Główna
 już skrócona przez hosta nie odejmuje klawiatury ponownie. Schowana daje zero.
 JS dostarcza geometrię i zapas `innerHeight - visualViewport.height - offsetTop`;
 CSS czyta wysokość natywną bezpośrednio, także gdy zmienia się po zdarzeniu.
-ResizeObserver widoku/listy/panelu aktualizuje limity i zachowuje dół listy, jeśli
-użytkownik był na dole. Korekta scrollTop przez układ nie oznacza ruchu czytelnika.
+ResizeObserver widoku/listy/panelu aktualizuje limity. U9 liczy śledzenie dołu z
+bieżącej treści i scrollTop, ale poprzedniej wysokości listy, wspólną regułą
+`scrollGeometry.followsChatBottom` (<150 px, jak dotychczas w `scrollToBottom`).
+Nie zapamiętuje przypięcia z pustej listy ani ze zdarzeń scroll, więc pośrednia
+klatka smooth nie odłącza śledzenia, a czytelnik na 0/3000 nie skacze na dół.
+Przy powiększeniu listy uwzględnia również już wykonane przez przeglądarkę
+ograniczenie scrollTop do nowego dołu. Desktop zachowuje dokładnie ten sam próg.
 Aktywne pole `ask_user` odsłania w liście, a pre-pytanie w jego formularzu.
 Wszystkie nasłuchy i obserwator
 należą do renderu; ponowny render i synchroniczny początek `onClose` je odpinają,
@@ -2175,13 +2180,52 @@ slotu; cały panel przesuwa się razem, bez zmiany kolejności pól i decyzji.
 
 Przegląd app.css/app.js Obsidiana 1.15.0: `Modal.open()` dopina kontener do body,
 poza `.app-container`, bez limitu klawiatury. `src/styles.css` skraca tylko kontenery
-ApprovalModal, MasterPasswordModal, SaveSessionModal i InlineCommentModal przez
-natywne `--keyboard-height`. Te modale nie mają zapasu visualViewport.
+ApprovalModal, DiffModal (U9), MasterPasswordModal, SaveSessionModal i InlineCommentModal
+przez natywne `--keyboard-height`. Te modale nie mają zapasu visualViewport.
+U9: kontener modala jest kontenerem zapytań CSS o dostępną wysokość. Do 480 px
+cały formularz, wraz z podglądem i decyzjami, przewija się w modalu; powyżej zostają
+powierzchnie U7. To próg zachowawczy dla nagłówka, czterech decyzji i pól, nie próg
+szerokości telefonu. Dodatkowe overflow-y:auto treści decyzji chroni też nietypowo
+długie etykiety przy większych wysokościach. Do 96 px znika rezerwa 24 px i minimum
+100 px hosta, żeby nad klawiaturą zmieścił się pełny cel dotykowy. Wszystko tylko
+za body.is-phone; kolejność DOM, obsługa decyzji i układ desktopu/tabletu bez zmian.
+
+U9: odtwarzanie wcześniej wywoływało render historii bez oczekiwania, a sam
+`render_messages` nie przewijał. `_switchTab` przywracał niezerową pozycję przed
+końcem asynchronicznego Markdown. Przyczyna jest wspólna z desktopem, ale zmiana
+zachowania jest tylko na telefonie: `phoneHistoryScroll` czeka na koniec renderu,
+widoczny prostokąt i dwie zgodne klatki geometrii, potem ustawia najnowszą wiadomość.
+Ukryty widok czeka na IntersectionObserver/ResizeObserver bez pętli odpytywania.
+Stan zakładki `hasScrollPosition` odróżnia zapamiętane 0 od początkowego 0 po restore.
+Zapamiętana pozycja ma pierwszeństwo także przy `_needsRefresh`; opuszczenie zakładki
+przed odsłonięciem nie zapamiętuje jeszcze pozycji czytelnika. Nowy render historii
+unieważnia poprzednie żądanie przewinięcia; dotyk, kółko, pointerdown i klawiatura
+w liście oddają sterowanie czytelnikowi. Instalacja klawiatury odpina również
+oczekujące klatki i obserwację widoczności przy zamknięciu/przebudowie widoku.
+To ustalenie pozycji po renderze Markdown, nie stałe śledzenie późnych osadzeń
+z innych pluginów, które zmienią wysokość już po ustabilizowaniu widoku.
 Testy U7 w `chat/chat_ui.mobile.test.ts`: geometria, produkcyjny render i zdarzenia,
 odpięcie nasłuchów, ponowny render, dwa widoki, przewijanie i trzy platformy/popup.
+U9 dopisuje scenariusz smooth 1200/400/800 -> 1220/225/995, czytelnika bez scroll
+na 0 oraz 3000, odroczony Markdown i odsłonięcie, zakładki z zapamiętanym 0/3000,
+przejęcie przewijania przez czytelnika, nieodwiedzoną zakładkę, spóźniony render
+oraz zamknięcie/przebudowę podczas oczekiwania. Setup testu przypięcia U7 zaczyna
+teraz na rzeczywistym dole 800, zamiast polegać na błędnej pamięci pustej listy;
+wszystkie wcześniejsze asercje pozostały.
 Lokalna atrapa zastępuje no-op stylów/nasłuchów; harness bez zmian. Chrome z CSS hosta
 potwierdził 175 px kompensacji (dół panelu 500, klawiatura od 504), powrót do 675,
 zero dla głównej karty, zapas visualViewport i przewijane popupy ponad polem.
+Pomiar U9 w Chromium 153 z app.css Obsidiana i rzeczywistymi klasami modali:
+360 wariantów (dwie orientacje, klawiatura 0/160/300, PL/EN, trzy platformy,
+przed/po). Każdy przycisk telefonu osiągalny przewinięciem, desktop/tablet z tą samą
+geometrią. Przy 804x360 i klawiaturze 160 wysokości modali wynoszą 176 px,
+InlineComment 200 px; przy klawiaturze 300 wszystkie mają 60 px. Przy 360x804
+istniejące cztery okna zachowują geometrię U7. DiffModal dodatkowo respektuje
+klawiaturę: 780 -> 480 px przy 300 px, bo wcześniej jego decyzje były zasłonięte.
+Osobna próba kontrolerów w Chromium na odtworzonym DOM czatu potwierdziła koniec
+historii po animowanym odsłonięciu (6669/6669), po klawiaturze (6844/6844),
+nieruszane 0 czytelnika i dół panelu 675 -> 500 -> 675 px. To próby komponentów,
+nie całego Obsidiana ani urządzenia Android.
 
 Do sprawdzenia na telefonie: animacja/panowanie WebView, obrót, wieloliniowa edycja,
 todo, odpowiedź `ask_user`, pola pre-pytań skilla, Przekieruj/powód odmowy,

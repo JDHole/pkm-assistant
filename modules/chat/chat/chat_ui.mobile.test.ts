@@ -1,6 +1,6 @@
 import test from 'ava';
 import { register } from 'node:module';
-import { Platform } from 'obsidian';
+import { Platform, MarkdownRenderer } from 'obsidian';
 import { setLocale } from '../../../core/i18n/index.js';
 import type { ChatViewLike } from './chatViewShape.js';
 import { bottomOcclusion, phoneKeyboardGeometry } from './phoneKeyboard.js';
@@ -255,6 +255,7 @@ test.serial('U7 resizing preserves bottom pinning, but leaves a reader above the
     Object.defineProperty(messages, 'clientHeight', { configurable: true, get: () => height });
     Object.defineProperty(messages, 'scrollHeight', { configurable: true, value: 1200 });
     messages.scrollTo = options => { messages.scrollTop = (options as ScrollToOptions).top ?? 0; };
+    messages.scrollTop = 800; // Start at the real bottom, not a stale pin from the empty installation.
     host.observers[0].callback();
     t.is(messages.scrollTop, 800);
     height = 225;
@@ -297,3 +298,202 @@ test.serial('U7 desktop and tablet keep their geometry while phone popup selecti
     t.is(view.input_area.value, '/clear ');
     t.is(host.roots.at(-1)!.props.get('--pkm-chat-below'), '125px');
 });
+
+
+function measuredList(view: ChatViewLike, height: number, content: number, top: number) {
+    const geometry = { height, content };
+    const messages = view.messages_container;
+    Object.defineProperties(messages, {
+        clientHeight: { configurable: true, get: () => geometry.height },
+        scrollHeight: { configurable: true, get: () => geometry.content },
+    });
+    messages.scrollTop = top;
+    messages.scrollTo = options => { messages.scrollTop = (options as ScrollToOptions).top ?? 0; };
+    return geometry;
+}
+
+test.serial('U9 smooth stream frame still follows the bottom when keyboard shrinks the list', async t => {
+    const host = keyboardHost(t);
+    const { view } = await fixture(t, true, true, 'en', host.setup);
+    const geometry = measuredList(view, 400, 1200, 800);
+    host.observers[0].callback();
+    geometry.content = 1220;
+    const requests: ScrollToOptions[] = [];
+    view.messages_container.scrollTo = options => {
+        const request = options as ScrollToOptions;
+        requests.push(request);
+        view.messages_container.scrollTop = request.behavior === 'smooth' ? 801 : request.top ?? 0;
+        view.messages_container.dispatchEvent(new Event('scroll'));
+    };
+    view.scrollToBottom(true, { drawConnectors: false });
+    t.deepEqual(requests, [{ top: 820, behavior: 'smooth' }]);
+    t.is(view.messages_container.scrollTop, 801);
+    geometry.height = 225;
+    host.observers[0].callback();
+    t.is(view.messages_container.scrollTop, 995);
+    geometry.height = 400;
+    host.observers[0].callback();
+    t.is(view.messages_container.scrollTop, 820);
+});
+
+for (const top of [0, 3000]) {
+    test.serial(`U9 keyboard respects reader at ${top} without any previous scroll events`, async t => {
+        const host = keyboardHost(t);
+        const { view } = await fixture(t, true, true, 'en', host.setup);
+        const geometry = measuredList(view, 458, 6496, top);
+        host.observers[0].callback();
+        t.is(view.messages_container.scrollTop, top);
+        geometry.height = 279;
+        host.observers[0].callback();
+        t.is(view.messages_container.scrollTop, top);
+        geometry.height = 458;
+        host.observers[0].callback();
+        t.is(view.messages_container.scrollTop, top);
+    });
+}
+
+function historyFrames(host: ReturnType<typeof keyboardHost>, view: ChatViewLike) {
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    Object.assign(host.win, {
+        innerWidth: 360,
+        requestAnimationFrame(callback: FrameRequestCallback) { frames.set(++next, callback); return next; },
+        cancelAnimationFrame(id: number) { frames.delete(id); },
+    });
+    const rect = { left: 360, top: 0, width: 354, height: 679, right: 714, bottom: 679 };
+    view.container.getBoundingClientRect = () => rect as DOMRect;
+    Object.defineProperty(view.container, 'isConnected', { configurable: true, value: true });
+    return {
+        rect,
+        tick() { const batch = [...frames.values()]; frames.clear(); for (const callback of batch) callback(0); },
+        reveal() { rect.left = 0; rect.right = 354; host.observers[0].callback(); },
+    };
+}
+
+async function restoreHistory(view: ChatViewLike) {
+    const memory = {
+        listActiveSessions: async () => [{ path: 'recent.md', name: 'recent.md', mtime: 2 }, { path: 'older.md', name: 'older.md', mtime: 1 }],
+        loadActiveSession: async () => ({ messages: [{ role: 'user', content: 'Question' }, { role: 'assistant', content: 'Latest answer' }], metadata: {} }),
+        setActiveSessionIdentity() {},
+    };
+    Object.assign(view.plugin.agentManager!, { getAgentMemory: () => memory, switchAgent() {} });
+    await view._restoreActiveSession();
+}
+
+test.serial('U9 restore waits for Markdown and visible stable geometry, then tab positions including zero win', async t => {
+    const host = keyboardHost(t);
+    const { view } = await fixture(t, true, true, 'en', host.setup);
+    const frames = historyFrames(host, view);
+    const geometry = measuredList(view, 458, 6496, 0);
+    let release!: () => void;
+    const oldRender = MarkdownRenderer.render;
+    MarkdownRenderer.render = async (...args) => { await new Promise<void>(resolve => { release = resolve; }); await oldRender(...args); };
+    t.teardown(() => { MarkdownRenderer.render = oldRender; });
+    await restoreHistory(view);
+    frames.tick();
+    t.is(view.messages_container.scrollTop, 0);
+    release();
+    // Flush the production renderer and its completion continuation.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.tick();
+    t.is(view.messages_container.scrollTop, 0, 'finished Markdown in a hidden drawer does not scroll');
+    frames.reveal();
+    frames.tick();
+    geometry.content = 6675; // final layout after drawer reveal
+    frames.tick();
+    frames.tick();
+    t.is(view.messages_container.scrollTop, 6217);
+    MarkdownRenderer.render = oldRender;
+
+    view.messages_container.scrollTop = 0;
+    await view._switchTab('older.md');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.tick(); frames.tick();
+    t.is(view.messages_container.scrollTop, 6217, 'first visit to restored background tab opens at end');
+    view.messages_container.scrollTop = 3000;
+    await view._switchTab('recent.md');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.tick(); frames.tick();
+    t.is(view.messages_container.scrollTop, 0, 'saved zero beats automatic bottom');
+    view.chatTabs.find(tab => tab.sessionId === 'older.md')!._needsRefresh = true;
+    await view._switchTab('older.md');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.tick(); frames.tick();
+    t.is(view.messages_container.scrollTop, 3000, 'saved middle beats background refresh');
+});
+
+for (const phone of [false, true]) {
+    test.serial(`U9 history respects reader takeover; phone=${phone}`, async t => {
+        const host = keyboardHost(t);
+        const { view } = await fixture(t, true, phone, 'en', host.setup);
+        const frames = historyFrames(host, view);
+        measuredList(view, 458, 6496, 0);
+        await restoreHistory(view);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        view.messages_container.dispatchEvent(new Event('touchstart'));
+        view.messages_container.scrollTop = 3000;
+        frames.reveal(); frames.tick(); frames.tick();
+        t.is(view.messages_container.scrollTop, 3000);
+        await view._switchTab('older.md');
+        await new Promise<void>(resolve => setImmediate(resolve));
+        frames.tick(); frames.tick();
+        t.is(view.messages_container.scrollTop, phone ? 6038 : 3000);
+    });
+}
+
+test.serial('U9 leaving an unseen tab does not save zero; stale render cannot override the selected tab', async t => {
+    const host = keyboardHost(t);
+    const { view } = await fixture(t, true, true, 'en', host.setup);
+    const frames = historyFrames(host, view);
+    measuredList(view, 458, 6496, 0);
+    const oldRender = MarkdownRenderer.render;
+    const releases: Array<() => void> = [];
+    MarkdownRenderer.render = async (...args) => { await new Promise<void>(resolve => { releases.push(resolve); }); await oldRender(...args); };
+    t.teardown(() => { MarkdownRenderer.render = oldRender; });
+    await restoreHistory(view);
+    await view._switchTab('older.md');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    t.is(releases.length, 2);
+    releases[1]();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.reveal(); frames.tick(); frames.tick();
+    t.is(view.messages_container.scrollTop, 6038);
+    view.messages_container.scrollTop = 3000;
+    releases[0]();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.tick(); frames.tick();
+    t.is(view.messages_container.scrollTop, 3000);
+    MarkdownRenderer.render = oldRender;
+    await view._switchTab('recent.md');
+    await new Promise<void>(resolve => setImmediate(resolve));
+    frames.tick(); frames.tick();
+    t.is(view.messages_container.scrollTop, 6038, 'unseen tab still opens at newest message');
+});
+
+for (const end of ['close', 'render'] as const) {
+    test.serial(`U9 pending history scroll is disposed on ${end}`, async t => {
+        const host = keyboardHost(t);
+        const { view } = await fixture(t, true, true, 'en', host.setup);
+        const frames = historyFrames(host, view);
+        measuredList(view, 458, 6496, 0);
+        await restoreHistory(view);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        frames.reveal(); frames.tick(); // positioning is still queued for a stable frame
+        const oldMessages = view.messages_container;
+        if (end === 'close') await view.onClose();
+        else await view.renderView();
+        oldMessages.scrollTop = 3000;
+        frames.tick(); frames.tick();
+        t.is(oldMessages.scrollTop, 3000);
+        t.true(host.observers[0].disconnected);
+        // A live installation remains capable of positioning the next history.
+        const nextView = end === 'close' ? (await fixture(t, true, true, 'en', host.setup)).view : view;
+        const nextFrames = historyFrames(host, nextView);
+        measuredList(nextView, 458, 6496, 0);
+        await restoreHistory(nextView);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        nextFrames.rect.left = 0; nextFrames.rect.right = 354;
+        nextFrames.tick(); nextFrames.tick();
+        t.is(nextView.messages_container.scrollTop, 6038);
+    });
+}

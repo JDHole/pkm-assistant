@@ -1,6 +1,7 @@
 import { captureSessionLifecycle, requestSessionLifecycle, serializeSessionLifecycle } from './sessionLifecycle.js';
 import { restoreSendDraft } from './sendDraft.js';
 import { cancelMessageEdit } from './messageEdit.js';
+import { phoneHistoryPending, renderPhoneHistory } from './phoneHistoryScroll.js';
 /**
  * Multi-agent tab management — init, switch, close, picker, tab bar rendering.
  * Methods mixed into ChatView.prototype.
@@ -162,7 +163,9 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
 
     // 1. Save current state
     if (currentTab) {
-        const scrollTop = this.messages_container?.scrollTop || 0;
+        const pendingPosition = Platform.isPhone && phoneHistoryPending(this.messages_container);
+        const previousState = this._agentStates.get(currentKey!);
+        const scrollTop = pendingPosition ? previousState?.scrollTop ?? 0 : this.messages_container?.scrollTop || 0;
         // `currentKey` liczy się z `currentTab` tuż wyżej — w tej gałęzi jest stringiem.
         this._agentStates.set(currentKey!, {
             rollingWindow: this.rollingWindow,
@@ -170,6 +173,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
             autonomy: this.currentAutonomy,
             currentArtifactId: this.currentArtifactId,
             scrollTop,
+            ...(Platform.isPhone ? { hasScrollPosition: pendingPosition ? previousState?.hasScrollPosition : true } : {}),
             isGenerating: this.is_generating,
         });
     }
@@ -265,7 +269,8 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     }
 
     // 7. Re-render messages
-    let historyRender = this.render_messages();
+    const phonePosition = stored?.hasScrollPosition ? stored.scrollTop : 'bottom';
+    let historyRender = Platform.isPhone ? renderPhoneHistory(this, phonePosition) : this.render_messages();
     const renderedWindow = this.rollingWindow;
     if (this.rollingWindow.messages.length === 0) {
         this.add_welcome_message();
@@ -277,7 +282,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     }
 
     // 9. Restore scroll position
-    if (stored?.scrollTop && this.messages_container) {
+    if (!Platform.isPhone && stored?.scrollTop && this.messages_container) {
         this.messages_container.scrollTop = stored.scrollTop;
     }
 
@@ -285,8 +290,8 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     const switchedTab = this.chatTabs.find((t: ChatTab) => _tabKey(t) === targetKey);
     if (switchedTab?._needsRefresh) {
         delete switchedTab._needsRefresh;
-        historyRender = this.render_messages();
-        this.scrollToFinalMessage();
+        historyRender = Platform.isPhone ? renderPhoneHistory(this, phonePosition) : this.render_messages();
+        if (!Platform.isPhone) this.scrollToFinalMessage();
     }
     if (this.is_generating) void Promise.resolve(historyRender).then(() => {
         if (tabSwitches.get(this) === switchToken && this.chatTabs.includes(targetTab) && targetTab.isActive

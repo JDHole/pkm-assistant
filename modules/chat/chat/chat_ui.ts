@@ -32,6 +32,7 @@ import { installMessagesContainerActivity } from './connectorActivity.js';
 import { scheduleTriggerPopupOpen, closeTriggerPopup } from './triggerPopupLifecycle.js';
 import { replaceMentionAutocomplete } from './inputLifecycle.js';
 import { installPhoneKeyboard } from './phoneKeyboard.js';
+import { followsChatBottom } from './scrollGeometry.js';
 export { _scheduleConnectorRedraw, _cancelConnectorRedraw } from './connectorActivity.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
@@ -1068,8 +1069,7 @@ export function scrollToBottom(this: ChatViewLike, smooth = true, opts: { drawCo
     const container = this.messages_container;
     if (!container) return;
 
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const isAtBottom = distanceFromBottom < 150;
+    const isAtBottom = followsChatBottom(container);
 
     if (isAtBottom || !smooth) {
         const target = container.scrollHeight - container.clientHeight;
