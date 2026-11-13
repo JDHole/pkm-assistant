@@ -2139,6 +2139,46 @@ Okna sesji dziedziczą tę regułę z `src/styles.css`. `pre` zachowuje formatow
 a `pre` i tabele mają własne przewijanie i `max-width: 100%`; tabela jest blokowym
 obszarem przewijania. Lista wiadomości nie udostępnia poziomego paska przewijania.
 
+## M3 U7 - klawiatura ekranowa
+
+Tylko `Platform.isPhone` instaluje `chat/phoneKeyboard.ts`; CSS jest za `body.is-phone`.
+Natywna warstwa Obsidiana ustawia `--keyboard-height` na korzeniu dokumentu. Host
+ogranicza `.app-container`, ale `.workspace-drawer` ma stałe `top: 0; bottom: 0`.
+Padding czatu odejmuje od wysokości klawiatury odległość dołu widoku od dołu okna;
+jego border-box nie zależy od paddingu, a lista kurczy się we flexie. Główna karta
+już skrócona przez hosta nie odejmuje klawiatury ponownie. Schowana daje zero.
+JS dostarcza geometrię i zapas `innerHeight - visualViewport.height - offsetTop`;
+CSS czyta wysokość natywną bezpośrednio, także gdy zmienia się po zdarzeniu.
+ResizeObserver widoku/listy/panelu aktualizuje limity i zachowuje dół listy, jeśli
+użytkownik był na dole. Korekta scrollTop przez układ nie oznacza ruchu czytelnika.
+Aktywne pole `ask_user` odsłania w liście, a pre-pytanie w jego formularzu.
+Wszystkie nasłuchy i obserwator
+należą do renderu; ponowny render i synchroniczny początek `onClose` je odpinają,
+także podczas oczekiwania na przyjęcie wiadomości. Dwa widoki nie dzielą stanu.
+
+Na telefonie `/` jest montowany przy polu jak `@`, z przewijaną wysokością ograniczoną
+do miejsca nad polem. Desktop zachowuje montaż w body i pozycjonowanie. Pre-pytania
+skilla dostają aktualizowany odstęp i limit nad panelem zamiast jednorazowej pozycji
+oraz `70vh`. Edycja używa tego samego pola, a todo to drugi, tylko do odczytu widok
+slotu; cały panel przesuwa się razem, bez zmiany kolejności pól i decyzji.
+
+Przegląd app.css/app.js Obsidiana 1.15.0: `Modal.open()` dopina kontener do body,
+poza `.app-container`, bez limitu klawiatury. `src/styles.css` skraca tylko kontenery
+ApprovalModal, MasterPasswordModal, SaveSessionModal i InlineCommentModal przez
+natywne `--keyboard-height`. Te modale nie mają zapasu visualViewport.
+Testy U7 w `chat/chat_ui.mobile.test.ts`: geometria, produkcyjny render i zdarzenia,
+odpięcie nasłuchów, ponowny render, dwa widoki, przewijanie i trzy platformy/popup.
+Lokalna atrapa zastępuje no-op stylów/nasłuchów; harness bez zmian. Chrome z CSS hosta
+potwierdził 175 px kompensacji (dół panelu 500, klawiatura od 504), powrót do 675,
+zero dla głównej karty, zapas visualViewport i przewijane popupy ponad polem.
+
+Do sprawdzenia na telefonie: animacja/panowanie WebView, obrót, wieloliniowa edycja,
+todo, odpowiedź `ask_user`, pola pre-pytań skilla, Przekieruj/powód odmowy,
+hasło/potwierdzenie MasterPasswordModal, opis/treść notatki i aktualizacja brain
+w SaveSessionModal, komentarz InlineCommentModal. Chrome z atrapą hosta nie zastępuje
+Androida Kuby. iOS, tablet i modale bez natywnej zmiennej pozostają nieweryfikowane;
+desktop/tablet celowo nie dostają tego mechanizmu.
+
 ## Telefon: tymczasowe menu rozmowy (M3 U2)
 
 `chat/phoneSessionMenu.ts` używa natywnego `Menu` Obsidiana. To tymczasowe zastępstwo

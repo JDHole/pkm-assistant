@@ -227,6 +227,8 @@ export class ChatView extends PluginItemView {
     onClose(this: ChatViewLike): Promise<void> | void {
         // Invalidate synchronously, before waiting for send admissions or saving.
         this._phoneSessionMenuClosed = true;
+        this._phoneKeyboardDetach?.();
+        this._phoneKeyboardDetach = null;
         closeSessionDecisions(this);
         this._dismissPhoneSessionMenu();
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).

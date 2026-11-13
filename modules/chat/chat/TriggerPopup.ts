@@ -12,6 +12,7 @@
  */
 
 import { makeInlineTriggerMarker, type InlineTriggerType } from './InlineChipPlugin.js';
+import { Platform } from 'obsidian';
 import type { ChatSkillConfig } from './chatViewShape.js';
 import type { SubAgentData } from '../../sub-agents/index.js';
 import type { ToolDefinition } from '../../tools/index.js';
@@ -271,7 +272,8 @@ export class TriggerPopup {
         itemsContainer.className = `${POPUP_CLASS}__items`;
         this.popupEl.appendChild(itemsContainer);
 
-        document.body.appendChild(this.popupEl);
+        // The phone anchor moves with the composer during native keyboard animation.
+        (Platform.isPhone ? this.textarea.parentElement! : document.body).appendChild(this.popupEl);
     }
 
     _renderItems(): void {
@@ -372,6 +374,7 @@ export class TriggerPopup {
     }
 
     _position(anchorEl: HTMLElement): void {
+        if (Platform.isPhone) return; // CSS anchors above the input, with a measured height limit.
         if (!this.popupEl || !anchorEl) return;
         const rect = anchorEl.getBoundingClientRect();
         const popupHeight = this.popupEl.offsetHeight || 200;

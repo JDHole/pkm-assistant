@@ -31,6 +31,7 @@ import { installSelectionMenu } from './selectionMenu.js';
 import { installMessagesContainerActivity } from './connectorActivity.js';
 import { scheduleTriggerPopupOpen, closeTriggerPopup } from './triggerPopupLifecycle.js';
 import { replaceMentionAutocomplete } from './inputLifecycle.js';
+import { installPhoneKeyboard } from './phoneKeyboard.js';
 export { _scheduleConnectorRedraw, _cancelConnectorRedraw } from './connectorActivity.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
@@ -96,6 +97,8 @@ function makeNoteOpener(app: ChatViewLike['app']): NoteOpener {
 // ── Main view render ────────────────────────────────────────────────
 
 export async function renderView(this: ChatViewLike, container = this.container) {
+    this._phoneKeyboardDetach?.();
+    this._phoneKeyboardDetach = null;
     cancelMessageEdit(this.rollingWindow);
     // Adopt chat styles (CSSStyleSheet from import) przez `adoptSheet`, żeby demontaż pluginu
     // zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
@@ -340,6 +343,8 @@ export async function renderView(this: ChatViewLike, container = this.container)
         this._bottomPanelObserver.observe(bottomPanel);
         reserveSpace();
     }
+
+    this._phoneKeyboardDetach = installPhoneKeyboard(container, this.messages_container, bottomPanel, inputRow, Platform.isPhone);
 
     // Add welcome message if no messages
     if (this.rollingWindow.messages.length === 0) {
@@ -874,7 +879,7 @@ export function _showSkillPreQuestions(this: ChatViewLike, skill: ChatSkillConfi
 
     // Position just above the input panel
     const inputPanel = this.input_area?.closest('.cs-input-panel');
-    if (inputPanel && this._chatBody) {
+    if (!Platform.isPhone && inputPanel && this._chatBody) {
         const bodyRect = this._chatBody.getBoundingClientRect();
         const inputRect = inputPanel.getBoundingClientRect();
         const bottomOffset = bodyRect.bottom - inputRect.top + 8;

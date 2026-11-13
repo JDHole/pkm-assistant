@@ -1700,6 +1700,17 @@ body.is-phone .pkm-skill-pq-overlay {
   overflow-wrap: anywhere;
 }
 body.is-phone .pkm-skill-pq-input { min-height: 44px; }
+/* M3 U7: native Modals are siblings of .app-container, so its keyboard limit
+   does not apply. Keep the original content/decision order and scroll surfaces. */
+body.is-phone .modal-container:has(:is(.pkm-approval-modal, .pkm-master-password__buttons, .cs-save-session-modal, .inline-comment-modal)) {
+  bottom: var(--keyboard-height, 0px);
+}
+body.is-phone .modal:has(:is(.pkm-approval-modal, .pkm-master-password__buttons, .cs-save-session-modal)) {
+  max-height: min(calc(100dvh - 24px), calc(100% - 24px));
+}
+body.is-phone .modal:has(.inline-comment-modal) {
+  max-height: min(var(--dialog-max-height), 100%);
+}
 body.is-phone .cs-ask-user { min-width: 0; overflow-wrap: anywhere; }
 body.is-phone .cs-ask-user :is(.cs-ask-user__options, .cs-ask-user__custom) {
   display: flex;

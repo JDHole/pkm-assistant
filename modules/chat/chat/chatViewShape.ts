@@ -349,6 +349,7 @@ export interface ChatViewMixins extends
     _slimBarTokenMinion: TokenRowRefs | null;
     _tokenViewer: TokenViewerWidget | null;
     _bottomPanelObserver: ResizeObserver | null;
+    _phoneKeyboardDetach: (() => void) | null;
 
     // ── Popovery ──
     _autonomyPopover: HTMLElement | null;

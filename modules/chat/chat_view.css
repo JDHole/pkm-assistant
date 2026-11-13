@@ -3964,6 +3964,30 @@ span.cs-note-link {
 body.is-phone .pkm-chat-view.view-content {
   padding: 0;
   margin: 0;
+  box-sizing: border-box;
+  padding-bottom: max(0px, calc(max(var(--keyboard-height, 0px), var(--pkm-chat-kb-fallback, 0px)) - var(--pkm-chat-below, 0px)));
+}
+
+/* M3 U7: the native keyboard variable can change after keyboardWillShow.
+   Its CSS change shrinks messages, whose ResizeObserver keeps geometry current. */
+body.is-phone .pkm-chat-view .cs-input-row { position: relative; }
+body.is-phone .pkm-chat-view .pkm-trigger-popup {
+  top: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(320px, var(--pkm-chat-popup-space, 260px));
+  box-sizing: border-box;
+}
+body.is-phone .pkm-chat-view .pkm-mention-dropdown {
+  max-height: min(260px, var(--pkm-chat-popup-space, 260px));
+  box-sizing: border-box;
+}
+body.is-phone .pkm-chat-view .pkm-skill-pq-overlay {
+  bottom: var(--pkm-chat-panel-offset, 120px);
+  max-height: var(--pkm-chat-prequestion-space, 70vh);
 }
 
 /* cs-root defines the gutter on the messages element itself, not its ancestor. */

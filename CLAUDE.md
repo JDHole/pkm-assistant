@@ -175,3 +175,10 @@ shell i ui-components. Ten sam arkusz powiększa przyciski i pola `ask_user`,
 MasterPasswordModal oraz pre-pytań skilla; pre-pytania mieszczą się w szerokości
 kontenera czatu. Te trzy powierzchnie zachowują dotychczasową kolejność DOM.
 Nie zmienia to obsługi decyzji, tekstów ani układu desktopu/tabletu.
+
+## Mobile M3 U7 - klawiatura ekranowa
+
+Tylko telefon kompensuje zasłoniętą część czatu przez CSS `--keyboard-height`
+Obsidiana i geometrię widoku, z zapasem `visualViewport`; główna karta nie odejmuje
+klawiatury drugi raz. Popupy i wskazane okna z polami tekstowymi mieszczą się nad
+klawiaturą; mechanizm, ograniczenia testów i lista prób na urządzeniu są w `modules/chat/CLAUDE.md`.
