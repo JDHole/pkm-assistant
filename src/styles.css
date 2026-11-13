@@ -1553,3 +1553,48 @@ input.pkm-onboarding-key-input {
 /* Diagnostics owns these touch targets on both desktop and mobile. */
 .pkm-diagnostics-actions { display: flex; flex-direction: column; gap: 12px; }
 .pkm-diagnostics-actions button { min-height: 48px; width: 100%; white-space: normal; height: auto; }
+
+/* M3 U2: session dialogs at phone width. Scope the shared archive class to
+   ConsolidationProgressModal so ArchiveModal in shell keeps its own contract. */
+body.is-phone .modal:is(.cs-session-modal-narrow, .cs-save-session-modal-wide),
+body.is-phone .modal.cs-archive-modal-wide:has(.cs-consolidation-modal) {
+  width: calc(100vw - 24px);
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+body.is-phone :is(.cs-session-close-modal, .cs-open-session-modal, .cs-save-session-modal, .cs-consolidation-modal) {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+body.is-phone :is(.cs-save-session-modal, .cs-consolidation-modal) :is(.pkm-review__actions, .cs-save-session__loading-actions, .cs-consolidation__step-actions) {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+body.is-phone :is(.cs-save-session-modal, .cs-consolidation-modal) button {
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  white-space: normal;
+}
+body.is-phone :is(.cs-save-session-modal, .cs-consolidation-modal) :is(input:not([type="checkbox"]), textarea) {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+body.is-phone :is(.cs-save-session-modal, .cs-consolidation-modal) :is(.pkm-review__row, .pkm-review__item-header) {
+  min-height: 44px;
+  flex-wrap: wrap;
+}
+body.is-phone :is(.cs-save-session-modal, .cs-consolidation-modal) .pkm-review__group-header { flex-wrap: wrap; }
+body.is-phone .cs-consolidation__step-head { flex-wrap: wrap; }
+body.is-phone .cs-consolidation__step-actions { flex-basis: 100%; }
+body.is-phone .cs-consolidation__step-label { min-width: 0; }

@@ -381,7 +381,7 @@ function installSaveCommand(view: Awaited<ReturnType<typeof fixture>>['view'], n
     if (!guard) throw new Error('Missing input guard');
     const code = ts.transpile(guard.getText(source) + '\n' + registryClass.getText(source).replace(/^export /, '')
         + '\nconst registry = new SlashCommandsRegistry();\n' + save.getText(source) + '\nreturn registry;', { target: ts.ScriptTarget.ES2022 });
-    const ui = ts.createSourceFile('chat_ui.ts', readFileSync(new URL('./chat_ui.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+    const ui = ts.createSourceFile('sessionActions.ts', readFileSync(new URL('./sessionActions.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
     const compression = ui.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === 'runManualCompression');
     if (!compression) throw new Error('Missing compression');
     const compressionCode = ts.transpile(compression.getText(ui).replace(/^export /, '') + '\nreturn runManualCompression;', { target: ts.ScriptTarget.ES2022 });
@@ -1361,7 +1361,10 @@ function lifecycleButtons(f: Awaited<ReturnType<typeof fixture>>) {
     const source = ts.createSourceFile('chat_ui.ts', readFileSync(new URL('./chat_ui.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
     const render = source.statements.find(s => ts.isFunctionDeclaration(s) && s.name?.text === '_renderSlimBar');
     if (!render || !ts.isFunctionDeclaration(render) || !render.body) throw new Error('_renderSlimBar missing');
-    const registrations = render.body.statements.filter(s => /^(newChatBtn|closeBtn)\.addEventListener/.test(s.getText(source)));
+    const registrations = render.body.statements.filter(ts.isForOfStatement);
+    const actionsSource = readFileSync(new URL('./sessionActions.ts', import.meta.url), 'utf8');
+    const actionsAst = ts.createSourceFile('sessionActions.ts', actionsSource, ts.ScriptTarget.Latest, true);
+    const actionsCode = actionsAst.statements.filter(s => !ts.isImportDeclaration(s)).map(s => s.getText(actionsAst).replace(/^export /, '')).join('\n');
     const newChatBtn = createDiv(), closeBtn = createDiv();
     events(newChatBtn); events(closeBtn);
     const requests: Promise<void>[] = [];
@@ -1373,7 +1376,10 @@ function lifecycleButtons(f: Awaited<ReturnType<typeof fixture>>) {
         handleNewSession() { const run = handleNewSession.call(f.view as never); requests.push(run); return run; },
         _closeActiveTab() { const run = _closeActiveTab.call(f.view as never); requests.push(run); return run; },
     });
-    new Function('newChatBtn', 'closeBtn', 'log', 'Notice', 't', ts.transpile(registrations.map(s => s.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2022 })).call(f.view, newChatBtn, closeBtn, log, CapturedNotice, translate);
+    const getActions = new Function('Notice', 't', 'log', 'UiIcons', ts.transpile(actionsCode, { target: ts.ScriptTarget.ES2022 }) + '\nreturn getSessionActions;')(CapturedNotice, translate, log, { refresh() {}, x() {}, save() {}, brain() {}, layers() {} });
+    let buttonIndex = 0;
+    const actionsGrid = { createDiv() { return [newChatBtn, closeBtn][buttonIndex++] || createDiv(); } };
+    new Function('actionsGrid', 'getSessionActions', 'setSvg', 't', ts.transpile(registrations.map(s => s.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2022 })).call(f.view, actionsGrid, getActions, () => {}, translate);
     return {
         requests, notices,
         newSession() { newChatBtn.dispatchEvent(new Event('click')); return requests.at(-1)!; },

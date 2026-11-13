@@ -329,6 +329,7 @@ export const pl: Record<string, string> = {
   'chat.attachment': 'Załącznik',
   'chat.voice_record': 'Nagrywanie głosu',
   'chat.mcp_tools': 'Narzędzia MCP',
+  'chat.session_menu': 'Menu rozmowy',
   'chat.actions': 'akcje',
   'chat.new_chat': 'Nowy chat',
   'chat.close_chat': 'Zamknij chat',

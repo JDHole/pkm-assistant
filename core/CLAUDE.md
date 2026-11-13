@@ -498,3 +498,7 @@ reguły transportu i normalizacji błędów w core pozostają bez zmian.
 
 M3 U1 dodaje `chat.send` i `chat.stop` w PL/EN jako dostępne nazwy przycisków czatu
 na obu platformach. Test rzeczywistego renderu: `modules/chat/chat/chat_ui.mobile.test.ts`.
+
+M3 U2 dodaje `chat.session_menu` w PL/EN jako dostępną nazwę przycisku menu telefonu.
+Pozostałe pozycje korzystają z istniejących etykiet. Test renderu obu języków:
+`modules/chat/chat/phoneSessionMenu.test.ts`.

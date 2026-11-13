@@ -2079,3 +2079,41 @@ i współpracę z natywnym menu Androida zostawiono następnej paczce zgodnie z 
 Testy TS: `chat/chat_ui.mobile.test.ts` (etykiety PL/EN i DOM trzech platform,
 wysyłka wielolinijkowa, rezerwa desktop/tablet i przejście na telefon).
 Pomiary Chrome i granice dowodu: [raport U1](../../audyt/mobile-m3-u1.md).
+
+## Telefon: tymczasowe menu rozmowy (M3 U2)
+
+`chat/phoneSessionMenu.ts` używa natywnego `Menu` Obsidiana. To tymczasowe zastępstwo
+ukrytego paska bocznego, do czasu jego przebudowy. Jedyna bramka nowego wejścia to
+`Platform.isPhone` w `_renderTabBar`. Przycisk ma i18n `chat.session_menu`, leży
+po prawej wewnątrz topbara, poza przewijaniem zakładek. Desktop i tablet zachowują
+poprzedni DOM. Import menu jest leniwy, przy dotknięciu przycisku.
+
+`chat/sessionActions.ts` jest jedyną definicją pięciu akcji sesji: identyfikator,
+klucz i18n, ikona natywnego menu i dotychczasowa ikona SVG paska, handler, zajętość.
+Pasek zachowuje kolejność Nowa/Zamknij/Zapisz/Konsolidacja/Podsumowanie, klasy oraz
+`data-tip`; menu ma kolejność Nowa/Zapisz/Zamknij, separator, Podsumowanie/Konsolidacja.
+Przebudowa paska ma używać tego samego rejestru, nie kopiować handlerów.
+`runManualCompression` przeniesiono do rejestru; re-eksport z `chat_ui.ts` zachowuje
+wejście dla `/compress`. Zajętość podsumowania/konsolidacji jest wskaźnikiem (klasa
+paska, ikona loader przy ponownym otwarciu menu), NIE dodatkową blokadą. Brak nowych
+blokad generowania. Błędy i komunikaty konsolidacji zachowują poprzedni kontrakt.
+
+Artefakty używają istniejącego `_showArtifactPicker(null)` z tą samą blokadą podczas
+generowania. Token Viewer dostaje wejście, ponieważ liczniki API w topbarze są
+nieklikalne, a faktyczny widget jest w ukrytym pasku. Oba popovery pozostają istniejącym
+UI. Popup `/` już wybiera konkretny indeks przez `mousedown`, niezależnie od hovera;
+nie zmieniano jego mechanizmu. AVA sprawdza markery skill/sub/MCP, a Chrome sprawdza
+natywne touchStart/touchEnd wraz z wygenerowanym mousedown.
+
+`body.is-phone` w arkuszu czatu i `src/styles.css` ogranicza cztery okna sesji do
+szerokości viewportu, przewijania treści i pionowych przycisków minimum 44 px.
+SaveSessionModal ma już grupy pionowe (komentarz o czterech kolumnach jest historyczny).
+Klasa szerokiego archiwum jest współdzielona z shell, więc reguła szerokości konsolidacji
+wymaga potomka `.cs-consolidation-modal` i nie zmienia ArchiveModal.
+
+Testy: `chat/phoneSessionMenu.test.ts` (35 przypadków: trzy platformy i dwa języki,
+DOM paska, rzeczywiste zapisy/okna, akcje obu wejść, generowanie, błędy, busy,
+artefakty, kontekst, wybór `/`). Dwa wcześniejsze testy czytające źródła dostosowano
+do nowego położenia funkcji, bez osłabiania asercji. Atrapa Menu/Notice i uzupełnienie
+DOM są lokalne dla testu. Harness nie eksportuje jeszcze Menu; proponowany patch
+jest poza repo i nie został nałożony. Dowody i ograniczenia: [raport U2](../../audyt/mobile-m3-u2.md).

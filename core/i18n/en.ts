@@ -330,6 +330,7 @@ export const en: Record<string, string> = {
   'chat.attachment': 'Attachment',
   'chat.voice_record': 'Voice recording',
   'chat.mcp_tools': 'MCP Tools',
+  'chat.session_menu': 'Conversation menu',
   'chat.actions': 'actions',
   'chat.new_chat': 'New chat',
   'chat.close_chat': 'Close chat',

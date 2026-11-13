@@ -4086,3 +4086,53 @@ body.is-phone .pkm-chat-view .cs-tile__action {
   opacity: 0.7;
 }
 body.is-phone .pkm-chat-view .cs-tile__actions { flex-wrap: wrap; }
+
+/* M3 U2: temporary native session menu, phone only. */
+body.is-phone .pkm-chat-view .cs-chat-topbar { overflow: visible; }
+body.is-phone .cs-phone-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+body.is-phone .cs-phone-tabs .cs-tab { flex-shrink: 0; }
+body.is-phone .pkm-chat-view .cs-chat-menu {
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  font-size: 24px;
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 0;
+  box-shadow: none;
+}
+body.is-phone .pkm-chat-view .cs-token-popover {
+  top: 8px;
+  right: 4px;
+  width: calc(100% - 8px);
+  max-height: calc(100% - 16px);
+  box-sizing: border-box;
+}
+body.is-phone .cs-token-popover :is(button, select),
+body.is-phone .cs-token-popover__toggle,
+body.is-phone .cs-token-popover__group-head,
+body.is-phone .pkm-artifact-pick-row,
+body.is-phone .pkm-trigger-picker__row { min-height: 44px; }
+body.is-phone .cs-token-popover__icon-btn { min-width: 44px; }
+body.is-phone .cs-token-popover__header,
+body.is-phone .cs-token-popover__footer { flex-wrap: wrap; }
+
+/* These rules follow the adopted desktop sheet, including its modal padding. */
+body.is-phone :is(.cs-session-close-modal, .cs-open-session-modal) {
+  padding: 12px;
+}
+body.is-phone :is(.cs-session-close__btn, .cs-open-session__btn) {
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  white-space: normal;
+}

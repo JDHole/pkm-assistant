@@ -14,7 +14,8 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
-const uiSource = readSource('./chat_ui.ts');
+const uiSource = readSource('./sessionActions.ts');
+const renderSource = readSource('./chat_ui.ts');
 const slashSource = readSource('./SlashCommandsRegistry.ts');
 
 test('chat.streaming.below_threshold nie jest wołany jako t() (duplikat i18n skasowany)', t => {
@@ -31,7 +32,8 @@ test('chat.streaming.below_threshold nie jest wołany jako t() (duplikat i18n sk
 
 test('guzik 🗜️ i komenda /compress wołają WSPÓLNY runManualCompression, nie powielają gałęzi decyzyjnej', t => {
     t.regex(uiSource, /export async function runManualCompression\(view: ChatViewLike\): Promise<boolean> \{/);
-    t.regex(uiSource, /await runManualCompression\(this\)/, 'guzik w _renderSlimBar ma wołać wspólny helper');
+    t.regex(uiSource, /await runManualCompression\(view\)/, 'guzik w _renderSlimBar ma wołać wspólny helper');
+    t.regex(renderSource, /getSessionActions\(this\)/);
     t.regex(slashSource, /import \{ runManualCompression \} from '\.\/chat_ui\.js';/);
     t.regex(slashSource, /await runManualCompression\(view\)/, "handler /compress ma wołać wspólny helper");
 

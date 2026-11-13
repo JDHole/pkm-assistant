@@ -14,7 +14,16 @@ async function loadPublicEntries() {
         },
         bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent', external: ['electron'],
         plugins: [{ name: 'test-assets', setup(build) {
-            build.onResolve({ filter: /^obsidian$/ }, () => ({ path: obsidianStub }));
+            // The read-only harness predates native Menu. This desktop fixture never
+            // opens it; fail explicitly if it does. Phone UI is exercised separately
+            // in modules/chat/chat/phoneSessionMenu.test.ts with an interactive host.
+            build.onResolve({ filter: /^obsidian$/ }, () => ({ path: obsidianStub, namespace: 'inline-obsidian' }));
+            build.onLoad({ filter: /.*/, namespace: 'inline-obsidian' }, () => ({
+                contents: `export * from ${JSON.stringify(obsidianStub)};
+                    export { default } from ${JSON.stringify(obsidianStub)};
+                    export class Menu { constructor() { throw new Error('Native Menu outside inline-comment fixture'); } }`,
+                loader: 'js', resolveDir: process.cwd(),
+            }));
             build.onResolve({ filter: /\.(css|md)$/ }, args => ({ path: path.resolve(args.resolveDir, args.path), namespace: 'text-asset' }));
             build.onLoad({ filter: /.*/, namespace: 'text-asset' }, args => ({ contents: `export default ${JSON.stringify(fs.readFileSync(args.path, 'utf8'))};`, loader: 'js' }));
         } }],

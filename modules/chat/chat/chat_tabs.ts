@@ -5,7 +5,7 @@ import { cancelMessageEdit } from './messageEdit.js';
  * Multi-agent tab management — init, switch, close, picker, tab bar rendering.
  * Methods mixed into ChatView.prototype.
  */
-import { Notice } from 'obsidian';
+import { Notice, Platform } from 'obsidian';
 import { SkinManager, hexToRgbTriplet, setSvg } from '../../crystal-soul/index.js';
 import { TokenTracker } from '../../../core/index.js';
 import { t } from '../../../core/i18n/index.js';
@@ -89,6 +89,23 @@ export function _renderTabBar(this: ChatViewLike, container: HTMLElement) {
     // Nie ma trzeciego wiersza dla 'master' - patrz modules/chat/chat/chat_ui.ts
     // `_updateSlimBarTokens`.
     this._updateSlimBarTokens();
+
+    if (Platform.isPhone) {
+        // Keep the menu outside the horizontal tab scroller so it remains reachable
+        // with several long session names. Desktop/tablet keep the original DOM.
+        const tabs = createDiv({ cls: 'cs-phone-tabs' });
+        while (topbar.firstChild) tabs.appendChild(topbar.firstChild);
+        topbar.appendChild(tabs);
+        const button = topbar.createEl('button', {
+            cls: 'cs-chat-menu', text: '⋯',
+            attr: { type: 'button', 'aria-label': t('chat.session_menu'), 'aria-haspopup': 'menu' },
+        });
+        button.addEventListener('click', (event: MouseEvent) => {
+            void import('./phoneSessionMenu.js').then(({ showPhoneSessionMenu }) => {
+                showPhoneSessionMenu(this, event);
+            }).catch((error: unknown) => log.error('Chat', 'Session menu failed:', error));
+        });
+    }
 }
 
 /**

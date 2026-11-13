@@ -69,38 +69,8 @@ type PreQuestionInput = (HTMLInputElement | HTMLTextAreaElement | HTMLSelectElem
     _allOptions?: PreQuestionOption[];
 };
 
-/**
- * Rdzeń ręcznej kompresji kontekstu, dzielony przez guzik 🗜️ „Sumaryzuj chat" (`_renderSlimBar`
- * niżej) i komendę `/compress` (`SlashCommandsRegistry.ts`). Oba wołacze MUSZĄ wołać JEDNĄ
- * wspólną gałąź decyzyjną — dwie osobne kopie tej gałęzi mogłyby się rozjechać na dwa różne
- * teksty i18n dla gałęzi „nic się nie zmieniło" tego samego stanu. Kanon: `chat.nothing_to_summarize`.
- *
- * Wołacze zachowują WŁASNE opakowanie: guzik dokłada busy-state + własny catch/Notice błędu
- * (to jest UI dymka, nie logika kompresji), komenda slash dokłada `resetInputArea()`. Wzór
- * eksportu-nie-mixina jak `_tabKey` w `chat_tabs.js` — funkcja przyjmuje `view` jawnie, nie `this`,
- * więc jest bezpieczna do importu wprost z pliku spoza mixinów.
- *
- * @returns `false` gdy za mało wiadomości (kompresja NIE wystartowała), `true` gdy się odbyła.
- */
-export async function runManualCompression(view: ChatViewLike): Promise<boolean> {
-    if (view.rollingWindow.messages.length < 4) {
-        new Notice(t('chat.too_few_messages'));
-        return false;
-    }
-    const result = await view.rollingWindow.performTwoPhaseCompression(false);
-    view.updateTokenCounter();
-    view._updateTokenPanel();
-    if (result.summaryFailed) {
-        new Notice(t('chat.summarize_failed'));
-    } else if (result.summarized) {
-        new Notice(t('chat.summarize_result', { count: view.rollingWindow.summarizationCount, trimmed: result.trimmed }));
-    } else if (result.trimmed > 0) {
-        new Notice(t('chat.trim_result', { trimmed: result.trimmed }));
-    } else {
-        new Notice(t('chat.nothing_to_summarize'));
-    }
-    return true;
-}
+export { runManualCompression } from './sessionActions.js';
+import { getSessionActions } from './sessionActions.js';
 
 /**
  * Otwiera notatke ZAWSZE w nowej karcie w glownym obszarze workspace'u - nigdy nie podmienia
@@ -394,83 +364,13 @@ export function _renderSlimBar(this: ChatViewLike) {
     topSection.createDiv({ cls: 'cs-skillbar__label', text: t('chat.actions') });
     const actionsGrid = topSection.createDiv({ cls: 'cs-skillbar__grid' });
 
-    // Row 1: Nowy chat | Zamknij chat
-    const newChatBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.new_chat') } });
-    setSvg(newChatBtn, UiIcons.refresh(16));
-    newChatBtn.addEventListener('click', () => {
-        void this.handleNewSession().catch((error: unknown) => {
-            log.error('Chat', 'Nie udało się rozpocząć nowej rozmowy:', error);
-            new Notice(t('chat.session.new_failed'), 6000);
+    for (const action of getSessionActions(this)) {
+        const button = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t(action.label) } });
+        setSvg(button, action.sidebarIcon(16));
+        button.addEventListener('click', () => {
+            void action.run(busy => button.classList.toggle('cs-skillbar__icon--busy', busy));
         });
-    });
-
-    const closeBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.close_chat') } });
-    setSvg(closeBtn, UiIcons.x(16));
-    // _closeActiveTab jest async (czeka na zapis sesji przed przełączeniem zakładki) —
-    // handler łyka ewentualny błąd, żeby nie zostawić unhandled rejection w konsoli.
-    closeBtn.addEventListener('click', () => {
-        void (async () => {
-            try {
-                await this._closeActiveTab();
-            } catch (e) {
-                log.warn('Chat', `Close tab failed: ${(e as Error)?.message || String(e)}`);
-            }
-        })();
-    });
-
-    // Row 2: Zapisz sesję | Konsolidacja
-    const saveBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.save_session') } });
-    setSvg(saveBtn, UiIcons.save(16));
-    saveBtn.addEventListener('click', () => { void this.handleSaveSession(); });
-
-    const consolidateBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.consolidate') } });
-    setSvg(consolidateBtn, UiIcons.brain(16));
-    consolidateBtn.addEventListener('click', () => {
-        void (async () => {
-            const agentMemory = this.plugin?.agentManager?.getActiveMemory();
-            const hasCurrentMessages = this.rollingWindow.messages.length >= 2;
-            let hasDiskSessions = false;
-            if (agentMemory) {
-                try {
-                    const unconsolidated = await agentMemory.getUnconsolidatedSessions();
-                    hasDiskSessions = unconsolidated.length >= 1;
-                } catch { /* ignore */ }
-            }
-            if (!hasCurrentMessages && !hasDiskSessions) {
-                new Notice(t('chat.no_sessions'));
-                return;
-            }
-            consolidateBtn.addClass('cs-skillbar__icon--busy');
-            try {
-                new Notice(t('chat.consolidating'));
-                await this.consolidateSession();
-                new Notice(t('chat.memory_saved'));
-            } catch (e) {
-                log.error('Chat', 'Memory consolidation failed:', e);
-                new Notice(t('chat.consolidate_error'));
-            } finally {
-                consolidateBtn.removeClass('cs-skillbar__icon--busy');
-            }
-        })();
-    });
-
-    // Row 3: Sumaryzuj chat. Artefakty mają własny segment slim bara w renderArtifactButtons,
-    // a todo — live-widok nad inputem.
-    const summarizeBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.summarize') } });
-    setSvg(summarizeBtn, UiIcons.layers(16));
-    summarizeBtn.addEventListener('click', () => {
-        void (async () => {
-            summarizeBtn.addClass('cs-skillbar__icon--busy');
-            try {
-                await runManualCompression(this);
-            } catch (e) {
-                log.error('Chat', 'Manual compression failed:', e);
-                new Notice(t('chat.summarize_error'));
-            } finally {
-                summarizeBtn.removeClass('cs-skillbar__icon--busy');
-            }
-        })();
-    });
+    }
 
     const tokenSection = this._slimBar.createDiv({ cls: 'cs-skillbar__section cs-token-viewer-section' });
     this._tokenViewer = new TokenViewerWidget(this, tokenSection);
