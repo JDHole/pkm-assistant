@@ -4,6 +4,7 @@ import { Platform, MarkdownRenderer } from 'obsidian';
 import { setLocale } from '../../../core/i18n/index.js';
 import type { ChatViewLike } from './chatViewShape.js';
 import { bottomOcclusion, phoneKeyboardGeometry } from './phoneKeyboard.js';
+import { phoneHistoryPending, renderPhoneHistory } from './phoneHistoryScroll.js';
 
 register('data:text/javascript,' + encodeURIComponent(`export async function load(url, context, next) {
     if (url.endsWith('.css')) return { format: 'module', source: 'export default {}', shortCircuit: true };
@@ -365,6 +366,7 @@ function historyFrames(host: ReturnType<typeof keyboardHost>, view: ChatViewLike
     Object.defineProperty(view.container, 'isConnected', { configurable: true, value: true });
     return {
         rect,
+        queued: () => frames.size,
         tick() { const batch = [...frames.values()]; frames.clear(); for (const callback of batch) callback(0); },
         reveal() { rect.left = 0; rect.right = 354; host.observers[0].callback(); },
     };
@@ -378,6 +380,104 @@ async function restoreHistory(view: ChatViewLike) {
     };
     Object.assign(view.plugin.agentManager!, { getAgentMemory: () => memory, switchAgent() {} });
     await view._restoreActiveSession();
+}
+
+for (const [position, expected] of [['bottom', 6098], [0, 0], [3000, 3000]] as const) {
+    test.serial(`U10 changing history geometry finishes once at ${position} after 60 visible frames`, async t => {
+        const host = keyboardHost(t);
+        const { view } = await fixture(t, true, true, 'en', host.setup);
+        const frames = historyFrames(host, view);
+        const geometry = measuredList(view, 458, 6496, 1200);
+        const calls: ScrollToOptions[] = [];
+        view.messages_container.scrollTo = options => {
+            const call = options as ScrollToOptions;
+            calls.push(call);
+            view.messages_container.scrollTop = call.top ?? 0;
+        };
+        await renderPhoneHistory(view, position);
+        frames.reveal();
+        for (let i = 0; i < 59; i++) { geometry.content++; frames.tick(); }
+        t.is(view.messages_container.scrollTop, 1200);
+        t.true(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 1);
+        t.deepEqual(calls, []);
+        geometry.content++;
+        frames.tick();
+        t.is(view.messages_container.scrollTop, expected);
+        t.deepEqual(calls, [{ top: expected, behavior: 'instant' }]);
+        t.false(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 0);
+        for (let i = 0; i < 100; i++) { geometry.content++; frames.tick(); }
+        host.observers[0].callback();
+        t.deepEqual(calls, [{ top: expected, behavior: 'instant' }]);
+        t.is(frames.queued(), 0);
+    });
+}
+
+for (const event of ['touchstart', 'pointerdown', 'wheel', 'keydown']) {
+    test.serial(`U10 reader ${event} cancels changing geometry just before the limit`, async t => {
+        const host = keyboardHost(t);
+        const { view } = await fixture(t, true, true, 'en', host.setup);
+        const frames = historyFrames(host, view);
+        const geometry = measuredList(view, 458, 6496, 1200);
+        const calls: ScrollToOptions[] = [];
+        view.messages_container.scrollTo = options => { calls.push(options as ScrollToOptions); };
+        await renderPhoneHistory(view);
+        frames.reveal();
+        for (let i = 0; i < 59; i++) { geometry.content++; frames.tick(); }
+        t.true(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 1);
+        view.messages_container.dispatchEvent(event === 'keydown' ? key('PageUp') : new Event(event));
+        view.messages_container.scrollTop = 3000;
+        for (let i = 0; i < 100; i++) { geometry.content++; frames.tick(); }
+        host.observers[0].callback();
+        t.is(view.messages_container.scrollTop, 3000);
+        t.deepEqual(calls, []);
+        t.false(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 0);
+        // Cancellation also resets the budget for the next history request.
+        await renderPhoneHistory(view, 1200);
+        for (let i = 0; i < 59; i++) { geometry.content++; frames.tick(); }
+        t.true(phoneHistoryPending(view.messages_container));
+        t.deepEqual(calls, []);
+        geometry.content++;
+        frames.tick();
+        t.deepEqual(calls, [{ top: 1200, behavior: 'instant' }]);
+        t.false(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 0);
+    });
+}
+
+for (const hidden of ['drawer', 'zero-size']) {
+    test.serial(`U10 hidden ${hidden} pauses the visible frame budget without polling`, async t => {
+        const host = keyboardHost(t);
+        const { view } = await fixture(t, true, true, 'en', host.setup);
+        const frames = historyFrames(host, view);
+        const geometry = measuredList(view, 458, 6496, 1200);
+        await renderPhoneHistory(view);
+        frames.reveal();
+        for (let i = 0; i < 30; i++) { geometry.content++; frames.tick(); }
+        if (hidden === 'drawer') frames.rect.left = 360;
+        else { frames.rect.width = 0; frames.rect.height = 0; }
+        frames.tick();
+        t.true(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 0);
+        // Even repeated host notifications while hidden cannot spend the budget.
+        for (let i = 0; i < 100; i++) { host.observers[0].callback(); frames.tick(); }
+        t.is(view.messages_container.scrollTop, 1200);
+        t.true(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 0);
+        frames.rect.width = 354; frames.rect.height = 679;
+        frames.reveal();
+        for (let i = 0; i < 29; i++) { geometry.content++; frames.tick(); }
+        t.is(view.messages_container.scrollTop, 1200);
+        t.true(phoneHistoryPending(view.messages_container));
+        geometry.content++;
+        frames.tick();
+        t.is(view.messages_container.scrollTop, 6098);
+        t.false(phoneHistoryPending(view.messages_container));
+        t.is(frames.queued(), 0);
+    });
 }
 
 test.serial('U9 restore waits for Markdown and visible stable geometry, then tab positions including zero win', async t => {

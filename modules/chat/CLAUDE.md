@@ -2196,6 +2196,7 @@ końcem asynchronicznego Markdown. Przyczyna jest wspólna z desktopem, ale zmia
 zachowania jest tylko na telefonie: `phoneHistoryScroll` czeka na koniec renderu,
 widoczny prostokąt i dwie zgodne klatki geometrii, potem ustawia najnowszą wiadomość.
 Ukryty widok czeka na IntersectionObserver/ResizeObserver bez pętli odpytywania.
+U10 ogranicza stabilizację do 60 klatek widocznego widoku po renderze (około 1 s przy 60 Hz, aby dać czas na animację szuflady bez blokowania pozycji przez ciągły strumień); po limicie pojedyncze przewinięcie do dołu lub zapamiętanej pozycji używa bieżącej geometrii i czyści żądanie, ukrycie nie zużywa budżetu, a przejęcie przez czytelnika nadal anuluje żądanie.
 Stan zakładki `hasScrollPosition` odróżnia zapamiętane 0 od początkowego 0 po restore.
 Zapamiętana pozycja ma pierwszeństwo także przy `_needsRefresh`; opuszczenie zakładki
 przed odsłonięciem nie zapamiętuje jeszcze pozycji czytelnika. Nowy render historii

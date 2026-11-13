@@ -1,8 +1,10 @@
 import type { ChatViewLike } from './chatViewShape.js';
 
-type ScrollRequest = { ready: boolean; top: number | 'bottom' };
+type ScrollRequest = { ready: boolean; top: number | 'bottom'; visibleFrames: number };
 type BeginScroll = (top: number | 'bottom') => (rendered: boolean) => void;
 const controllers = new WeakMap<HTMLElement, { begin: BeginScroll; pending(): boolean }>();
+// About one second at 60 Hz (half a second at 120 Hz), without charging hidden drawers.
+const MAX_VISIBLE_FRAMES = 60;
 
 /** A tab left before its first reveal has no reading position to remember yet. */
 export function phoneHistoryPending(messages: HTMLElement): boolean {
@@ -48,8 +50,9 @@ export function installPhoneHistoryScroll(root: HTMLElement, messages: HTMLEleme
             previousGeometry = '';
             return; // ResizeObserver or IntersectionObserver wakes us on reveal.
         }
+        request.visibleFrames++;
         const geometry = [rect.left, rect.top, rect.width, rect.height, messages.clientHeight, messages.scrollHeight].join(',');
-        if (geometry !== previousGeometry) {
+        if (geometry !== previousGeometry && request.visibleFrames < MAX_VISIBLE_FRAMES) {
             previousGeometry = geometry;
             layoutChanged();
             return;
@@ -60,7 +63,7 @@ export function installPhoneHistoryScroll(root: HTMLElement, messages: HTMLEleme
     };
     const begin: BeginScroll = top => {
         cancel();
-        const next: ScrollRequest = { ready: false, top };
+        const next: ScrollRequest = { ready: false, top, visibleFrames: 0 };
         request = next;
         return rendered => {
             if (disposed || request !== next) return;
