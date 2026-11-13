@@ -10,6 +10,7 @@ bo to samodzielna funkcja, a nie infrastruktura core ani część rozmowy.
   oraz typy `DiagnosticInput`, `DiagnosticReport`.
 - `diagnostics.ts`: logika bez Obsidiana/Node, adapter i migawka platformy wstrzykiwane.
   Wynik zawiera status, czas i szczegół każdego sprawdzenia, Markdown oraz liczniki.
+- `redaction.ts`: lokalny redaktor zakresów tekstu; sekretów nie maskuje częściowo.
 - `connection.ts`: jedno żądanie `buildRequest(..., true)` dostawcy przez transport
   z runtimeConfig. Limit 30 s, bez ponowień, narzędzi, promptu agenta i historii.
   Mierzy surowe porcje transportu (także ciało błędu HTTP), a nie tokeny modelu.
@@ -38,11 +39,23 @@ raport nie może zostać zapisany, a UI pokazuje stały komunikat błędu.
 Pliki mają datę UTC, losowy sufiks i platformę, żeby nie nadpisywać poprzednich biegów.
 
 Raport jest allowlistą faktów, nie zrzutem ustawień/logów. Ustawienia służą tylko
-jako słownik sekretów (także nieenumerowalne klucze po odblokowaniu). Redakcja po
-wartości z core idzie przed maską wzorców z core; dodatkowo usuwa krótkie sekrety,
-e-maile, URL, autoryzację w środku tekstu i ścieżki absolutne, również po interpunkcji.
-Granica ścieżki zachowuje tokeny user-agent, identyfikatory modeli i ścieżki względne
-vaulta. Maskowanie obejmuje również cały Markdown przed zapisem.
+jako słownik sekretów (także nieenumerowalne klucze po odblokowaniu). Lokalny redaktor
+zbiera zakresy na oryginalnym tekście i zastępuje nakładające się zakresy jednokrotnie.
+Sekrety znane z ustawień (również krótkie, URL-encoded i JSON-escaped), znane prefiksy
+kluczy, JWT, Bearer/Basic/Token i pola autoryzacji/sekretów dostają `[REDACTED]`.
+Parametry zapytania zachowują nazwę, ale tracą całą wartość. Fragmenty maski core
+(`abcd***wxyz`), które może wcześniej zwrócić dekoder dostawcy, też znikają w całości.
+Nie używamy częściowego maskowania core w redaktorze diagnostyki.
+E-maile, również z cytowaną częścią lokalną, dostają `[EMAIL]`; HTTP(S) URL - `[URL]`.
+Ścieżki rozpoznajemy po korzeniach POSIX `/home/`, `/Users/`, `/storage/`, `/sdcard/`,
+`/data/`, `/mnt/`, `/var/`, `/private/`, `/tmp/`, `/root/`, `/opt/`, `/etc/`, `/usr/`,
+`/Volumes/`, `/media/`, `/run/`, po `~/`, `file://`, UNC albo literze dysku Windows
+niepoprzedzonej literą/cyfrą. `[PATH]` zastępuje ścieżkę do końca linii albo zamykającego
+cudzysłowu, także ze spacjami i interpunkcją; prefiks błędu zostaje. To świadomie
+konserwatywne: tekst po niecytowanej ścieżce też może zniknąć. Endpointy `/v1/messages`,
+`/v1/chat/completions`, `/api/chat`, identyfikatory modeli i ścieżki względne zostają.
+Maskowanie obejmuje szczegóły i cały Markdown przed zapisem; stałe znaczniki nie są
+ponownie traktowane jako znane krótkie sekrety przy kolejnym przebiegu.
 Nie zapisujemy wartości kluczy, nagłówków, próbek szyfru, notatek, rozmów ani nazw plików.
 Brak możliwości opcjonalnych jest pominięciem, nie awarią. Brak wymaganych API
 (structuredClone, at, WebCrypto, strumienie, dekoder, AbortController) jest błędem.
@@ -57,6 +70,8 @@ konfiguracji użytkownika. Nie zmieniamy gitignore vaulta.
 
 ## Testy
 
+`redaction.test.ts`: literalne pary wejście/wyjście dla sekretów, pól, korzeni ścieżek,
+przecieków i zniszczeń z R3, zachowanych faktów oraz ponownej redakcji.
 `diagnostics.test.ts`: odczyt raportu z adaptera RAM, kryptografia, awarie rename,
 mkdir, rmdir, brak append, cichy błąd dopisania, izolacja sprzątania, literalne fakty
 user-agent/model/build, prywatne błędy adaptera i odpowiedzi dostawcy w całym pliku oraz `report.markdown`, prywatność

@@ -2752,3 +2752,48 @@ for (const targetState of ['present', 'hidden-by-exists', 'missing'] as const) {
         }
     });
 }
+
+// Fail only the redundant comparison, after the mutation has read valid state.
+function rejectSecondStateRead(vault: ReturnType<typeof makeVault>['vault']) {
+    const read = vault.adapter.read;
+    let stateReads = 0;
+    vault.adapter.read = async path => {
+        if (path.endsWith('/.state.json') && ++stateReads === 2) throw new Error('comparison offline');
+        return read(path);
+    };
+}
+
+test('appendToActiveSession persists the message when the second state read fails', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    await memory.ensureMemoryStructure();
+    memory._generateActiveSessionFilename = () => 'r3.md';
+    rejectSecondStateRead(vault);
+    const path = await memory.appendToActiveSession({ type: 'user_message', content: 'Wiadomosc R3' });
+    t.is(path, '.pkm-assistant/agents/jaskier/memory/sessions/active/r3.md');
+    const fresh = new AgentMemory(vault, 'Jaskier');
+    t.deepEqual((await fresh.loadActiveSession(path)).messages, [
+        { role: 'user', content: 'Wiadomosc R3', seq: 1 },
+    ]);
+    t.is(files[memory.paths.state], '{\n  "active_sessions": [\n    "r3.md"\n  ],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null,\n  "last_used": "r3.md"\n}\n');
+    t.is(JSON.parse(files[memory.paths.activeSessionMeta]).path, '.pkm-assistant/agents/jaskier/memory/sessions/active/r3.md');
+});
+
+test('archiveActiveSession finishes state and pointer updates when the second state read fails', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    memory._generateActiveSessionFilename = () => 'r3.md';
+    const path = await memory.appendToActiveSession({ type: 'user_message', content: 'Rozmowa R3' });
+    rejectSecondStateRead(vault);
+    const archivePath = await memory.archiveActiveSession(path);
+    t.is(archivePath, '.pkm-assistant/agents/jaskier/memory/sessions/archive/r3.md');
+    t.deepEqual(parseSessionFile(files[archivePath!]).messages, [{ role: 'user', content: 'Rozmowa R3' }]);
+    const state = await new StateManager(vault, memory.paths.state).read();
+    t.deepEqual({ active: state.active_sessions, last: state.last_used, count: state.archived_since_last_consolidation },
+        { active: [], last: null, count: 1 });
+    t.regex(state.last_archive_at!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    t.true(files[memory.paths.state].endsWith('\n'));
+    t.is(memory.activeSessionPath, null);
+    t.is(files[memory.paths.activeSessionMeta], '{}');
+    t.false(Object.hasOwn(files, path));
+});

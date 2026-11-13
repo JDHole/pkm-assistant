@@ -75,15 +75,21 @@ test('missing state is seeded with newline', async t => {
     t.is(await f.adapter.read(), '{\n  "active_sessions": [],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null\n}\n');
 });
 
-test('failed comparison does not overwrite disk and does not poison the write queue', async t => {
+test('failed comparison falls back to writing and preserves the write queue', async t => {
     const f = fixture();
     const read = f.adapter.read;
     f.adapter.read = async () => { throw new Error('offline'); };
-    await t.throwsAsync(f.manager.write({ active_sessions: ['new.md'] }), { message: 'offline' });
-    t.is(f.writes.length, 0);
-    f.adapter.read = read;
-    t.is(await f.adapter.read(), ORIGINAL);
-    await f.manager.addActiveSession('new.md');
+    await f.manager.write({ active_sessions: ['new.md'] });
     t.is(f.writes.length, 1);
-    t.deepEqual((await f.manager.read()).active_sessions, ['live.md', 'new.md']);
+    f.adapter.read = read;
+    t.is(await f.adapter.read(), '{\n  "active_sessions": [\n    "new.md"\n  ],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null\n}\n');
+    await f.manager.addActiveSession('next.md');
+    t.is(f.writes.length, 2);
+    t.deepEqual((await f.manager.read()).active_sessions, ['new.md', 'next.md']);
+});
+
+test('corrupt comparison input still permits an explicit state write', async t => {
+    const f = fixture('{broken');
+    await f.manager.write({ active_sessions: ['restored.md'] });
+    t.is(await f.adapter.read(), '{\n  "active_sessions": [\n    "restored.md"\n  ],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null\n}\n');
 });

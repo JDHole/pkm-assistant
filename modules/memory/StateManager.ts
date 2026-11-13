@@ -1,4 +1,4 @@
-import { probeFile, readIfExists } from '../../core/index.js';
+import { probeFile } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 
 /** Adapter FS vaulta w zakresie potrzebnym `.state.json` (typowany strukturalnie). */
@@ -96,16 +96,14 @@ export class StateManager {
             ...this.defaultState(),
             ...(state || {})
         }, null, 2) + '\n';
-        const previous = await readIfExists(this.vault.adapter, this.statePath);
-        if (previous.state === 'unreadable') {
-            log.warn('StateManager', `Nie mogę porównać ${this.statePath} - nie ruszam pliku`, previous.cause);
-            throw previous.cause instanceof Error ? previous.cause : new Error(`Cannot read ${this.statePath}`);
-        }
-        if (previous.state === 'content') {
-            let parsed: unknown;
-            try { parsed = JSON.parse(previous.content); }
-            catch { /* Jawne write() nadal pozwala zastąpić uszkodzony JSON; mutatory odrzuca _readRaw. */ }
-            if (equalJson(parsed, JSON.parse(content))) return;
+        // This read only avoids redundant writes. The caller already supplied the state;
+        // uncertainty here must not turn a successful mutation into a failed operation.
+        try {
+            const previous: unknown = JSON.parse(await this.vault.adapter.read(this.statePath));
+            if (equalJson(previous, JSON.parse(content))) return;
+        } catch {
+            // Missing/unreadable/corrupt comparison input: retain the original write contract.
+            // Mutation reads remain fail-closed in _readRaw, before any state is changed.
         }
         await this.vault.adapter.write(this.statePath, content);
     }

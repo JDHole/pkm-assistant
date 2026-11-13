@@ -1152,13 +1152,19 @@ Testy: `AgentMemory.archiveCollision.test.ts` oraz F4 w
 ### Mobile M1 R2 - zapisy startowe
 
 `StateManager` przed zapisem porównuje wartości JSON ze świeżym odczytem dysku przez
-`readIfExists`. Kolejność kluczy obiektów, wcięcia i końcowy newline nie stanowią zmiany;
+`adapter.read` w try/catch. To wyłącznie optymalizacja pomijania równego zapisu.
+Kolejność kluczy obiektów, wcięcia i końcowy newline nie stanowią zmiany;
 kolejność tablic i pola spoza schematu są istotne. Równy stan oznacza zero zapisów i
 zachowanie oryginalnych bajtów. Faktyczny zapis zawsze kończy się `\n`. Błąd odczytu
-blokuje zapis; dotychczasowe odrzucenie uszkodzonego JSON przez mutatory zostaje.
+porównawczego lub uszkodzony JSON powoduje zwykły zapis dostarczonego stanu, jak przed R2.
+Pierwszy odczyt mutacji (`_readRaw`) nadal odrzuca nieczytelny/uszkodzony stan przed zmianą;
+nie wolno pomylić tej ochrony z opcjonalnym drugim odczytem do porównania.
 Kolejka jest nadal lokalna dla instancji, nie zapewnia blokady między urządzeniami.
 Testy: `StateManager.test.ts` (pruning pustej sesji, zmiana, równość, zewnętrzny zapis,
-bootstrap i awaria I/O).
+bootstrap i zapis awaryjny po błędzie I/O/uszkodzonym JSON porównania).
+`AgentMemory.test.ts`: drugi odczyt `.state.json` odrzucony przez adapter - dopisanie
+wiadomości daje odczytywalną sesję, a archiwizacja kończy aktualizację licznika i obu
+wskaźników (RAM oraz `.active_session.json`).
 
 Migracja `weekly/` do `summaries/L1/` sprawdza teraz cel przez `probeFile` pod kolejką.
 Zajęty lub niepewny cel pozostawia oba pliki bez zmiany, jak migracja płaskich sesji.

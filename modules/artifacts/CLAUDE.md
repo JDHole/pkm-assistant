@@ -68,7 +68,9 @@ Nie dodajemy markera w ustawieniach: produkcyjne `defaultSettings()` nie zawiera
 `language`, a jedyny pisarz wyboru UI to `renderAppearanceSection.onChange`.
 Zapis klucza API nie materializuje języka. Test `AgentManager.startup.test.ts` wykonuje
 rzeczywisty load/merge/save/reload i start managera; testy loadera pokrywają brak wyboru,
-jawny wybór, brakujący plik i niezgodne sygnały adaptera. Dotyczy obu platform.
+jawny wybór, brakujący plik i niezgodne sygnały adaptera. Test kłamiącego `exists()`
+jednocześnie sprawdza literalną treść dosianego brakującego typu oraz zachowanie
+istniejących plików, więc wykrywa także brak wykonania seedowania. Dotyczy obu platform.
 
 Audyt R2: migrator JSON ma marker w vaulcie, nie w ustawieniach. Gdy markera nie ma,
 backup omija zajęte nazwy przez sufiks `.2`, `.3` itd. (maksymalnie 1000 prób), również

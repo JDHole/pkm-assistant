@@ -367,13 +367,24 @@ test.serial('default language cannot overwrite an existing type hidden by exists
     useLocale(t, 'en');
     const { vault, files, writes } = makeVault(new Map([
         [typePath('plan'), PLAN_TYPE_CONTENT],
-        [typePath('notatka'), NOTATKA_TYPE_CONTENT],
         [typePath('raport'), RAPORT_TYPE_CONTENT],
     ]));
     vault.adapter.exists = async () => false;
     await new ArtifactTypeLoader(vault).ensureBuiltinTypes();
     t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT);
-    t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT);
+    t.is(files.get(typePath('notatka')), `---
+nazwa: notatka
+opis: A note or piece of text for approval — the agent writes, you review and approve
+statusy: [pending-approval, remarks, accepted, closed]
+sprzatanie: 30
+---
+
+## Content
+(the agent writes the content here)
+
+## User notes
+(your space — the agent reads it, never overwrites it)
+`);
     t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT);
-    t.is(writes.length, 0);
+    t.deepEqual(writes, [typePath('notatka')]);
 });

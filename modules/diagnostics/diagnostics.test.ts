@@ -132,7 +132,7 @@ test('redaction precedes truncation and covers URL credentials, encodings and UN
     const redact = diagnosticRedactor({ apiKey: 'odd secret+/value' });
     t.is(redact('failure odd%20secret%2B%2Fvalue'), 'failure [REDACTED]');
     t.is(redact('connect https://user:pass@host.test/?token=hidden'), 'connect [URL]');
-    t.is(redact('error \\\\server\\private\\file.txt'), 'error  [PATH]');
+    t.is(redact('error \\\\server\\private\\file.txt'), 'error [PATH]');
 });
 
 const diagnosticFacts = [
@@ -161,8 +161,8 @@ test('redaction masks inline email, authorization schemes and absolute paths wit
         ['ENOENT,/home/kuba/x', 'ENOENT,[PATH]'],
         ["open '/storage/emulated/0/Documents/Vault/x.md'", "open '[PATH]'"],
         ['/data/user/0/md.obsidian/files/x', '[PATH]'],
-        ['C:\\Users\\kuba\\x', ' [PATH]'],
-        ['file:///home/kuba/x', '[URL]'],
+        ['C:\\Users\\kuba\\x', '[PATH]'],
+        ['file:///home/kuba/x', '[PATH]'],
     ]) t.is(redact(input), expected);
 });
 
@@ -173,9 +173,9 @@ test('whole saved diagnostic report redacts private adapter errors and real prov
     const { probeConnection } = await import('./connection.js');
     const f = fixture();
     f.input.facts = Object.fromEntries(diagnosticFacts.map((value, i) => [`fact.${i}`, value]));
-    f.adapter.rename = async () => { throw new Error('ENOENT,/home/kuba/private.txt; kuba@example.com; Authorization: Bearer adapter-secret'); };
+    f.adapter.rename = async () => { throw new Error('ENOENT:/storage/emulated/0/Documents/Moj Vault/prywatna notatka.md\n"kuba"@example.com; ?key=abc; sk-1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'); };
     const transport = new FetchStreamTransport(async () => new Response('data: ' + JSON.stringify({ error: {
-        message: 'provider@example.com; open "/storage/emulated/0/Documents/Vault/x.md"; Authorization: Bearer provider-secret',
+        message: 'HTTP 404 POST /v1/messages returned invalid model anthropic/claude-sonnet-5-5\n"kuba"@example.com; ?key=private123; sk-ant-api03-1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ; Authorization: Bearer provider-secret',
     } }) + '\n\n', { status: 200 }));
     f.input.consent = async () => true;
     f.input.connection = () => probeConnection(CHAT_PROVIDERS.openai, { modelId: 'test', log }, transport,
@@ -184,11 +184,11 @@ test('whole saved diagnostic report redacts private adapter errors and real prov
     const saved = await f.adapter.read(report.path);
     t.is(saved, report.markdown);
     t.is(report.errors, 2);
-    t.regex(saved, /\| fs.rename \| ERROR \| 0 \| ENOENT,\[PATH\]; \[EMAIL\]; \[REDACTED\] \|/);
-    t.regex(saved, /error: \[EMAIL\]; open "\[PATH\]"; \[REDACTED\]/);
+    t.regex(saved, /\| fs.rename \| ERROR \| 0 \| ENOENT:\[PATH\] \[EMAIL\]; \?key=\[REDACTED\]; \[REDACTED\] \|/);
+    t.regex(saved, /error: HTTP 404 POST \/v1\/messages returned invalid model anthropic\/claude-sonnet-5-5 \[EMAIL\]; \?key=\[REDACTED\]; \[REDACTED\]; \[REDACTED\]/);
     for (const output of [saved, report.markdown]) {
-        for (const privateValue of ['kuba@example.com', 'provider@example.com', '/home/kuba/private.txt',
-            '/storage/emulated/0/Documents/Vault/x.md', 'Authorization: Bearer', 'adapter-secret', 'provider-secret']) {
+        for (const privateValue of ['kuba', 'private123', 'abc', 'sk-', 'WXYZ', 'priv***e123',
+            '/storage/emulated/0/Documents/Moj Vault/prywatna notatka.md', 'Authorization: Bearer', 'provider-secret']) {
             t.false(output.includes(privateValue), privateValue);
         }
         for (const fact of diagnosticFacts) t.true(output.includes(fact), fact);

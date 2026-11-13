@@ -1,4 +1,5 @@
-import { SecretsStorage, ensureAdapterFolder, maskSensitiveData, redactSecretsDeep, normalizeError } from '../../core/index.js';
+import { SecretsStorage, ensureAdapterFolder, redactSecretsDeep, normalizeError } from '../../core/index.js';
+import { redactDiagnosticText } from './redaction.js';
 import { t } from '../../core/i18n/index.js';
 import type { DataAdapter } from 'obsidian';
 
@@ -43,26 +44,7 @@ function secretValues(settings: unknown): string[] {
 
 export function diagnosticRedactor(settings: unknown): (text: string) => string {
     const secrets = secretValues(settings);
-    return text => {
-        // Existing value redaction precedes pattern masking; short custom secrets need full removal too.
-        let safe = String(redactSecretsDeep(text, secrets));
-        for (const secret of secrets) {
-            for (const variant of [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)]) {
-                safe = safe.split(variant).join('[REDACTED]');
-            }
-        }
-        // Do this before the core mask, which deliberately keeps parts of some keys.
-        safe = safe
-            .replace(/\b(?:authorization|proxy-authorization|x-api-key|api-key|api_key|x-goog-api-key)["']?\s*[:=]\s*["']?(?:(?:Bearer|Basic|Token)\s+)?[^\s"'<>,;|]+/gi, '[REDACTED]')
-            .replace(/\b(?:Bearer|Basic)\s+[^\s"'<>,;|]+/gi, '[REDACTED]')
-            .replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)+/gi, '[EMAIL]');
-        return maskSensitiveData(safe)
-            .replace(/(?:https?|file):\/\/[^\s<>"']+/gi, '[URL]')
-            .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\n\r"'<>,;|]*/g, ' [PATH]')
-            // A separator can precede an absolute path without whitespace (ENOENT,/home/...).
-            // Word, dot and slash prefixes belong to UA tokens, model IDs and vault paths.
-            .replace(/(^|[^\w./-])\/[^\s/][^\n\r"'<>,;|]*/g, '$1[PATH]');
-    };
+    return text => redactDiagnosticText(text, secrets);
 }
 
 export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<DiagnosticReport> {
