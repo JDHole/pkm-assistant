@@ -165,3 +165,13 @@ Wygląd telefonu jest ograniczony do `body.is-phone` / `Platform.isPhone` w modu
 chat. `_checkEmbeddingProviderConfigured` pomija notice na `Platform.isMobile`,
 zgodnie z bezwarunkowym `disabled_mobile` w inicjalizacji VaultIndexer; desktopowy
 komunikat pozostaje bez zmian. Test obu języków i platform: `src/main.mobile.test.ts`.
+
+## Mobile M3 U4 - okna decyzji
+
+`src/styles.css` zawiera reguły wyłącznie `body.is-phone` dla ApprovalModal i
+DiffModal: przewijana treść ponad decyzjami, pełna szerokość przycisków i cele
+48 px. Strukturę telefonu i zgodną z widokiem kolejność Tab opisują dokumentacje
+shell i ui-components. Ten sam arkusz powiększa przyciski i pola `ask_user`,
+MasterPasswordModal oraz pre-pytań skilla; pre-pytania mieszczą się w szerokości
+kontenera czatu. Te trzy powierzchnie zachowują dotychczasową kolejność DOM.
+Nie zmienia to obsługi decyzji, tekstów ani układu desktopu/tabletu.

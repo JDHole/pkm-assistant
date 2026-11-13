@@ -3,7 +3,7 @@
  * Modal for approving/denying agent actions.
  * i18n-aware UI, content preview, deny reason field.
  */
-import { Modal } from 'obsidian';
+import { Modal, Platform } from 'obsidian';
 import type { App } from 'obsidian';
 import { UiIcons, setSvg } from '../../modules/crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
@@ -85,14 +85,17 @@ export class ApprovalModal extends Modal {
         setSvg(h2, UiIcons.warning(20));
         h2.appendText(t('approval.title'));
 
+        // Only the phone needs a bounded scroller above the decision controls.
+        const body = Platform.isPhone ? contentEl.createDiv('pkm-decision-body') : contentEl;
+
         // Agent action description (human-readable)
-        const agentInfo = contentEl.createDiv('approval-agent');
+        const agentInfo = body.createDiv('approval-agent');
         agentInfo.createEl('p', {
             text: this._getHumanDescription()
         });
 
         // Action details
-        const details = contentEl.createDiv('approval-details');
+        const details = body.createDiv('approval-details');
 
         // Action type badge
         const typeBadge = details.createSpan({
@@ -125,7 +128,7 @@ export class ApprovalModal extends Modal {
         }
 
         // Content preview - different per action type
-        this._renderContentPreview(contentEl);
+        this._renderContentPreview(body);
 
         // Checkbox "Nie pytaj więcej w tej sesji o zapisy do tego pliku" - TYLKO dla akcji
         // zapisu pliku (`vault.write` - jedyny actionType, którym MCPClient oznacza tool `write`
@@ -176,24 +179,28 @@ export class ApprovalModal extends Modal {
         // Buttons
         const buttonContainer = contentEl.createDiv('approval-buttons');
 
-        // Deny button - first click shows reason field, second confirms
-        let denyClicked = false;
-        const denyBtn = buttonContainer.createEl('button', {
-            cls: 'mod-warning'
-        });
-        setSvg(denyBtn, UiIcons.cross(14));
-        denyBtn.appendText(t('approval.deny'));
-        denyBtn.onclick = () => {
-            if (!denyClicked) {
-                denyClicked = true;
-                denyReasonDiv.removeClass('pkm-hidden');
-                setSvg(denyBtn, UiIcons.cross(14));
-                denyBtn.appendText(t('approval.confirm_deny'));
-                denyReasonInput.focus();
-            } else {
-                this._resolve({ result: 'deny', reason: denyReasonInput.value.trim() });
-            }
+        // Keep native Tab order aligned with the phone layout, without CSS order.
+        const renderDenyButton = () => {
+            // Deny button - first click shows reason field, second confirms
+            let denyClicked = false;
+            const denyBtn = buttonContainer.createEl('button', {
+                cls: 'mod-warning'
+            });
+            setSvg(denyBtn, UiIcons.cross(14));
+            denyBtn.appendText(t('approval.deny'));
+            denyBtn.onclick = () => {
+                if (!denyClicked) {
+                    denyClicked = true;
+                    denyReasonDiv.removeClass('pkm-hidden');
+                    setSvg(denyBtn, UiIcons.cross(14));
+                    denyBtn.appendText(t('approval.confirm_deny'));
+                    denyReasonInput.focus();
+                } else {
+                    this._resolve({ result: 'deny', reason: denyReasonInput.value.trim() });
+                }
+            };
         };
+        if (!Platform.isPhone) renderDenyButton();
 
         // Approve button
         const approveBtn = buttonContainer.createEl('button', {
@@ -252,6 +259,7 @@ export class ApprovalModal extends Modal {
                 this._confirmRedirect(redirectInput.value.trim());
             }
         };
+        if (Platform.isPhone) renderDenyButton();
     }
 
     /**

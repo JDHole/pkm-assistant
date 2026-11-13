@@ -349,3 +349,14 @@ snapshot z `snapshotAttachments()`. Czat przekazuje go po rozwiązaniu wzmianek,
 żeby zmiana chipów podczas await nie podmieniła załączników wysłanej wiadomości.
 Bez drugiego argumentu metoda nadal korzysta z bieżących załączników. Kolejność
 kontekstu i format treści są takie same dla obu wariantów.
+
+### Mobile M3 U4 - podgląd zmiany na telefonie
+
+`DiffModal` tylko przy `Platform.isPhone` grupuje informacje i podgląd w przewijanym
+`.pkm-decision-body`, zostawiając nagłówek, etykietę checkboxa i decyzje poza nim.
+Telefon tworzy Zatwierdź przed Odrzuć w DOM, więc Tab zgadza się z układem; desktop
+i tablet zachowują poprzednią strukturę i kolejność. `src/styles.css` ogranicza
+te reguły do `body.is-phone`: przyciski 48 px na pełną szerokość, 16 px przed odmową,
+wiersz checkboxa 44 px, zawijanie ścieżek i przewijanie długiego diffa/obrazu.
+Wynik i pamięć sesyjna nie zmieniają kontraktu. Testy platform i obu decyzji:
+`modules/shell/decisionModals.mobile.test.ts`; geometria wymaga Chrome/Obsidiana.

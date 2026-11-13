@@ -1598,3 +1598,120 @@ body.is-phone :is(.cs-save-session-modal, .cs-consolidation-modal) .pkm-review__
 body.is-phone .cs-consolidation__step-head { flex-wrap: wrap; }
 body.is-phone .cs-consolidation__step-actions { flex-basis: 100%; }
 body.is-phone .cs-consolidation__step-label { min-width: 0; }
+
+/* M3 U4: phone decisions. Desktop/tablet retain their DOM and host sizing.
+   The body scrolls; remember + decision buttons remain outside that scroller. */
+body.is-phone .modal:has(:is(.pkm-approval-modal, .pkm-diff-modal)) {
+  width: calc(100vw - 24px);
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+body.is-phone :is(.pkm-approval-modal, .pkm-diff-modal) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+body.is-phone :is(.pkm-approval-modal, .pkm-diff-modal) > * { flex-shrink: 0; }
+body.is-phone :is(.pkm-approval-modal, .pkm-diff-modal) > .pkm-decision-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+body.is-phone .pkm-decision-body :is(pre, code, .diff-text) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+body.is-phone .pkm-decision-body .diff-body {
+  max-height: none;
+  overflow: visible;
+}
+body.is-phone .pkm-decision-body .diff-image { max-width: 100%; height: auto; }
+body.is-phone :is(.approval-header, .diff-header) h2 {
+  font-size: 1.1em;
+  margin: 0 0 12px;
+}
+body.is-phone :is(.approval-buttons, .diff-buttons, .pkm-master-password__buttons, .pkm-skill-pq-btnrow) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 10px;
+}
+body.is-phone :is(.approval-buttons, .diff-buttons, .pkm-master-password__buttons, .pkm-skill-pq-btnrow) > button {
+  width: 100%;
+  min-height: 48px;
+  height: auto;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  justify-content: center;
+}
+/* Together with the 10px gap this gives refusal a 16px separation. */
+body.is-phone :is(.approval-buttons, .diff-buttons) > .mod-warning { margin-top: 6px; }
+body.is-phone :is(.approval-remember, .diff-remember) > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  width: 100%;
+  padding-block: 4px;
+  box-sizing: border-box;
+}
+body.is-phone :is(.approval-remember, .diff-remember) input { flex-shrink: 0; }
+body.is-phone :is(.approval-deny-input, .approval-redirect-input) {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+/* Other decisions encountered during a turn; preserve their native focus order. */
+body.is-phone .modal:has(.pkm-master-password__buttons) {
+  min-width: 0;
+  width: calc(100vw - 24px);
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  box-sizing: border-box;
+}
+body.is-phone .modal-content:has(.pkm-master-password__buttons) { overflow-wrap: anywhere; }
+body.is-phone .modal-content:has(.pkm-master-password__buttons) .setting-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+body.is-phone .modal-content:has(.pkm-master-password__buttons) :is(.setting-item-control, input) {
+  min-width: 0;
+  width: 100%;
+}
+body.is-phone .modal-content:has(.pkm-master-password__buttons) input { min-height: 44px; }
+body.is-phone .pkm-skill-pq-overlay {
+  right: 8px;
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+body.is-phone .pkm-skill-pq-input { min-height: 44px; }
+body.is-phone .cs-ask-user { min-width: 0; overflow-wrap: anywhere; }
+body.is-phone .cs-ask-user :is(.cs-ask-user__options, .cs-ask-user__custom) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+body.is-phone .cs-ask-user :is(button, .cs-ask-user__input) {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}

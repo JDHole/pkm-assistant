@@ -222,3 +222,21 @@ uruchomił produkcyjny rejestr z atrapą hosta i rozszerzeniami DOM Obsidiana,
 przed/po CSS z bazy M1: 360 i 412 px, kliknięcie ostatniej zakładki, cele dotykowe
 oraz desktop/tablet bez `is-phone`. Wynik R1: treść 78 -> 316 px i 130 -> 368 px (zewnętrzne paddingi po
 22 px); bez `is-phone` wymiary bez zmian. Nie zastępuje testu Androida i klawiatury.
+
+## Mobile M3 U4 - decyzje dotykowe
+
+`ApprovalModal` przy `Platform.isPhone` umieszcza opis, ścieżki i podgląd w
+`.pkm-decision-body`. Nagłówek, checkbox sesyjny, pola odmowy/przekierowania oraz
+przyciski pozostają poza przewijaną treścią. Tylko telefon tworzy ten kontener.
+Kolejność DOM na telefonie: Zatwierdź, Zawsze zezwalaj (jeśli dostępne), Przekieruj,
+Odrzuć. Dzięki temu Tab odpowiada kolejności wizualnej, bez `order` ani `tabindex`.
+Desktop/tablet zachowują poprzedni DOM i kolejność. Handlery i kontrakt zgód są wspólne.
+Dotyczy to także zgody `delegate.share_conversation`, nadal bez trwałej zgody.
+
+`src/styles.css` pod `body.is-phone` ustala pełną szerokość i minimum 48 px dla
+przycisków, odstęp 10 px i 16 px przed odmową. Cała istniejąca etykieta checkboxa
+ma minimum 44 px; zagnieżdżony input zapewnia natywne przełączanie etykietą.
+Kontener modala ogranicza wysokość do viewportu, a długa treść przewija się ponad
+decyzjami. Weryfikacja geometrii wymaga przeglądarki, atrapa DOM AVA jej nie mierzy.
+`decisionModals.mobile.test.ts` sprawdza kolejność oraz wyniki wszystkich decyzji
+na telefonie, tablecie i desktopie, także sesyjną zgodę oraz modal diffa.

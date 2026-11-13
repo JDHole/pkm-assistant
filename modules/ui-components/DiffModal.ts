@@ -3,7 +3,7 @@
  * Shows a user-friendly diff before vault_write operations.
  * Non-programmer friendly: strikethrough for removed, highlighted for added.
  */
-import { Modal } from 'obsidian';
+import { Modal, Platform } from 'obsidian';
 import type { App } from 'obsidian';
 import { UiIcons, setSvg, setSvgLabel } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
@@ -73,8 +73,10 @@ export class DiffModal extends Modal {
         const h2 = header.createEl('h2');
         setSvgLabel(h2, UiIcons.edit(20), t('modal.diff.title'));
 
+        const body = Platform.isPhone ? contentEl.createDiv('pkm-decision-body') : contentEl;
+
         // Agent + path info
-        const info = contentEl.createDiv('diff-info');
+        const info = body.createDiv('diff-info');
         if (this.opts.agentName) {
             info.createSpan({
                 text: t('modal.diff.wants_to_change', { name: this.opts.agentName }),
@@ -88,8 +90,8 @@ export class DiffModal extends Modal {
 
         const preview = this.opts.preview;
         if (preview?.kind === 'binary') {
-            contentEl.createDiv({ cls: 'diff-operation', text: t(preview.operation === 'create' ? 'modal.diff.binary_create' : preview.operation === 'replace' ? 'modal.diff.binary_replace' : 'modal.diff.binary_delete') });
-            contentEl.createDiv({ cls: 'diff-binary-size', text: t('modal.diff.binary_size', {
+            body.createDiv({ cls: 'diff-operation', text: t(preview.operation === 'create' ? 'modal.diff.binary_create' : preview.operation === 'replace' ? 'modal.diff.binary_replace' : 'modal.diff.binary_delete') });
+            body.createDiv({ cls: 'diff-binary-size', text: t('modal.diff.binary_size', {
                 before: preview.oldBytes, after: preview.newBytes,
             }) });
             const extension = this.opts.path.split('.').at(-1)?.toLowerCase() ?? '';
@@ -97,13 +99,13 @@ export class DiffModal extends Modal {
                 gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp' };
             if (preview.image && mime[extension] && typeof URL.createObjectURL === 'function') {
                 this.imageUrl = URL.createObjectURL(new Blob([preview.image], { type: mime[extension] }));
-                contentEl.createEl('img', { cls: 'diff-image', attr: { src: this.imageUrl,
+                body.createEl('img', { cls: 'diff-image', attr: { src: this.imageUrl,
                     alt: t('modal.diff.image_preview') } });
             }
         } else if (preview?.kind === 'folder') {
-            contentEl.createDiv({ cls: 'diff-operation', text: t('modal.diff.folder') });
+            body.createDiv({ cls: 'diff-operation', text: t('modal.diff.folder') });
         } else {
-            if (preview?.kind === 'deleted') contentEl.createDiv({ cls: 'diff-operation', text: t('modal.diff.deleted') });
+            if (preview?.kind === 'deleted') body.createDiv({ cls: 'diff-operation', text: t('modal.diff.deleted') });
             // Diff computed ONCE, shared by stats + render — computing the same full LCS DP table
             // twice (once per method) would waste one pass for nothing.
             const ops = computeLineDiff(preview?.oldContent ?? this.opts.oldContent, preview?.newContent ?? this.opts.newContent);
@@ -111,7 +113,7 @@ export class DiffModal extends Modal {
             // Stats
             const stats = computeDiffStats(ops);
             if (stats.added > 0 || stats.removed > 0) {
-                const statsEl = contentEl.createDiv('diff-stats');
+                const statsEl = body.createDiv('diff-stats');
                 if (stats.removed > 0) {
                     statsEl.createSpan({
                         text: t('modal.diff.stat_removed', { count: stats.removed }),
@@ -127,7 +129,7 @@ export class DiffModal extends Modal {
             }
 
             // Diff body
-            const diffBody = contentEl.createDiv('diff-body');
+            const diffBody = body.createDiv('diff-body');
             // oldContent !== newContent as STRINGS doesn't guarantee any line actually differs after
             // split('\n') (e.g. content that differs only outside what split captures) — without
             // this check, the modal would show nothing but a single "⋯ N unchanged lines ⋯"
@@ -159,13 +161,16 @@ export class DiffModal extends Modal {
         // Buttons
         const buttons = contentEl.createDiv('diff-buttons');
 
-        const denyBtn = buttons.createEl('button', { cls: 'mod-warning' });
-        setSvgLabel(denyBtn, UiIcons.cross(14), t('modal.diff.deny'));
-        denyBtn.onclick = () => {
-            // Odrzucenie NIGDY nie pamięta zgody, niezależnie od stanu checkboxa.
-            this.rememberForSession = false;
-            this._resolve('deny');
+        const renderDenyButton = () => {
+            const denyBtn = buttons.createEl('button', { cls: 'mod-warning' });
+            setSvgLabel(denyBtn, UiIcons.cross(14), t('modal.diff.deny'));
+            denyBtn.onclick = () => {
+                // Odrzucenie NIGDY nie pamięta zgody, niezależnie od stanu checkboxa.
+                this.rememberForSession = false;
+                this._resolve('deny');
+            };
         };
+        if (!Platform.isPhone) renderDenyButton();
 
         const approveBtn = buttons.createEl('button', { cls: 'mod-cta' });
         setSvgLabel(approveBtn, UiIcons.check(14), t('modal.diff.approve'));
@@ -173,6 +178,7 @@ export class DiffModal extends Modal {
             this.rememberForSession = !!rememberCheckbox?.checked;
             this._resolve('approve');
         };
+        if (Platform.isPhone) renderDenyButton();
     }
 
     /**
