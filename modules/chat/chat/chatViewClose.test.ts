@@ -1,3 +1,4 @@
+import { closeSessionDecisions } from '../sessionViewLifecycle.js';
 import test from 'ava';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -51,7 +52,7 @@ test('onClose zamyka trigger popup', async t => {
     host._closeTriggerPopup = function (this: typeof host) { closeTriggerPopup(this); };
     let opened = false;
     scheduleTriggerPopupOpen(host, () => { opened = true; });
-    const close = new Function('document', 'window', `return async function() {${body}};`)({}, {}) as (this: typeof host) => Promise<void>;
+    const close = new Function('document', 'window', 'closeSessionDecisions', `return async function() {${body}};`)({}, {}, closeSessionDecisions) as (this: typeof host) => Promise<void>;
 
     await close.call(host);
 

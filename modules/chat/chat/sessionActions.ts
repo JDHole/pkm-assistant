@@ -3,6 +3,7 @@ import { UiIcons } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import type { ChatViewLike } from './chatViewShape.js';
+import { isSessionViewAlive } from '../sessionViewLifecycle.js';
 
 /**
  * Rdzeń ręcznej kompresji kontekstu, dzielony przez guzik 🗜️ „Sumaryzuj chat" (`_renderSlimBar`
@@ -91,6 +92,7 @@ export function getSessionActions(view: ChatViewLike): readonly SessionAction[] 
                         hasDiskSessions = unconsolidated.length >= 1;
                     } catch { /* ignore, as in the sidebar */ }
                 }
+                if (!isSessionViewAlive(view)) return;
                 if (!hasCurrentMessages && !hasDiskSessions) {
                     new Notice(t('chat.no_sessions'));
                     return;
@@ -99,6 +101,7 @@ export function getSessionActions(view: ChatViewLike): readonly SessionAction[] 
                 try {
                     new Notice(t('chat.consolidating'));
                     await view.consolidateSession();
+                    if (!isSessionViewAlive(view)) return;
                     new Notice(t('chat.memory_saved'));
                 } catch (error) {
                     log.error('Chat', 'Memory consolidation failed:', error);

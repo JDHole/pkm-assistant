@@ -1,3 +1,4 @@
+import { closeSessionDecisions } from '../sessionViewLifecycle.js';
 import test from 'ava';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -217,7 +218,7 @@ test.serial('F8-3: quit → beforeunload → plugin unload → onClose: jedno zd
     const unload = new Function('log', 'stopAllDelegations', 'SkinManager', 'removeAdoptedSheets', 'CHAT_VIEW_TYPE', `return function() ${methodBody('../../../src/main.ts', 'onunload')}`)(
         { debug() {}, warn() {}, disposeFileSink() {} }, () => {}, {}, () => {}, 'chat');
     unload.call({ app: { workspace: { getLeavesOfType: () => [{ view: f.view }] } } });
-    tasks.push(new Function(`return async function() ${methodBody('../chat_view.ts', 'onClose')}`)().call(f.view));
+    tasks.push(new Function('closeSessionDecisions', `return async function() ${methodBody('../chat_view.ts', 'onClose')}`)(closeSessionDecisions).call(f.view));
     release.resolve();
     await Promise.all(tasks);
     t.deepEqual(parseActiveSession(f.files.get(f.tabs[0].sessionPath)).messages.map(m => m.content), []);

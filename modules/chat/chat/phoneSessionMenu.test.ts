@@ -1,5 +1,7 @@
 import test, { type ExecutionContext } from 'ava';
 import { register } from 'node:module';
+import { mock } from 'node:test';
+import { ConfirmModal } from '../../ui-components/index.js';
 import { Platform, Modal } from 'obsidian';
 import { setLocale } from '../../../core/i18n/index.js';
 import { AgentMemory } from '../../memory/index.js';
@@ -38,6 +40,7 @@ const host = await import('obsidian') as unknown as typeof import('obsidian') & 
 const { ChatView } = await import('../chat_view.js');
 const { SessionCloseModal } = await import('../SessionCloseModal.js');
 const { SaveSessionModal } = await import('../SaveSessionModal.js');
+const { OpenSessionModal } = await import('../OpenSessionModal.js');
 
 const patched = new WeakSet<HTMLElement>();
 function browserEvents(el: HTMLElement): HTMLElement {
@@ -119,9 +122,10 @@ async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
         getActiveMemory: () => memory, getAgentMemory: () => memory, switchAgent() {},
     } };
     const opened: Modal[] = [];
+    const closed = new Set<Modal>();
     const open = Modal.prototype.open, close = Modal.prototype.close, svg = SvgHelper.toElement;
     Modal.prototype.open = function () { browserEvents(this.contentEl); opened.push(this); this.onOpen(); };
-    Modal.prototype.close = function () { this.onClose(); };
+    Modal.prototype.close = function () { closed.add(this); this.onClose(); };
     SvgHelper.toElement = () => document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     const view = new ChatView({ app, id: 'session-menu' }, plugin as never) as ChatViewLike;
     browserEvents(view.container);
@@ -153,7 +157,7 @@ async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
             grid().children[sidebarIndex[id]].dispatchEvent(new Event('click'));
         }
     }
-    return { view, memory, files, opened, grid, menu, invoke };
+    return { view, memory, files, adapter, opened, closed, grid, menu, invoke };
 }
 
 for (const platform of ['phone', 'tablet', 'desktop']) for (const locale of ['pl', 'en']) {
@@ -397,4 +401,223 @@ for (const entry of ['menu', 'sidebar'] as const) {
         t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content),
             ['Retain on close failure.']);
     });
+}
+
+
+// U5 exercises the production decision dialogs, view and memory with controlled I/O.
+function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+}
+async function sessionFixture(t: ExecutionContext, entry: 'menu' | 'sidebar') {
+    mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-13T12:00:00Z') });
+    t.teardown(() => mock.timers.reset());
+    const f = await fixture(t, entry === 'menu' ? 'phone' : 'desktop');
+    await f.view.rollingWindow.addMessage('user', 'Keep the blue notebook.');
+    await f.view.rollingWindow.addMessage('assistant', 'The notebook stays blue.');
+    await f.view.handleSaveSession();
+    const path = f.memory.activeSessionPath!;
+    const tab = f.view.chatTabs[0];
+    tab.sessionPath = path; tab.sessionEpoch = f.memory.sessionEpoch;
+    f.view.input_area.value = 'Unsent draft';
+    const bytes = await f.adapter.read(path);
+    const originalWindow = f.view.rollingWindow;
+    let action = Promise.resolve();
+    const newSession = f.view.handleNewSession.bind(f.view);
+    f.view.handleNewSession = () => { action = newSession(); return action; };
+    t.teardown(() => { for (const modal of f.opened) if (!f.closed.has(modal)) modal.close(); });
+    return { ...f, path, bytes, originalWindow,
+        async begin() {
+            const invocation = f.invoke(entry, 'new');
+            const modal = await until(() => f.opened.find((m): m is InstanceType<typeof SessionCloseModal> => m instanceof SessionCloseModal));
+            return { modal, done: Promise.all([invocation, action]) };
+        },
+    };
+}
+async function assertRetained(t: ExecutionContext, f: Awaited<ReturnType<typeof sessionFixture>>) {
+    t.is(await f.adapter.read(f.path), f.bytes, 'active transcript retains every byte');
+    t.deepEqual((await f.adapter.list(f.memory.paths.sessionsActive + '/.discarded')).files, []);
+    t.deepEqual((await f.adapter.list(f.memory.paths.sessionsArchive)).files, []);
+    t.is(f.view.rollingWindow, f.originalWindow);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+    t.is(f.view.input_area.value, 'Unsent draft');
+    t.is(f.view.chatTabs[0].sessionPath, f.path);
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+}
+
+for (const entry of ['menu', 'sidebar'] as const) {
+    for (const phase of ['decision', 'confirmation', 'confirmed'] as const) {
+        test.serial(`U5 ${entry}: close during ${phase} cancels new chat and retains transcript and draft`, async t => {
+            const f = await sessionFixture(t, entry);
+            const { modal, done } = await f.begin();
+            t.deepEqual([modal.agentName, modal.messageCount], ['Mira', 2]);
+            if (phase !== 'decision') {
+                modal.contentEl.children[2].children[1].dispatchEvent(new Event('click'));
+                const confirm = await until(() => f.opened.find((m): m is ConfirmModal => m instanceof ConfirmModal));
+                t.is(confirm.opts.destructive, true);
+                if (phase === 'confirmed') confirm.contentEl.children[1].children[1].dispatchEvent(new Event('click'));
+            }
+            const closing = f.view.onClose();
+            t.deepEqual(f.opened.map(m => f.closed.has(m)), phase === 'decision' ? [true] : [true, true]);
+            await closing;
+            await done;
+            await assertRetained(t, f);
+        });
+    }
+    test.serial(`U5 ${entry}: close during pre-save never opens a decision`, async t => {
+        const f = await sessionFixture(t, entry);
+        const entered = deferred(), release = deferred();
+        const read = f.adapter.read;
+        let held = false;
+        f.adapter.read = async path => {
+            if (!held && path === f.path) { held = true; entered.resolve(); await release.promise; }
+            return read(path);
+        };
+        const running = f.invoke(entry, 'new');
+        await entered.promise;
+        const closing = f.view.onClose();
+        release.resolve();
+        await Promise.all([closing, running]);
+        t.deepEqual(f.opened, []);
+        await assertRetained(t, f);
+    });
+    test.serial(`U5 ${entry}: admitted discard finishes storage but never resets the closed view`, async t => {
+        const f = await sessionFixture(t, entry);
+        const entered = deferred(), release = deferred();
+        const write = f.adapter.write;
+        f.adapter.write = async (path, bytes) => {
+            if (path.includes('/.discarded/')) { entered.resolve(); await release.promise; }
+            await write(path, bytes);
+        };
+        const { modal, done } = await f.begin();
+        modal.contentEl.children[2].children[1].dispatchEvent(new Event('click'));
+        const confirm = await until(() => f.opened.find((m): m is ConfirmModal => m instanceof ConfirmModal));
+        confirm.contentEl.children[1].children[1].dispatchEvent(new Event('click'));
+        await entered.promise;
+        const closing = f.view.onClose();
+        release.resolve();
+        await Promise.all([closing, done]);
+        const discarded = f.memory.paths.sessionsActive + '/.discarded/mira_2026-11-13_12-00.md';
+        t.is(await f.adapter.read(discarded), f.bytes);
+        t.deepEqual((await f.adapter.list(f.memory.paths.sessionsActive)).files, []);
+        t.like(JSON.parse(await f.adapter.read(f.memory.paths.state)), { active_sessions: [], last_used: null });
+        t.is(f.memory.activeSessionPath, null);
+        t.is(f.view.rollingWindow, f.originalWindow);
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+        t.is(f.view.input_area.value, 'Unsent draft');
+    });
+    for (const choice of ['discard', 'archive'] as const) {
+        test.serial(`U5 ${entry}: live view completes ${choice} through real buttons`, async t => {
+            const f = await sessionFixture(t, entry);
+            const { modal, done } = await f.begin();
+            modal.contentEl.children[2].children[choice === 'archive' ? 0 : 1].dispatchEvent(new Event('click'));
+            if (choice === 'discard') {
+                const confirm = await until(() => f.opened.find((m): m is ConfirmModal => m instanceof ConfirmModal));
+                confirm.contentEl.children[1].children[1].dispatchEvent(new Event('click'));
+            } else {
+                const review = await until(() => f.opened.find((m): m is InstanceType<typeof SaveSessionModal> => m instanceof SaveSessionModal && m.state === 'proposals'));
+                review.contentEl.querySelector('.pkm-review__actions')!.children[0].dispatchEvent(new Event('click'));
+            }
+            await done;
+            t.deepEqual(f.view.rollingWindow.messages, []);
+            const dir = choice === 'discard' ? f.memory.paths.sessionsActive + '/.discarded' : f.memory.paths.sessionsArchive;
+            const saved = (await f.adapter.list(dir)).files;
+            t.deepEqual(saved, [dir + '/mira_2026-11-13_12-00.md']);
+            t.deepEqual((await (choice === 'discard' ? f.memory.loadActiveSession(saved[0]) : f.memory.loadSession(saved[0]))).messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+            t.deepEqual((await f.adapter.list(f.memory.paths.sessionsActive)).files, []);
+        });
+    }
+    for (const dialog of ['save-loading', 'save-review', 'save-decided', 'open', 'open-decided'] as const) {
+        test.serial(`U5 ${entry}: close cancels ${dialog} without changing the draft or session`, async t => {
+            const f = await sessionFixture(t, entry);
+            const entered = deferred(), release = deferred();
+            const read = f.adapter.read;
+            if (dialog === 'save-loading') f.adapter.read = async path => {
+                if (path === f.memory.paths.brain) { entered.resolve(); await release.promise; }
+                return read(path);
+            };
+            const running = dialog.startsWith('open') ? f.view.handleLoadSession(f.path)
+                : f.view.slashCommands.execute('/save session', { view: f.view, plugin: f.view.plugin });
+            const modal = await until(() => f.opened.find(m => dialog.startsWith('open') ? m instanceof OpenSessionModal
+                : m instanceof SaveSessionModal && (dialog === 'save-loading' || m.state === 'proposals')));
+            if (dialog === 'save-loading') {
+                await entered.promise;
+                t.is((modal as InstanceType<typeof SaveSessionModal>).state, 'loading');
+            }
+            if (dialog === 'save-decided') modal.contentEl.querySelector('.pkm-review__actions')!.children[2].dispatchEvent(new Event('click'));
+            if (dialog === 'open-decided') modal.contentEl.querySelector('.cs-open-session__actions')!.children[1].dispatchEvent(new Event('click'));
+            await f.view.onClose();
+            await running;
+            release.resolve();
+            // Let the non-LLM proposal read return after cancellation as well.
+            await new Promise<void>(resolve => setImmediate(resolve));
+            t.true(f.closed.has(modal));
+            await assertRetained(t, f);
+        });
+    }
+}
+
+for (const stage of ['archive-file', 'clear-before-new', 'new-file'] as const) {
+    test.serial(`U5 archive_new: close during ${stage} preserves the closed window and completes admitted storage`, async t => {
+        const f = await sessionFixture(t, 'sidebar');
+        const entered = deferred(), release = deferred();
+        const write = f.adapter.write;
+        let cleared = 0;
+        f.adapter.write = async (path, bytes) => {
+            if (path === f.memory.paths.activeSessionMeta && bytes === '{}') cleared++;
+            const match = stage === 'archive-file' ? path.startsWith(f.memory.paths.sessionsArchive + '/')
+                : stage === 'clear-before-new' ? path === f.memory.paths.activeSessionMeta && bytes === '{}' && cleared === 2
+                : path.startsWith(f.memory.paths.sessionsActive + '/') && path.endsWith('_2.md');
+            if (match) { entered.resolve(); await release.promise; }
+            await write(path, bytes);
+        };
+        const running = f.view.slashCommands.execute('/save session', { view: f.view, plugin: f.view.plugin });
+        const review = await until(() => f.opened.find((m): m is InstanceType<typeof SaveSessionModal> => m instanceof SaveSessionModal && m.state === 'proposals'));
+        review.contentEl.querySelector('.pkm-review__actions')!.children[2].dispatchEvent(new Event('click'));
+        await entered.promise;
+        // A new draft written after acceptance must survive even the post-archive I/O.
+        f.view.input_area.value = 'Draft during archive';
+        const closing = f.view.onClose();
+        release.resolve();
+        await Promise.all([running, closing]);
+        t.is(f.view.rollingWindow, f.originalWindow);
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+        t.is(f.view.input_area.value, 'Draft during archive');
+        t.is(f.view.chatTabs[0].sessionPath, f.path);
+        const archive = f.memory.paths.sessionsArchive + '/mira_2026-11-13_12-00.md';
+        t.deepEqual((await f.memory.loadSession(archive)).messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+        const next = f.memory.paths.sessionsActive + '/mira_2026-11-13_12-00_2.md';
+        t.deepEqual((await f.adapter.list(f.memory.paths.sessionsActive)).files, stage === 'new-file' ? [next] : []);
+        t.like(JSON.parse(await f.adapter.read(f.memory.paths.state)), {
+            active_sessions: stage === 'new-file' ? ['mira_2026-11-13_12-00_2.md'] : [], archived_since_last_consolidation: 1,
+        });
+        t.is(f.memory.activeSessionPath, stage === 'new-file' ? next : null);
+    });
+}
+
+for (const entry of ['menu', 'sidebar'] as const) {
+    for (const phase of ['eligibility', 'review'] as const) {
+        test.serial(`U5 ${entry}: consolidation ${phase} does not announce success after close`, async t => {
+            const f = await sessionFixture(t, entry);
+            const entered = deferred(), release = deferred();
+            const list = f.memory.getUnconsolidatedSessions.bind(f.memory);
+            if (phase === 'eligibility') f.memory.getUnconsolidatedSessions = async () => {
+                entered.resolve(); await release.promise;
+                return list();
+            };
+            const running = f.invoke(entry, 'consolidate');
+            if (phase === 'eligibility') await entered.promise;
+            else {
+                await until(() => f.opened.find(m => m instanceof SaveSessionModal && m.state === 'proposals'));
+                t.deepEqual(host.notices, ['Consolidating memory...']);
+            }
+            await f.view.onClose();
+            release.resolve();
+            await running;
+            await new Promise<void>(resolve => setImmediate(resolve));
+            t.deepEqual(host.notices, phase === 'review' ? ['Consolidating memory...'] : []);
+            await assertRetained(t, f);
+        });
+    }
 }

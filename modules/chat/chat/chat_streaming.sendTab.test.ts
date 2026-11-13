@@ -1,3 +1,4 @@
+import { closeSessionDecisions } from '../sessionViewLifecycle.js';
 import test from 'ava';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -921,7 +922,7 @@ function closeView(view: unknown): Promise<void> {
     const code = ts.transpile('this._phoneSessionMenuGeneration = 0; this._phoneSessionMenu = null;\n'
         + 'this._dismissPhoneSessionMenu = function () ' + dismiss.body.getText(source) + ';\n'
         + 'function close() ' + method.body.getText(source) + '\nreturn close.call(this);');
-    return new Function(code).call(view);
+    return new Function('closeSessionDecisions', code).call(view, closeSessionDecisions);
 }
 
 function creationGate(f: Awaited<ReturnType<typeof fixture>>, stage: string) {

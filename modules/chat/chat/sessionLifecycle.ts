@@ -2,6 +2,7 @@ import type { ChatTab, ChatViewLike } from './chatViewShape.js';
 import { _tabKey } from './chat_tabs.js';
 import { sendAdmission } from './sendAdmission.js';
 import { resolveOwnerMemory } from './turnOwner.js';
+import { isSessionViewAlive } from '../sessionViewLifecycle.js';
 
 type LifecycleOperation = 'close' | 'new' | 'restore' | `load:${string}`;
 
@@ -38,6 +39,7 @@ export function captureSessionLifecycle(view: ChatViewLike): SessionLifecycleOwn
         epoch: tab ? tab.sessionEpoch ?? null : memory?.sessionEpoch ?? null, id: tab?.sessionId,
         ready: Promise.resolve(), tail: Promise.resolve(), requests: new Map(),
         current() {
+            if (!isSessionViewAlive(view)) return false;
             if (!tab) return view.rollingWindow === window;
             // Publication happens before admission.done (pointer I/O and compression
             // can still be pending). Reconcile before deduplicating another click.

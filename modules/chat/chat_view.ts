@@ -1,4 +1,5 @@
 import { cancelMessageEdit } from './chat/messageEdit.js';
+import { closeSessionDecisions } from './sessionViewLifecycle.js';
 import type { Menu } from 'obsidian';
 /**
  * ChatView — coordinator.
@@ -226,6 +227,7 @@ export class ChatView extends PluginItemView {
     onClose(this: ChatViewLike): Promise<void> | void {
         // Invalidate synchronously, before waiting for send admissions or saving.
         this._phoneSessionMenuClosed = true;
+        closeSessionDecisions(this);
         this._dismissPhoneSessionMenu();
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
         // Odpinamy dostawcę — wyniki zostają w kolejce notifiera do następnego otwarcia.

@@ -2,6 +2,8 @@ import { Notice, type App } from 'obsidian';
 import { SaveSessionWorkflow, CostLog, normalizeUsage } from '../../memory/index.js';
 import type { SaveSessionOutcome, SaveSessionPrep, SessionMessageLike, StreamChatModelLike } from '../../memory/index.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
+import { isSessionViewAlive, promptSessionDecision } from '../sessionViewLifecycle.js';
+import type { SessionViewLifetime } from '../sessionViewLifecycle.js';
 import { createModelForRole } from '../../models/index.js';
 import { startConsolidationRun } from '../consolidationRunner.js';
 import { getLimits } from '../../../config/limits.js';
@@ -60,7 +62,7 @@ interface RollingWindowLike {
     messages?: SessionMessageLike[];
 }
 
-interface SaveSessionView {
+interface SaveSessionView extends SessionViewLifetime {
     app: App;
     chatTabs: ChatTabLike[];
     rollingWindow?: RollingWindowLike;
@@ -166,6 +168,7 @@ export function createSaveSessionCommand(): SaveSessionCommand {
  * @param {{view: Object, plugin: Object}} ctx
  */
 export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = false }: SaveSessionCommandContext): Promise<void> {
+    if (!isSessionViewAlive(view)) return;
     const agentManager = plugin?.agentManager;
     const agentMemory = agentManager?.getActiveMemory?.();
     if (!agentMemory) {
@@ -180,7 +183,7 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
     const onInput = (): void => { draftChanged = true; };
     input?.addEventListener('input', onInput);
     const resetOriginalDraft = (): void => {
-        if (view.chatTabs?.find(tab => tab.isActive) === activeTab
+        if (isSessionViewAlive(view) && view.chatTabs?.find(tab => tab.isActive) === activeTab
             && view.input_area === input && !draftChanged && input?.value === initialDraft) {
             view.resetInputArea?.();
         }
@@ -238,10 +241,11 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
             agentName: activeSession.agentName,
             messageCount: messages.length
         });
-        const decisionPromise = modal.prompt();
+        const decisionPromise = promptSessionDecision(view, modal, { action: 'cancel', notes: [], brainUpdates: [] });
 
         // „Anuluj" anuluje — wyścig decyzji usera ze strzałem do modelu + AbortSignal.
         const prepared = await prepareWithCancel({ workflow, activeSession, modal, decisionPromise, plugin });
+        if (!isSessionViewAlive(view)) return;
         if (prepared.cancelled) {
             resetOriginalDraft();
             return;
@@ -261,7 +265,11 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
         });
 
         const decision = await decisionPromise;
+        if (!isSessionViewAlive(view)) return;
+        // Once admitted, the memory transaction finishes its file/state bookkeeping.
+        // A closing view must never apply its subsequent UI action.
         const result = await workflow.applyDecision(activeSession, prep, decision);
+        if (!isSessionViewAlive(view)) return;
 
         if (result.cancelled) {
             resetOriginalDraft();
@@ -274,6 +282,7 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
         }
         resetOriginalDraft();
         await applyPostArchiveAction(view, plugin, agentMemory, result, path, resetAfterArchive);
+        if (!isSessionViewAlive(view)) return;
         // `applyDecision` (modules/memory) nie przerywa się na padzie
         // jednej notatki — reszta pętli (rebuildBrainIndex, archiveActiveSession) dochodzi do końca,
         // a padnięte pozycje wracają w `result.noteFailures`. Bezwarunkowy Notice „gotowe" zamieniałby
@@ -395,6 +404,7 @@ export async function applyPostArchiveAction(
     closingSessionPath: string | null | undefined,
     resetAfterArchive = false,
 ): Promise<void> {
+    if (!isSessionViewAlive(view)) return;
     // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
     // (`core/security/SessionWriteConsent.ts`) jest kluczowana `origin.sessionPath` - WSZYSTKIE
     // TRZY warianty tej funkcji (`archive`/`archive_new`/`archive_close`) kończą TĘ sesję, więc
@@ -416,7 +426,9 @@ export async function applyPostArchiveAction(
         agentMemory.setActiveSessionIdentity?.(null, null);
         if (!agentMemory.setActiveSessionIdentity) agentMemory.activeSessionPath = null;
         await agentMemory._persistActiveSession?.();
+        if (!isSessionViewAlive(view)) return;
         const newPath = await agentMemory.startActiveSession(agentMemory.agentName);
+        if (!isSessionViewAlive(view)) return;
         if (activeTab) {
             activeTab.sessionPath = newPath;
             activeTab.sessionId = newPath;

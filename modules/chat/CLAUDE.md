@@ -866,6 +866,37 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
 
 ### Cykl życia sesji w zakładce
 
+- **M3 U5: decyzje należą do widoku na obu platformach.**
+  `sessionViewLifecycle.ts` rejestruje wyłącznie `SessionCloseModal`, `SaveSessionModal`
+  i `OpenSessionModal` otwierane przez czat. `onClose` zamyka je synchronicznie jak Anuluj,
+  przed oczekiwaniem na przyjęcia wysyłki i dotychczasowym zapisem wszystkich zakładek.
+  SessionCloseModal zamyka także własne potwierdzenie Odrzuć. Rejestr usuwa uchwyty
+  po rozstrzygnięciu; nie wprowadza drugiej flagi życia widoku. Wspólny predykat czyta
+  istniejące `_phoneSessionMenuClosed` z U3 oraz `env.state === 'disposed'`.
+  `SessionLifecycleOwner.current()` obejmuje teraz zamknięcie widoku, więc istniejące
+  kontrole po await chronią Nową sesję i load także z desktopowego paska. Przepływ
+  `/save session` sprawdza życie po analizie, decyzji, archiwizacji i zapisach nowej
+  sesji, przed resetem szkicu, okna lub tożsamości zakładki.
+- **Granica anulowania U5:** przed wejściem do `discardActiveSession` albo
+  `SaveSessionWorkflow.applyDecision` zamknięcie zatrzymuje decyzję bez skutków.
+  Już przyjęta operacja pamięci kończy zapis pliku, ewidencji i wskaźnika; nie ma
+  rollbacku ani przerywania jej pomiędzy zapisami. Po powrocie nie modyfikuje
+  zamkniętego okna. Analogicznie rozpoczęte `startActiveSession` może dokończyć
+  utworzenie pustej sesji, ale nie przypina jej do zamkniętej zakładki. Końcowy zapis
+  starej zakładki zachowuje dotychczasowe `expectedSession`: po przeniesieniu pliku
+  odmowa pamięci jest logowana, zamiast odtwarzać odrzucony lub zarchiwizowany plik.
+  Wiadomości i szkic pozostają w obiekcie zamkniętego widoku; nie dodajemy trwałego
+  zapisu szkicu ani odzyskiwania po zabiciu procesu Androida.
+- **ConsolidationProgressModal celowo pozostaje niezależny.** Jego właścicielem jest
+  przebieg w `memoryOpsCenter` i `RunController`, a nie ChatView. Decyzje dotyczą
+  przechwyconej pamięci agenta i kroków konsolidacji, bez resetowania RollingWindow
+  lub zakładek. Nie rejestrujemy tego okna do zamykania; jego automatyczne zamknięcie
+  zmieniłoby także politykę wyciszania L1 opisaną w sekcji konsolidacji.
+  Testy U5 w `chat/phoneSessionMenu.test.ts` wykonują produkcyjne przyciski paska
+  desktopu i menu telefonu, trzy okna oraz potwierdzenie Odrzuć. Sprawdzają literalne
+  wiadomości, szkic i bajty aktywnego pliku, decyzję tuż przed zamknięciem, opóźniony
+  zapis, analizę oraz zachowanie otwartego widoku. Testy F7/F8 zachowują wszystkie
+  asercje; ich adaptery ekstrakcji `onClose` dostają nowy produkcyjny helper.
 - **Zamknięcie zakładki czeka na zapis.** `_closeActiveTab` jest `async` i `await`-uje
   `handleSaveSession()` przed usunięciem stanu zakładki i przełączeniem - fire-and-forget
   zapis równolegle z przełączeniem potrafił trafić do pliku już przełączonego agenta albo

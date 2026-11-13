@@ -15,7 +15,7 @@
 import { Modal, type App } from 'obsidian';
 import { SkinManager, UiIcons, setSvgLabel } from '../crystal-soul/index.js';
 import { SvgHelper } from '../crystal-soul/index.js';
-import { confirmModal } from '../ui-components/index.js';
+import { ConfirmModal } from '../ui-components/index.js';
 import { t } from '../../core/i18n/index.js';
 
 type SessionCloseChoice = 'archive' | 'discard' | 'cancel';
@@ -37,6 +37,7 @@ export class SessionCloseModal extends Modal {
     declare agentColor: string;
     declare messageCount: number;
     declare _resolve: SessionCloseResolver | null;
+    private discardConfirmation: ConfirmModal | null = null;
 
     /**
      * @param {App} app
@@ -124,16 +125,20 @@ export class SessionCloseModal extends Modal {
             t('modal.session_close.discard'));
         discardBtn.title = t('modal.session_close.discard_tooltip');
         discardBtn.addEventListener('click', () => {
+            if (!this._resolve || this.discardConfirmation) return;
             void (async () => {
                 const msg = t('modal.session_close.discard_confirm', { count: this.messageCount });
                 // no-alert (wytyczne katalogu Obsidiana): natywny `window.confirm()` blokuje pętlę
-                // zdarzeń i wygląda obco - `confirmModal` z modules/ui-components jest jego
-                // promise'owym zamiennikiem.
-                const confirmed = this.messageCount === 0 || await confirmModal(this.app, {
-                    title: t('modal.session_close.discard_confirm_title'),
-                    message: msg,
-                    destructive: true,
+                // zdarzeń. Trzymamy ConfirmModal, aby zamknąć potwierdzenie razem z rodzicem.
+                const confirmed = this.messageCount === 0 || await new Promise<boolean>(resolve => {
+                    this.discardConfirmation = new ConfirmModal(this.app, {
+                        title: t('modal.session_close.discard_confirm_title'),
+                        message: msg,
+                        destructive: true,
+                    }, resolve);
+                    this.discardConfirmation.open();
                 });
+                this.discardConfirmation = null;
                 if (confirmed) {
                     this._resolveWith('discard');
                 }
@@ -150,6 +155,8 @@ export class SessionCloseModal extends Modal {
     }
 
     onClose(): void {
+        this.discardConfirmation?.close();
+        this.discardConfirmation = null;
         // If modal closed via Escape or clicking outside
         if (this._resolve) {
             const r = this._resolve;

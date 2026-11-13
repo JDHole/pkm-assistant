@@ -1,3 +1,4 @@
+import { closeSessionDecisions } from '../sessionViewLifecycle.js';
 import test from 'ava';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
@@ -127,7 +128,7 @@ for (const close of ['tab', 'new-session', 'view', 'beforeunload', 'plugin-unloa
         const cls = source.statements.find(ts.isClassDeclaration)!;
         const method = cls.members.find(m => ts.isMethodDeclaration(m) && m.name.getText(source) === 'onClose' && m.body) as ts.MethodDeclaration;
         const body = ts.transpile(method.body!.getText(source), { target: ts.ScriptTarget.ES2022 });
-        const run = new Function(`return async function() ${body}`)() as (this: unknown) => Promise<void>;
+        const run = new Function('closeSessionDecisions', `return async function() ${body}`)(closeSessionDecisions) as (this: unknown) => Promise<void>;
         const dismiss = cls.members.find(m => ts.isMethodDeclaration(m) && m.name.getText(source) === '_dismissPhoneSessionMenu') as ts.MethodDeclaration;
         Object.assign(view, {
             _cleanupAskUser() {}, stop_all_turns() {},

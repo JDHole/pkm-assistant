@@ -13,6 +13,7 @@ import { IdleScheduler, sessionMessageId } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
+import { promptSessionDecision } from '../sessionViewLifecycle.js';
 // Jedyny publiczny akt sprzątania pliku todo (`modules/tools`, publiczne drzwi) - patrz
 // `handleNewSession`, gałąź `discard` (BUG C3).
 import { retireTodoFile } from '../../tools/index.js';
@@ -476,7 +477,7 @@ export async function handleNewSession(this: ChatViewLike) {
                 agentName: owner.agentName || 'Agent', agentColor: agent?.color || '', messageCount: msgCount,
             });
             // Do not hold the queue while a dialog waits: Close can invalidate its owner.
-            return { hasMessages: true, decision: modal.prompt() };
+            return { hasMessages: true, decision: promptSessionDecision(this, modal, { choice: 'cancel' }) };
         });
         if (!prepared || !owner.current()) return;
         const { choice } = await prepared.decision || { choice: 'cancel' };
@@ -651,7 +652,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                     sessionTitle: filename.replace(/\.md$/, ''),
                     sessionDate: typeof parsed.metadata?.created === 'string' ? parsed.metadata.created : filename,
                 });
-                return { agentMemory, filename, parsed, decision: modal.prompt() };
+                return { agentMemory, filename, parsed, decision: promptSessionDecision(this, modal, 'cancel') };
             });
             if (!prepared || !owner.current()) return;
             const choice = await prepared.decision;
