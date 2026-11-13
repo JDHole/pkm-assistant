@@ -207,3 +207,18 @@ sprawdzają literalne treści, zestaw przycisków, maskowanie, zamknięcie i abo
 To UI bramki zgody P3; kafelek i pasek delegacji pozostają zakresem P5.
 
 Screenshot approval describes the active note area and model provider; it has no persistent approval button.
+
+## Mobile M1 R1 - ustawienia telefonu
+
+`src/styles.css` pod `body.is-phone` ustawia nawigację nad pełną szerokością treści:
+jeden poziomy, przewijany rząd przycisków o wysokości co najmniej 44 px. Desktop
+i tablet zachowują dwie kolumny. `SettingsRegistry.render` odtwarza cały DOM przy
+każdym kliknięciu, dlatego tylko przy `Platform.isPhone` przewija aktywny przycisk
+do widoku (`nearest`). Sam CSS nie przywraca pozycji po wymianie elementu.
+
+Test `SettingsRegistry.pkmSettingsV2.test.ts` sprawdza render aktywnej sekcji
+i przewinięcie na telefonie oraz brak przewinięcia na desktopie. Pomiar R1 w Chrome
+uruchomił produkcyjny rejestr z atrapą hosta i rozszerzeniami DOM Obsidiana,
+przed/po CSS z bazy M1: 360 i 412 px, kliknięcie ostatniej zakładki, cele dotykowe
+oraz desktop/tablet bez `is-phone`. Wynik R1: treść 78 -> 316 px i 130 -> 368 px (zewnętrzne paddingi po
+22 px); bez `is-phone` wymiary bez zmian. Nie zastępuje testu Androida i klawiatury.

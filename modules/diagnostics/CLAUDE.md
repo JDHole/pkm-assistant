@@ -13,10 +13,12 @@ bo to samodzielna funkcja, a nie infrastruktura core ani część rozmowy.
 - `connection.ts`: jedno żądanie `buildRequest(..., true)` dostawcy przez transport
   z runtimeConfig. Limit 30 s, bez ponowień, narzędzi, promptu agenta i historii.
   Mierzy surowe porcje transportu (także ciało błędu HTTP), a nie tokeny modelu.
-  Dekoder dostawcy rozpoznaje błędy w strumieniu HTTP 200. Treści odpowiedzi nie zapisuje.
+  Dekoder dostawcy rozpoznaje błędy w strumieniu HTTP 200. Sukces wymaga zdarzenia
+  treści/rozumowania albo poprawnego końca, także z `finish()`. HTML, keepalive i obcy JSON
+  dają błąd i18n z zachowaniem liczników porcji i czasów. Treści odpowiedzi nie zapisuje.
 - `ui.ts`: zgoda z dwoma przyciskami 48 px, zamknięcie/abort oznacza odmowę;
   po zapisie Notice i modal z kopiowaniem gotowego, zamaskowanego raportu.
-- `buildInfo.ts`: define `__PKM_BUILD__` z esbuild (hash + UTC), bez builda `dev`.
+- `buildInfo.ts`: define `__PKM_BUILD__` z esbuild (hash + UTC), bez builda `dev`. Watch dopisuje `watch`, ponieważ hash i czas opisują start kontekstu.
 
 ## Decyzje i granice
 
@@ -38,7 +40,9 @@ Pliki mają datę UTC, losowy sufiks i platformę, żeby nie nadpisywać poprzed
 Raport jest allowlistą faktów, nie zrzutem ustawień/logów. Ustawienia służą tylko
 jako słownik sekretów (także nieenumerowalne klucze po odblokowaniu). Redakcja po
 wartości z core idzie przed maską wzorców z core; dodatkowo usuwa krótkie sekrety,
-URL i ścieżki absolutne. Maskowanie obejmuje również cały Markdown przed zapisem.
+e-maile, URL, autoryzację w środku tekstu i ścieżki absolutne, również po interpunkcji.
+Granica ścieżki zachowuje tokeny user-agent, identyfikatory modeli i ścieżki względne
+vaulta. Maskowanie obejmuje również cały Markdown przed zapisem.
 Nie zapisujemy wartości kluczy, nagłówków, próbek szyfru, notatek, rozmów ani nazw plików.
 Brak możliwości opcjonalnych jest pominięciem, nie awarią. Brak wymaganych API
 (structuredClone, at, WebCrypto, strumienie, dekoder, AbortController) jest błędem.
@@ -54,7 +58,8 @@ konfiguracji użytkownika. Nie zmieniamy gitignore vaulta.
 ## Testy
 
 `diagnostics.test.ts`: odczyt raportu z adaptera RAM, kryptografia, awarie rename,
-mkdir, rmdir, brak append, cichy błąd dopisania, izolacja sprzątania, prywatność
+mkdir, rmdir, brak append, cichy błąd dopisania, izolacja sprzątania, literalne fakty
+user-agent/model/build, prywatne błędy adaptera i odpowiedzi dostawcy w całym pliku oraz `report.markdown`, prywatność
 z kluczami nieenumerowalnymi i odmowa bez żądania.
 `connection.test.ts`: prawdziwy FetchStreamTransport z atrapą fetch, dwie porcje,
 jedno krótkie żądanie, 429 bez retry, błąd w HTTP 200, abort.

@@ -20,3 +20,10 @@ test('esbuild define reaches the runtime marker and source execution needs no bu
     t.is(await read(built.code), 'a10ecbd 2026-11-13T12:00:00.000Z');
     t.is(await read(dev.code), 'dev');
 });
+
+test('watch context explicitly marks its startup hash and time as watch', t => {
+    t.is(createBuildMarker(() => 'ea775b9\n', new Date('2026-11-13T07:40:59.306Z'), true),
+        'ea775b9 2026-11-13T07:40:59.306Z watch');
+    t.is(createBuildMarker(() => 'ea775b9\n', new Date('2026-11-13T07:40:59.306Z'), false),
+        'ea775b9 2026-11-13T07:40:59.306Z');
+});

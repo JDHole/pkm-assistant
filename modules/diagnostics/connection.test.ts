@@ -55,3 +55,28 @@ test('aborted probe sends no request and still returns a diagnostic result', asy
     t.is(result.status, 'error'); t.is(requests, 0);
     t.regex(result.detail, /HTTP: Unavailable; chunks: 0;/);
 });
+
+for (const [name, body, expected] of [
+    ['HTML login page', '<html>Login required</html>', 'error'],
+    ['SSE keepalive only', ': keepalive\n\n', 'error'],
+    ['unrecognized JSON frame', 'data: {"login":"required"}\n\n', 'error'],
+    ['model content without sentinel', 'data: {"choices":[{"delta":{"content":"OK"}}]}\n\n', 'ok'],
+    ['valid completion only', 'data: [DONE]\n\n', 'ok'],
+] as const) {
+    test(`HTTP 200 ${name}: success requires a decoded model response`, async t => {
+        const transport = new FetchStreamTransport(async () => new Response(body, { status: 200 }));
+        const result = await probeConnection(CHAT_PROVIDERS.openai, { modelId: 'test', log }, transport,
+            diagnosticRedactor({}), new AbortController().signal);
+        t.is(result.status, expected);
+        t.regex(result.detail, /^HTTP: 200; chunks: 1; first chunk \(ms\): \d+; total \(ms\): \d+; error:/);
+        t.true(result.detail.endsWith(expected === 'ok' ? 'error: None' : 'error: The response is not a model stream'));
+    });
+}
+
+test('NDJSON completion buffered until EOF is recognized by the provider decoder', async t => {
+    const transport = new FetchStreamTransport(async () => new Response('{"done":true}', { status: 200 }));
+    const result = await probeConnection(CHAT_PROVIDERS.ollama, { modelId: 'llama3', log }, transport,
+        diagnosticRedactor({}), new AbortController().signal);
+    t.is(result.status, 'ok');
+    t.regex(result.detail, /^HTTP: 200; chunks: 1; first chunk \(ms\): \d+; total \(ms\): \d+; error: None$/);
+});

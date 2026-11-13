@@ -259,7 +259,7 @@ async function main() {
         treeShaking: true,
         logLevel: 'info',
         banner: { js: buildBanner(pkg) },
-        define: { __PKM_BUILD__: JSON.stringify(createBuildMarker(() => execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))) },
+        define: { __PKM_BUILD__: JSON.stringify(createBuildMarker(() => execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }), new Date(), watchMode)) },
         // Runtime hosta, nie paczka z npm — musi zostac poza bundlem, inaczej wciagnelibysmy
         // caly Obsidian. Lista jest LITERALEM czytanym regexem przez trzech niezaleznych
         // straznikow (core/deps_kontrakt, core/dead_code_zasieg, build_kontrakt) — nie sklejaj

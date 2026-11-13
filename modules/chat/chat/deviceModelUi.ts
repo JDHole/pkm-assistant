@@ -6,7 +6,7 @@ type ModelIdentity = Pick<ChatModel, 'providerId' | 'modelId'>;
 
 /** Input has already passed safeErrorText; append only a static translated hint. */
 export function addDeviceModelHint(text: string, settings: PkmModelSettings | undefined,
-    agent: ResolverAgentLike, selected?: ModelIdentity | null): string {
+    agent: ResolverAgentLike, selected?: ModelIdentity | null, error?: unknown): string {
     if (settings?.useDeviceModels === true) return text;
     const override = agent?.models?.main || agent?.model;
     if (!override) return text;
@@ -18,8 +18,10 @@ export function addDeviceModelHint(text: string, settings: PkmModelSettings | un
     if (!platform || !model) return text;
     const missingKey = !selected && !isLocalPlatform(platform) && !settings?.chat?.apiKeys?.[platform]
         && text.includes('Chat model not configured');
+    const transportFailure = error !== null && typeof error === 'object' && 'code' in error
+        && (error.code === 'transport' || error.code === 'timeout');
     const connectionFailure = selected?.providerId === platform && selected.modelId === model
-        && /failed to fetch|fetch failed|network|ECONNREFUSED|ENOTFOUND|no response|brak połączenia|timeout|timed out/i.test(text);
+        && (transportFailure || /failed to fetch|fetch failed|network|ECONNREFUSED|ENOTFOUND|no response|brak połączenia|timeout|timed out/i.test(text));
     return missingKey || connectionFailure ? `${text}\n\n${t('chat.device_model_hint')}` : text;
 }
 

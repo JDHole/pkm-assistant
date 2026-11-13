@@ -1,5 +1,5 @@
 import type { StreamTransport } from '../../core/index.js';
-import type { ChatProvider, ProviderContext } from '../models/index.js';
+import type { ChatProvider, ProviderContext, StreamEvent } from '../models/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { CheckStatus } from './diagnostics.js';
 
@@ -13,11 +13,16 @@ export async function probeConnection(provider: ChatProvider, context: ProviderC
     const decoder = provider.createStreamDecoder(request, ctx);
     let providerError = '';
     let failure = '';
+    let modelResponse = false;
+    const observe = (events: StreamEvent[]) => {
+        for (const event of events) {
+            if (event.type === 'error') providerError = event.error.message;
+            if (event.type === 'done' || ((event.type === 'text' || event.type === 'reasoning') && event.delta.length > 0)) modelResponse = true;
+        }
+    };
     try {
         const response = await transport.open({ ...provider.buildRequest(request, ctx, true), timeoutMs: 30000 }, {
-            onChunk: text => {
-                for (const event of decoder.feed(text)) if (event.type === 'error') providerError = event.error.message;
-            },
+            onChunk: text => observe(decoder.feed(text)),
             onActivity: activity => {
                 if (activity.kind === 'response') status = activity.status;
                 if (activity.kind === 'chunk') { chunks = activity.chunkIndex; first ??= activity.elapsedMs; }
@@ -25,10 +30,11 @@ export async function probeConnection(provider: ChatProvider, context: ProviderC
         }, signal);
         status = response.status;
         if (status !== 200) failure = response.body || `HTTP ${status}`;
-        for (const event of decoder.finish()) if (event.type === 'error') providerError = event.error.message;
+        observe(decoder.finish());
     } catch (error) { failure = error instanceof Error ? error.message : String(error); }
     failure = providerError || failure;
     if (!failure && chunks === 0) failure = t('diagnostics.empty_stream');
+    if (!failure && !modelResponse) failure = t('diagnostics.invalid_stream');
     return {
         status: failure ? 'error' : 'ok',
         detail: redact(t('diagnostics.connection_result', {

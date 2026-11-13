@@ -6,10 +6,11 @@
  * must not be painted either (no replacement needed: no rule ever existed for it, and the
  * container is a bare wrapper styled by its children's own `setting-item` markup).
  *
- * `SettingsRegistry.ts` has zero imports (no `obsidian`), so this test drives `render()` with a
- * minimal fake DOM element instead of reading source regexes.
+ * `SettingsRegistry.ts` reads the host Platform flag, supplied by the AVA Obsidian stub.
+ * These tests drive `render()` with a minimal fake DOM element instead of source regexes.
  */
 import test from 'ava';
+import { Platform } from 'obsidian';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { SettingsRegistryClass } from './SettingsRegistry.js';
@@ -27,6 +28,8 @@ class FakeEl {
     children: FakeEl[] = [];
     classSet = new Set<string>();
     textContent = '';
+    scrollRequest: ScrollIntoViewOptions | null = null;
+    scrollIntoView(options: ScrollIntoViewOptions): void { this.scrollRequest = options; }
     constructor(tagName = 'div') { this.tagName = tagName; }
     get classList() {
         const set = this.classSet;
@@ -100,3 +103,24 @@ test('SettingsRegistry.ts code does not contain the string pkm-settings-v2', t =
     const source = readFileSync(fileURLToPath(new URL('./SettingsRegistry.ts', import.meta.url)), 'utf8');
     t.false(stripComments(source).includes('pkm-settings-v2'));
 });
+
+
+for (const phone of [true, false]) {
+    test.serial(`settings render preserves active content and reveals its tab only on phone=${phone}`, async t => {
+        const previous = Platform.isPhone;
+        Platform.isPhone = phone;
+        t.teardown(() => { Platform.isPhone = previous; });
+        const registry = new SettingsRegistryClass();
+        registry.register({ id: 'models', label: 'Models', order: 1, render(el) { el.createEl('p', { text: 'Model choices' }); } });
+        registry.register({ id: 'keys', label: 'API keys', order: 2, render(el) { el.createEl('p', { text: 'Provider credentials' }); } });
+        const root = new FakeEl();
+        await registry.render(root as unknown as HTMLElement, fakePlugin, { ...fakeOptions, defaultId: 'keys' });
+        const [nav, content] = root.children[0].children;
+        t.is(content.children[0].textContent, 'Provider credentials');
+        t.deepEqual(nav.children.map(button => ({ label: button.textContent, active: button.classSet.has('is-active'),
+            scroll: button.scrollRequest })), [
+            { label: 'Models', active: false, scroll: null },
+            { label: 'API keys', active: true, scroll: phone ? { block: 'nearest', inline: 'nearest' } : null },
+        ]);
+    });
+}

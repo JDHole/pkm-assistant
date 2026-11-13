@@ -2230,7 +2230,7 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     // → maska → sufit, niezależnie od tego, co robi źródło zdarzenia.
     const modelContext = ownerTabKey ? this._streamCtxMap.get(ownerTabKey) : undefined;
     const safeText = addDeviceModelHint(safeErrorText(error) || 'Unknown error occurred',
-        this.env?.settings?.pkmAssistant, modelContext?.agent as ResolverAgentLike, modelContext?.chatModel);
+        this.env?.settings?.pkmAssistant, modelContext?.agent as ResolverAgentLike, modelContext?.chatModel, error);
     log.error('Chat', 'Chat error:', safeErrorText(error));
 
     // Determine which tab this error belongs to

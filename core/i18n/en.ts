@@ -31,6 +31,7 @@ export const en: Record<string, string> = {
   "diagnostics.cleaned": "Temporary folder removed",
   "diagnostics.declined": "No consent; no request sent",
   "diagnostics.empty_stream": "No stream chunks received",
+  "diagnostics.invalid_stream": "The response is not a model stream",
   "diagnostics.connection_result": "HTTP: {{status}}; chunks: {{chunks}}; first chunk (ms): {{first}}; total (ms): {{total}}; error: {{error}}",
   "diagnostics.none": "None",
   "diagnostics.key_set": "Key set: {{value}}",

@@ -5,6 +5,7 @@
  * shell owns only the tab layout and calls each section renderer.
  */
 import { hostWindow } from '../../core/index.js';
+import { Platform } from 'obsidian';
 import type { PluginApi, SettingsSectionCtx } from '../../core/index.js';
 
 /**
@@ -125,7 +126,11 @@ class SettingsRegistryClass {
                 cls: `pkm-settings-nav__btn ${section.id === activeId ? 'is-active' : ''}`,
             });
             button.textContent = `${section.icon ? section.icon + ' ' : ''}${section.label}`;
-            if (section.id === activeId) button.classList.add('mod-cta');
+            if (section.id === activeId) {
+                button.classList.add('mod-cta');
+                // render() replaces the nav on every click. CSS cannot restore its scroll position.
+                if (Platform.isPhone) button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            }
             button.addEventListener('click', () => {
                 void (async () => {
                     // `hostWindow` - patrz uzasadnienie przy getActiveId() wyżej.

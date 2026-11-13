@@ -2039,3 +2039,10 @@ wyłącznie dla brakującego klucza nadpisania agenta lub rozpoznanego błędu p
 modelu zgodnego z nadpisaniem. Przy włączonej polityce i błędach niezwiązanych
 z modelem tekst się nie zmienia. Nie klasyfikujemy wszystkich błędów dostawców:
 nieznany komunikat lub błąd poza tym mapperem zachowuje oryginalną treść.
+
+R1: `handle_error` przekazuje mapperowi także obiekt błędu. `ChatModel` zachowuje
+publiczny kod `transport`/`timeout`, więc awaria produkcyjnego fetch nie zależy od
+języka komunikatu. Dotychczasowy fallback tekstowy pozostaje dla starszych błędów.
+Testy `chat_streaming.sameAgentTabs.test.ts` wykonują pełne `send_message` przez
+resolver i `FetchStreamTransport` z rzucającym fetch oraz rzeczywisty brak klucza
+agenta; sprawdzają końcowy tekst kafelka z literalną podpowiedzią w PL i EN.

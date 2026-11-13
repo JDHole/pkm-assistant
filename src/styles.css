@@ -851,6 +851,29 @@ button.pkm-settings-nav__btn {
   border-radius: 6px;
 }
 
+/* Phone only: keep the settings section wide enough for descriptions and API keys. */
+body.is-phone .pkm-settings-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+body.is-phone .pkm-settings-nav {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+  position: relative;
+  padding-bottom: 4px;
+}
+body.is-phone button.pkm-settings-nav__btn {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 44px;
+  white-space: nowrap;
+}
+body.is-phone .pkm-settings-content {
+  width: 100%;
+}
+
 /* -- shell/pkm_settings_tab.js: baner onboardingu -- */
 .pkm-onboarding-banner {
   background: var(--background-modifier-border);

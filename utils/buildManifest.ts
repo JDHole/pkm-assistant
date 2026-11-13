@@ -96,9 +96,9 @@ export function pluginDeployDir(vaultPath: string, configDir: string, pluginId: 
 }
 
 /** Build-only helper. Git access is injected by esbuild.js, never shipped to the plugin. */
-export function createBuildMarker(readHash: () => string, date = new Date()): string {
+export function createBuildMarker(readHash: () => string, date = new Date(), watch = false): string {
     let hash = 'dev';
     try { hash = readHash().trim() || 'dev'; }
     catch { /* Source archives and environments without git still build. */ }
-    return `${hash} ${date.toISOString()}`;
+    return `${hash} ${date.toISOString()}${watch ? ' watch' : ''}`;
 }

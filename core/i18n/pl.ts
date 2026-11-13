@@ -31,6 +31,7 @@ export const pl: Record<string, string> = {
   "diagnostics.cleaned": "Folder tymczasowy usunięty",
   "diagnostics.declined": "Brak zgody; nie wysłano żądania",
   "diagnostics.empty_stream": "Nie odebrano żadnej porcji strumienia",
+  "diagnostics.invalid_stream": "Odpowiedź nie jest strumieniem modelu",
   "diagnostics.connection_result": "HTTP: {{status}}; porcje: {{chunks}}; pierwsza porcja (ms): {{first}}; razem (ms): {{total}}; błąd: {{error}}",
   "diagnostics.none": "Brak",
   "diagnostics.key_set": "Klucz ustawiony: {{value}}",

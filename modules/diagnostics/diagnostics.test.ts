@@ -134,3 +134,63 @@ test('redaction precedes truncation and covers URL credentials, encodings and UN
     t.is(redact('connect https://user:pass@host.test/?token=hidden'), 'connect [URL]');
     t.is(redact('error \\\\server\\private\\file.txt'), 'error  [PATH]');
 });
+
+const diagnosticFacts = [
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.135 Mobile Safari/537.36',
+    'anthropic/claude-sonnet-5-5', 'lm_studio/gpt-6-astra-medium',
+    'ea775b9 2026-11-13T07:40:59.306Z', '.pkm-assistant/diagnostics/x-android.md',
+    '412x880', 'HTTP: 200; chunks: 2; first chunk (ms): 1653',
+];
+
+test('redaction preserves literal device facts, including UA slash tokens and relative vault paths', t => {
+    const redact = diagnosticRedactor({});
+    for (const value of diagnosticFacts) t.is(redact(value), value);
+    t.is(redact(diagnosticFacts.join('\n')), diagnosticFacts.join('\n'));
+});
+
+test('redaction masks inline email, authorization schemes and absolute paths without whitespace', t => {
+    const redact = diagnosticRedactor({});
+    for (const [input, expected] of [
+        ['contact kuba@example.com', 'contact [EMAIL]'],
+        ['error Authorization: Bearer abc', 'error [REDACTED]'],
+        ['error Bearer abc', 'error [REDACTED]'],
+        ['error Basic dXNlcjpwYXNz', 'error [REDACTED]'],
+        ['error x-api-key: abc', 'error [REDACTED]'],
+        ['error api-key=abc', 'error [REDACTED]'],
+        ['https://host.test/model?key=abc', '[URL]'],
+        ['ENOENT,/home/kuba/x', 'ENOENT,[PATH]'],
+        ["open '/storage/emulated/0/Documents/Vault/x.md'", "open '[PATH]'"],
+        ['/data/user/0/md.obsidian/files/x', '[PATH]'],
+        ['C:\\Users\\kuba\\x', ' [PATH]'],
+        ['file:///home/kuba/x', '[URL]'],
+    ]) t.is(redact(input), expected);
+});
+
+test('whole saved diagnostic report redacts private adapter errors and real provider responses', async t => {
+    const { FetchStreamTransport } = await import('../../core/index.js');
+    const { CHAT_PROVIDERS } = await import('../models/index.js');
+    const { log } = await import('../../core/utils/Logger.js');
+    const { probeConnection } = await import('./connection.js');
+    const f = fixture();
+    f.input.facts = Object.fromEntries(diagnosticFacts.map((value, i) => [`fact.${i}`, value]));
+    f.adapter.rename = async () => { throw new Error('ENOENT,/home/kuba/private.txt; kuba@example.com; Authorization: Bearer adapter-secret'); };
+    const transport = new FetchStreamTransport(async () => new Response('data: ' + JSON.stringify({ error: {
+        message: 'provider@example.com; open "/storage/emulated/0/Documents/Vault/x.md"; Authorization: Bearer provider-secret',
+    } }) + '\n\n', { status: 200 }));
+    f.input.consent = async () => true;
+    f.input.connection = () => probeConnection(CHAT_PROVIDERS.openai, { modelId: 'test', log }, transport,
+        diagnosticRedactor({}), new AbortController().signal);
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.is(saved, report.markdown);
+    t.is(report.errors, 2);
+    t.regex(saved, /\| fs.rename \| ERROR \| 0 \| ENOENT,\[PATH\]; \[EMAIL\]; \[REDACTED\] \|/);
+    t.regex(saved, /error: \[EMAIL\]; open "\[PATH\]"; \[REDACTED\]/);
+    for (const output of [saved, report.markdown]) {
+        for (const privateValue of ['kuba@example.com', 'provider@example.com', '/home/kuba/private.txt',
+            '/storage/emulated/0/Documents/Vault/x.md', 'Authorization: Bearer', 'adapter-secret', 'provider-secret']) {
+            t.false(output.includes(privateValue), privateValue);
+        }
+        for (const fact of diagnosticFacts) t.true(output.includes(fact), fact);
+    }
+});

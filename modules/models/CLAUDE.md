@@ -415,3 +415,9 @@ argumentu model. Edytory profili zapisują YAML, nie wybór lokalny dla tury.
 
 Testy P2: `deviceModels.test.ts` (literalne modele, delegacja, cache, fallback),
 `SettingsContent.deviceModels.test.ts` (interakcja i zapis przełącznika).
+
+R1: normalizacja `HttpTransportError` zachowuje wyłącznie publiczne kody
+`transport` i `timeout` obok dotychczasowego bezpiecznego komunikatu. Nie przenosi
+`cause`, nagłówków ani danych żądania. Czat używa kodu do podpowiedzi o modelach
+urządzenia, bez dopasowywania zlokalizowanego komunikatu transportu. Sprawdzian
+pełnej ścieżki: `modules/chat/chat/chat_streaming.sameAgentTabs.test.ts`.

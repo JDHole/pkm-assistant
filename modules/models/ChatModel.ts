@@ -302,7 +302,13 @@ function toConsumerError(e: unknown, fallback = 'Stream error (no response)'): N
     if (isSettledError(e)) return e as NormalizedError;
     const text = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
     const safe = maskSensitiveData(text).trim();
-    return normalizeError(safe || fallback);
+    const normalized = normalizeError(safe || fallback);
+    // Preserve only the transport's public reason, never its raw cause or request.
+    if (e instanceof Error && e.name === 'HttpTransportError' && 'code' in e
+        && (e.code === 'transport' || e.code === 'timeout')) {
+        normalized.code = e.code;
+    }
+    return normalized;
 }
 
 export class ChatModel {

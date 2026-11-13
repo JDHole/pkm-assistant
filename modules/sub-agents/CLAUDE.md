@@ -330,7 +330,9 @@ Rama suba czyta budżety z `config/limits.js`, nie hardcody - `_buildTaskPrompt`
 
 - `role: 'worker'` → `createModelForRole(plugin, 'sub_worker', …)` = **model rodzica** (ta sama drabinka co main: `agent.models` → `agent.model` → biblioteka → legacy), zawsze świeża instancja. Dotyczy wbudowanego `aspect:"worker"` **i** custom suba, który ma `role: worker` w `SUB_AGENT.yaml`.
 - wszystko inne (brak roli, `researcher`, `explorer`, dowolna etykieta) → dotychczasowy slot sub-agentów. Zero zmian dla `pkm-sub`, szablonów i istniejących YAML-i.
-- `config.model` z YAML wygrywa w OBU przypadkach - rozstrzyga to `createModelForRole`.
+- `config.model` z YAML wygrywa w OBU przypadkach tylko przy wyłączonym `useDeviceModels` - rozstrzyga to `createModelForRole`.
+
+Kontynuacja istniejącego wątku suba zachowuje model, z którym wystartował, także po włączeniu przełącznika, ponieważ transkrypt jest związany z dostawcą; nowe wątki biorą model urządzenia.
 
 ⚠️ **Rola przestała być czysto opisową etykietą.** Jedna jej wartość - `worker` - steruje wyborem modelu. Reszta pól (narzędzia, prompt, limity) nadal nie zależy od roli. Kto pisze migrację ról, musi o tym wiedzieć.
 

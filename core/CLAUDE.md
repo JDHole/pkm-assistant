@@ -482,3 +482,7 @@ I18n PL/EN dodaje przełącznik, opis, etykietę faktycznego modelu i podpowied�
 `runDeviceDiagnostics` wstrzykiwane przez composition root. Informacje pokazują
 znacznik obok wersji i przycisk komendy; core nie importuje modułu diagnostics.
 I18n PL/EN obejmuje komendę, zgodę, wyniki, kopiowanie i komunikaty błędów.
+
+R1 diagnostyki dodaje w obu słownikach `diagnostics.invalid_stream`: odpowiedź
+HTTP 200 bez zdarzenia modelu jest błędem z czytelnym szczegółem. Sam transport
+HTTP pozostaje bez zmian.

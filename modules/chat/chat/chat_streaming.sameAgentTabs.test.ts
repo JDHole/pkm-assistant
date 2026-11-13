@@ -677,3 +677,42 @@ test.serial('kolejka zgodnego właściciela trafia do jego trwającej tury', asy
     await waitFor(() => !!second); done(second, 'A'); await run; cleanupStreams();
     t.deepEqual(snapshot, { messages: [['user', 'Wiadomość do tury A']], events: [['a.md', 'user_message']], queue: null });
 });
+
+for (const locale of ['en', 'pl'] as const) {
+    for (const failure of ['transport', 'missing-key'] as const) {
+        test.serial(`real send_message ${failure} shows device-model hint in ${locale}`, async t => {
+            const { getLocale, setLocale } = await import('../../../core/i18n/index.js');
+            const { FetchStreamTransport } = await import('../../../core/index.js');
+            const { CHAT_PROVIDERS, clearModelCache } = await import('../../models/index.js');
+            const { get_chat_model } = await import('./chat_model.js');
+            const previous = getLocale(); setLocale(locale);
+            t.teardown(() => { setLocale(previous); clearModelCache(); cleanupStreams(); });
+            clearModelCache();
+            const f = await fixture();
+            const agent = { name: 'Owner', model: failure === 'transport' ? 'ollama/llama3' : 'openai/agent-model' };
+            f.ctx.plugin.agentManager.getActiveAgent = () => agent;
+            f.ctx.plugin.env = f.ctx.env;
+            f.ctx.env.settings.pkmAssistant.chat = { apiKeys: {}, endpoints: { ollama: 'http://localhost:11434' } };
+            f.ctx.env.config = { chat: { providers: CHAT_PROVIDERS,
+                http: { send: async () => { throw new Error('Unexpected non-stream request'); } },
+                transport: new FetchStreamTransport(async () => { throw new TypeError('Failed to fetch'); }),
+            } };
+            f.ctx.get_chat_model = get_chat_model.bind(f.ctx);
+            f.ctx.handle_error = handle_error.bind(f.ctx);
+            f.ctx.messages_container = createDiv();
+            await _restoreActiveSession.call(f.ctx);
+            f.ctx.input_area.value = 'hello';
+            await send_message.call(f.ctx);
+            const details = (el: HTMLElement): string[] => el.className === 'cs-tile__details'
+                ? [el.textContent ?? ''] : Array.from(el.children).flatMap(child => details(child as HTMLElement));
+            const detail = details(f.ctx.messages_container).at(-1);
+            const error = failure === 'transport'
+                ? 'Strumień nie doszedł do skutku: POST http://localhost:11434/api/chat [TypeError]'
+                : 'Chat model not configured. Please configure API key in Settings → PKM Assistant.';
+            const hint = locale === 'en'
+                ? 'If the agent’s model is unavailable on this device, configure the library in Settings > PKM Assistant > Models and enable “Use this device’s models”.'
+                : 'Jeśli model agenta jest niedostępny na tym urządzeniu, skonfiguruj bibliotekę w Ustawieniach > PKM Assistant > Modele i włącz „Modele tego urządzenia”.';
+            t.is(detail, `${locale === 'en' ? 'Error' : 'Błąd'}: ${error}\n\n${hint}`);
+        });
+    }
+}
