@@ -1,5 +1,7 @@
-import { SecretsStorage, ensureAdapterFolder, redactSecretsDeep, normalizeError } from '../../core/index.js';
-import { redactDiagnosticText } from './redaction.js';
+import { SecretsStorage, ensureAdapterFolder } from '../../core/index.js';
+import { capabilities, diagnosticFacts, errorField, field } from './values.js';
+import { connectionDetail, renderDiagnosticMarkdown, secretFilter } from './report.js';
+import type { ConnectionResult } from './connection.js';
 import { t } from '../../core/i18n/index.js';
 import type { DataAdapter } from 'obsidian';
 
@@ -9,12 +11,12 @@ export interface DiagnosticCheck { name: string; status: CheckStatus; ms: number
 export interface DiagnosticInput {
     adapter: DiagnosticAdapter;
     platform: 'android' | 'ios' | 'mobile' | 'desktop';
-    facts: Record<string, string | number | boolean | null>;
+    facts: Record<string, unknown>;
     capabilities: Record<string, boolean>;
     /** Used only as a redaction dictionary, never serialized into the report. */
     settings: unknown;
     consent: () => Promise<boolean>;
-    connection: () => Promise<{ status: CheckStatus; detail: string }>;
+    connection: () => Promise<ConnectionResult>;
     now?: () => number;
     date?: () => Date;
 }
@@ -26,60 +28,43 @@ export interface DiagnosticReport {
     errors: number;
 }
 
-/** Includes non-enumerable hydrated API keys. Never reads notes, conversations or log files. */
-function secretValues(settings: unknown): string[] {
-    const values: string[] = [];
-    const seen = new WeakSet<object>();
-    function visit(value: unknown, sensitive: boolean): void {
-        if (typeof value === 'string') { if (sensitive && value) values.push(value); return; }
-        if (!value || typeof value !== 'object' || seen.has(value)) return;
-        seen.add(value);
-        for (const key of Object.getOwnPropertyNames(value)) {
-            visit(Reflect.get(value, key), sensitive || /key|token|secret|password|authorization|cookie|headers|^env$/i.test(key));
-        }
-    }
-    visit(settings, false);
-    return values.sort((a, b) => b.length - a.length);
-}
-
-export function diagnosticRedactor(settings: unknown): (text: string) => string {
-    const secrets = secretValues(settings);
-    return text => redactDiagnosticText(text, secrets);
-}
+/** Only this internal error gets a fixed verification explanation. */
+class VerificationError extends Error {}
 
 export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<DiagnosticReport> {
     const now = input.now ?? (() => performance.now());
     const date = input.date ?? (() => new Date());
-    const redact = diagnosticRedactor(input.settings);
+    const redact = secretFilter(input.settings);
     const checks: DiagnosticCheck[] = [];
     async function check(name: string, run: () => Promise<string>): Promise<boolean> {
         const start = now();
         try {
             const detail = await run();
-            checks.push({ name, status: 'ok', ms: Math.round(now() - start), detail: redact(detail) });
+            checks.push({ name, status: 'ok', ms: Math.round(now() - start), detail });
             return true;
         } catch (error) {
-            // Redact before normalizeError truncates the message.
-            const message = error instanceof Error ? error.message : normalizeError(redactSecretsDeep(error, secretValues(input.settings))).message;
-            checks.push({ name, status: 'error', ms: Math.round(now() - start), detail: redact(message) });
+            const detail = error instanceof VerificationError ? t('diagnostics.mismatch') : t('diagnostics.local_error', {
+                name: errorField(field(error, 'name')), code: errorField(field(error, 'code')),
+            });
+            checks.push({ name, status: 'error', ms: Math.round(now() - start), detail });
             return false;
         }
     }
     const skipped = (name: string, detail = t('diagnostics.dependency')) => checks.push({ name, status: 'skipped', ms: 0, detail });
-    for (const [name, value] of Object.entries(input.facts)) {
+    for (const [name, value] of diagnosticFacts(input.facts)) {
         if (value === null) skipped(name, t('diagnostics.unavailable'));
-        else await check(name, () => Promise.resolve(String(value)));
+        else await check(name, () => Promise.resolve(value));
     }
-    const required = new Set(['structuredClone', 'Array.prototype.at', 'crypto.subtle', 'ReadableStream', 'TextDecoder', 'AbortController']);
     for (const [name, available] of Object.entries(input.capabilities)) {
-        checks.push({ name, status: available ? 'ok' : required.has(name) ? 'error' : 'skipped', ms: 0, detail: t(available ? 'diagnostics.present' : 'diagnostics.unavailable') });
+        if (!capabilities.has(name)) continue;
+        checks.push({ name, status: available === true ? 'ok' : capabilities.get(name) ? 'error' : 'skipped', ms: 0, detail: t(available === true ? 'diagnostics.present' : 'diagnostics.unavailable') });
     }
     await check('crypto.roundtrip', async () => {
         const vault = new SecretsStorage(null);
         try {
             await vault.unlock('PKM diagnostic test password');
             const encrypted = await vault.encryptWithPassword('PKM diagnostic sample');
-            if (await vault.decryptWithPassword(encrypted) !== 'PKM diagnostic sample') throw new Error(t('diagnostics.mismatch'));
+            if (await vault.decryptWithPassword(encrypted) !== 'PKM diagnostic sample') throw new VerificationError();
             return t('diagnostics.crypto_ok');
         } finally { vault.lock(); }
     });
@@ -92,7 +77,7 @@ export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<Diag
     const nested = `${tmp}/nested`;
     const original = `${nested}/probe.txt`, renamed = `${nested}/renamed.txt`;
     const adapter = input.adapter;
-    const assert = (ok: boolean) => { if (!ok) throw new Error(t('diagnostics.mismatch')); };
+    const assert = (ok: boolean) => { if (!ok) throw new VerificationError(); };
     let created = false;
     try {
         created = await check('fs.mkdir', async () => {
@@ -135,20 +120,15 @@ export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<Diag
         const start = now();
         try {
             const result = await input.connection();
-            checks.push({ name: 'model.connection', ...result, detail: redact(result.detail), ms: Math.round(now() - start) });
-        } catch (error) {
-            checks.push({ name: 'model.connection', status: 'error', detail: redact(error instanceof Error ? error.message : String(error)), ms: Math.round(now() - start) });
+            checks.push({ name: 'model.connection', status: result.status, detail: connectionDetail(result), ms: Math.round(now() - start) });
+        } catch {
+            checks.push({ name: 'model.connection', status: 'error', detail: t('diagnostics.connection.transport'), ms: Math.round(now() - start) });
         }
     } else skipped('model.connection', t('diagnostics.declined'));
     const ok = checks.filter(c => c.status === 'ok').length;
     const errors = checks.filter(c => c.status === 'error').length;
-    const cell = (value: string) => value.replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ').replace(/[<>]/g, '');
-    const markdown = redact([
-        `# ${t('diagnostics.title')}`, '',
-        t('diagnostics.privacy'), '',
-        `| ${t('diagnostics.columns')} |`, '| --- | --- | ---: | --- |',
-        ...checks.map(c => `| ${cell(c.name)} | ${t(`diagnostics.status.${c.status}`)} | ${c.ms} | ${cell(c.detail)} |`), '',
-    ].join('\n'));
+    for (const check of checks) check.detail = redact(check.detail);
+    const markdown = renderDiagnosticMarkdown(checks, redact);
     const path = `${base}/${id}-${input.platform}.md`;
     await ensureAdapterFolder(adapter, base);
     await adapter.write(path, markdown);

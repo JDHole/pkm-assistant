@@ -150,3 +150,11 @@ ustawioną na danym urządzeniu. Default false, również desktop pozostaje bez 
 zachowania do jawnego włączenia. Reguła i wyjątek kontynuacji suba: `modules/models/CLAUDE.md`.
 `src/styles.css` układa opis nowego przełącznika nad kontrolką, bez stałej szerokości;
 etykieta modelu w czacie zawija długie identyfikatory. Dane agentów nie są przepisywane.
+
+## Mobile M1 D1 - diagnostyka z zamkniętego słownika
+
+Composition root przekazuje flagi obecności kluczy jako boolean oraz strukturalny
+wynik połączenia. Moduł diagnostics waliduje nazwy/kształty faktów i składa stałe
+objaśnienia bez komunikatów adaptera lub dostawcy. Zmiana raportu dotyczy obu
+platform zgodnie z D1; zachowanie rozmowy nie zmienia się. Szczegółowy kontrakt
+prywatności i warunki rozszerzania raportu: `modules/diagnostics/CLAUDE.md`.

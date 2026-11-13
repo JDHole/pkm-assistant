@@ -4,6 +4,21 @@
  * {{param}} for interpolation.
  */
 export const pl: Record<string, string> = {
+  "diagnostics.custom_identifier": "niestandardowy identyfikator",
+  "diagnostics.local_error": "Klasa: {{name}}; kod: {{code}}",
+  "diagnostics.connection_kind": "Rodzaj: {{kind}}",
+  "diagnostics.provider_error_type": "Typ błędu dostawcy: {{type}}",
+  "diagnostics.connection.authentication": "Klucz API odrzucony",
+  "diagnostics.connection.not_found": "Nieznany model albo adres",
+  "diagnostics.connection.rate_limit": "Osiągnięto limit",
+  "diagnostics.connection.server": "Awaria dostawcy",
+  "diagnostics.connection.transport": "Brak połączenia albo blokada CORS",
+  "diagnostics.connection.timeout": "Przekroczono czas połączenia",
+  "diagnostics.connection.aborted": "Połączenie przerwane",
+  "diagnostics.connection.http": "Żądanie HTTP nie powiodło się",
+  "diagnostics.connection.provider": "Dostawca zgłosił błąd",
+  "diagnostics.connection.empty_stream": "Nie odebrano żadnej porcji strumienia",
+  "diagnostics.connection.invalid_stream": "Odpowiedź nie jest strumieniem modelu",
   "diagnostics.no_abort_controller": "Test połączenia niedostępny: brak AbortController lub przebieg anulowano.",
   "diagnostics.title": "Diagnostyka urządzenia",
   "diagnostics.run": "Uruchom diagnostykę urządzenia",

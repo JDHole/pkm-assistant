@@ -486,3 +486,8 @@ I18n PL/EN obejmuje komendę, zgodę, wyniki, kopiowanie i komunikaty błędów.
 R1 diagnostyki dodaje w obu słownikach `diagnostics.invalid_stream`: odpowiedź
 HTTP 200 bez zdarzenia modelu jest błędem z czytelnym szczegółem. Sam transport
 HTTP pozostaje bez zmian.
+
+D1 diagnostyki dodaje parzyste teksty PL/EN dla klas/kodów błędów, zastępczego
+identyfikatora i stałych objaśnień połączenia (status HTTP/rodzaj). Komunikaty
+zewnętrzne nie są już interpolowane w raport. Kontrakt zamkniętego słownika jest
+w `modules/diagnostics/CLAUDE.md`; transport i logowanie zwykłego czatu bez zmian.

@@ -4,6 +4,21 @@
  * {{param}} for interpolation.
  */
 export const en: Record<string, string> = {
+  "diagnostics.custom_identifier": "Custom identifier",
+  "diagnostics.local_error": "Class: {{name}}; code: {{code}}",
+  "diagnostics.connection_kind": "Kind: {{kind}}",
+  "diagnostics.provider_error_type": "Provider error type: {{type}}",
+  "diagnostics.connection.authentication": "API key rejected",
+  "diagnostics.connection.not_found": "Unknown model or address",
+  "diagnostics.connection.rate_limit": "Rate limit reached",
+  "diagnostics.connection.server": "Provider unavailable",
+  "diagnostics.connection.transport": "No connection or CORS blocked the request",
+  "diagnostics.connection.timeout": "Connection timed out",
+  "diagnostics.connection.aborted": "Connection aborted",
+  "diagnostics.connection.http": "HTTP request failed",
+  "diagnostics.connection.provider": "Provider reported an error",
+  "diagnostics.connection.empty_stream": "No stream chunks received",
+  "diagnostics.connection.invalid_stream": "The response is not a model stream",
   "diagnostics.no_abort_controller": "Connection test unavailable: AbortController is missing or the run was cancelled.",
   "diagnostics.title": "Device diagnostics",
   "diagnostics.run": "Run device diagnostics",

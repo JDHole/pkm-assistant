@@ -1,5 +1,5 @@
 import test from 'ava';
-import { runDeviceDiagnostics, diagnosticRedactor } from './diagnostics.js';
+import { runDeviceDiagnostics } from './diagnostics.js';
 import type { DiagnosticAdapter, DiagnosticInput } from './diagnostics.js';
 import { setLocale } from '../../core/i18n/index.js';
 
@@ -34,7 +34,7 @@ function fixture() {
         adapter: disk.adapter, platform: 'android', settings: {}, facts: { 'plugin.version': '2.4.1', isMobile: true },
         capabilities: { structuredClone: true, MediaRecorder: false },
         consent: async () => false,
-        connection: async () => { requests++; return { status: 'ok', detail: 'connected' }; },
+        connection: async () => { requests++; return { status: 'ok', httpStatus: 200, chunks: 2, firstChunkMs: 1, totalMs: 2 }; },
         now: () => 10, date: () => new Date('2026-11-13T12:34:56.000Z'),
     };
     return { ...disk, input, requests: () => requests };
@@ -63,27 +63,11 @@ test('rename failure is red in saved Markdown and cleanup still removes all temp
     const f = fixture();
     f.adapter.rename = async () => { throw new Error('rename denied'); };
     const result = await runDeviceDiagnostics(f.input);
-    t.regex(await f.adapter.read(result.path), /\| fs.rename \| ERROR \| 0 \| rename denied \|/);
+    t.regex(await f.adapter.read(result.path), /\| fs.rename \| ERROR \| 0 \| Class: Error; code: unknown \|/);
     t.is(result.errors, 1);
     t.deepEqual(result.checks.find(c => c.name === 'fs.rmdir'), { name: 'fs.rmdir', status: 'ok', ms: 0, detail: 'Temporary folder removed' });
     t.deepEqual([...f.files.keys()], [result.path]);
     t.deepEqual([...f.folders], ['', '.pkm-assistant', '.pkm-assistant/diagnostics']);
-});
-
-test('saved report removes literal, hydrated, encoded and short secrets plus system paths', async t => {
-    const f = fixture();
-    const keys = { openai: 'diagnostic-SECRET-123456', local: 'xyz' };
-    Object.defineProperty(keys, 'anthropic', { value: 'hydrated-SECRET-987654', enumerable: false });
-    f.input.settings = { pkmAssistant: { chat: { apiKeys: keys }, externalMcpServers: [{ headers: { Authorization: 'Bearer mcp-secret-777777' } }] } };
-    f.input.facts['model.default'] = 'openai/test-model';
-    f.input.consent = async () => true;
-    f.input.connection = async () => ({ status: 'error', detail: 'bad diagnostic-SECRET-123456 hydrated-SECRET-987654 xyz Authorization: Bearer mcp-secret-777777\nENOENT /home/private/my vault/keys.txt\nFile C:\\Users\\Kuba\\private.txt' });
-    const result = await runDeviceDiagnostics(f.input);
-    const saved = await f.adapter.read(result.path);
-    t.regex(saved, /\| model.default \| OK \| 0 \| openai\/test-model \|/);
-    t.regex(saved, /\| model.connection \| ERROR/);
-    t.true(saved.includes('[REDACTED]'));
-    for (const value of ['diagnostic-SECRET-123456', 'hydrated-SECRET-987654', 'xyz', 'mcp-secret-777777', '/home/private', 'C:\\Users']) t.false(saved.includes(value), value);
 });
 
 test('declining connection records a skip and sends zero requests', async t => {
@@ -117,7 +101,7 @@ test('cleanup failure remains visible and does not turn the report green', async
     const f = fixture(); f.adapter.rmdir = async () => { throw new Error('rmdir denied'); };
     const result = await runDeviceDiagnostics(f.input);
     t.is(result.errors, 1);
-    t.regex(await f.adapter.read(result.path), /\| fs.rmdir \| ERROR \| 0 \| rmdir denied \|/);
+    t.regex(await f.adapter.read(result.path), /\| fs.rmdir \| ERROR \| 0 \| Class: Error; code: unknown \|/);
 });
 
 test('read-back mismatch is an error even if adapter write resolved', async t => {
@@ -128,69 +112,210 @@ test('read-back mismatch is an error even if adapter write resolved', async t =>
     t.regex(await f.adapter.read(result.path), /\| fs.append \| ERROR \| 0 \| Read-back verification failed \|/);
 });
 
-test('redaction precedes truncation and covers URL credentials, encodings and UNC paths', t => {
-    const redact = diagnosticRedactor({ apiKey: 'odd secret+/value' });
-    t.is(redact('failure odd%20secret%2B%2Fvalue'), 'failure [REDACTED]');
-    t.is(redact('connect https://user:pass@host.test/?token=hidden'), 'connect [URL]');
-    t.is(redact('error \\\\server\\private\\file.txt'), 'error [PATH]');
+
+const privateMessage = 'kuba@example.com /storage/emulated/0/Documents/Mój Vault/prywatna notatka.md '
+    + 'content://documents/Mój%20Vault/prywatna%20notatka.md Cookie: session=abc '
+    + 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz \\Users\\Kuba\\prywatna.md';
+
+test('adapter messages never enter the saved report; class and EACCES survive literally', async t => {
+    const f = fixture();
+    f.adapter.rename = async () => { throw Object.assign(new Error(privateMessage), { code: 'EACCES' }); };
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.is(saved, report.markdown);
+    t.deepEqual(report.checks.find(c => c.name === 'fs.rename'), {
+        name: 'fs.rename', status: 'error', ms: 0, detail: 'Class: Error; code: EACCES',
+    });
+    t.is(report.errors, 1);
+    t.true(saved.includes('| fs.rename | ERROR | 0 | Class: Error; code: EACCES |'));
+    for (const output of [saved, report.markdown, JSON.stringify(report.checks)]) {
+        for (const secret of ['kuba', 'example.com', '/storage', 'content://', 'prywatna', 'Vault', 'session=', 'sk-ant', '\\Users']) t.false(output.includes(secret), secret);
+    }
+    t.deepEqual([...f.files.keys()], [report.path]);
 });
 
-const diagnosticFacts = [
-    'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A.240205.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.135 Mobile Safari/537.36',
-    'anthropic/claude-sonnet-5-5', 'lm_studio/gpt-6-astra-medium',
-    'ea775b9 2026-11-13T07:40:59.306Z', '.pkm-assistant/diagnostics/x-android.md',
-    '412x880', 'HTTP: 200; chunks: 2; first chunk (ms): 1653',
-];
+for (const bad of ['Error private', 'x'.repeat(200), 'Error\n', 'Cookie: session=abc']) {
+    test(`adapter class and code reject invalid shapes: ${JSON.stringify(bad.slice(0, 24))}`, async t => {
+        const f = fixture();
+        f.adapter.rename = async () => { throw { name: bad, code: bad, message: privateMessage }; };
+        const report = await runDeviceDiagnostics(f.input);
+        t.is(report.checks.find(c => c.name === 'fs.rename')?.detail, 'Class: unknown; code: unknown');
+        t.true((await f.adapter.read(report.path)).includes('| fs.rename | ERROR | 0 | Class: unknown; code: unknown |'));
+    });
+}
 
-test('redaction preserves literal device facts, including UA slash tokens and relative vault paths', t => {
-    const redact = diagnosticRedactor({});
-    for (const value of diagnosticFacts) t.is(redact(value), value);
-    t.is(redact(diagnosticFacts.join('\n')), diagnosticFacts.join('\n'));
-});
-
-test('redaction masks inline email, authorization schemes and absolute paths without whitespace', t => {
-    const redact = diagnosticRedactor({});
-    for (const [input, expected] of [
-        ['contact kuba@example.com', 'contact [EMAIL]'],
-        ['error Authorization: Bearer abc', 'error [REDACTED]'],
-        ['error Bearer abc', 'error [REDACTED]'],
-        ['error Basic dXNlcjpwYXNz', 'error [REDACTED]'],
-        ['error x-api-key: abc', 'error [REDACTED]'],
-        ['error api-key=abc', 'error [REDACTED]'],
-        ['https://host.test/model?key=abc', '[URL]'],
-        ['ENOENT,/home/kuba/x', 'ENOENT,[PATH]'],
-        ["open '/storage/emulated/0/Documents/Vault/x.md'", "open '[PATH]'"],
-        ['/data/user/0/md.obsidian/files/x', '[PATH]'],
-        ['C:\\Users\\kuba\\x', '[PATH]'],
-        ['file:///home/kuba/x', '[PATH]'],
-    ]) t.is(redact(input), expected);
-});
-
-test('whole saved diagnostic report redacts private adapter errors and real provider responses', async t => {
+test('HTTP 401 through production transport records type and fixed explanation without the message', async t => {
     const { FetchStreamTransport } = await import('../../core/index.js');
     const { CHAT_PROVIDERS } = await import('../models/index.js');
     const { log } = await import('../../core/utils/Logger.js');
     const { probeConnection } = await import('./connection.js');
     const f = fixture();
-    f.input.facts = Object.fromEntries(diagnosticFacts.map((value, i) => [`fact.${i}`, value]));
-    f.adapter.rename = async () => { throw new Error('ENOENT:/storage/emulated/0/Documents/Moj Vault/prywatna notatka.md\n"kuba"@example.com; ?key=abc; sk-1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'); };
-    const transport = new FetchStreamTransport(async () => new Response('data: ' + JSON.stringify({ error: {
-        message: 'HTTP 404 POST /v1/messages returned invalid model anthropic/claude-sonnet-5-5\n"kuba"@example.com; ?key=private123; sk-ant-api03-1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ; Authorization: Bearer provider-secret',
-    } }) + '\n\n', { status: 200 }));
+    let requests = 0;
+    const transport = new FetchStreamTransport(async () => {
+        requests++;
+        return new Response('{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key sk-ant-SECRET for kuba@example.com"}}', { status: 401 });
+    });
     f.input.consent = async () => true;
-    f.input.connection = () => probeConnection(CHAT_PROVIDERS.openai, { modelId: 'test', log }, transport,
-        diagnosticRedactor({}), new AbortController().signal);
+    f.input.connection = () => probeConnection(CHAT_PROVIDERS.anthropic, { modelId: 'claude-sonnet-5-5', log }, transport, new AbortController().signal);
     const report = await runDeviceDiagnostics(f.input);
     const saved = await f.adapter.read(report.path);
-    t.is(saved, report.markdown);
+    t.is(saved, report.markdown); t.is(requests, 1); t.is(report.errors, 1);
+    t.regex(saved, /\| model.connection \| ERROR \| 0 \| HTTP: 401; chunks: 1; first chunk \(ms\): \d+; total \(ms\): \d+; error: API key rejected; Kind: http; Provider error type: authentication_error \|/);
+    for (const output of [saved, report.markdown]) for (const secret of ['sk-ant', 'kuba', 'example.com', 'x-api-key']) t.false(output.includes(secret), secret);
+});
+
+for (const model of ['private model for kuba@example.com', 'x'.repeat(101), 'valid\n', 'https://host.test?key=abc']) {
+    test(`invalid model ID uses a fixed replacement: ${JSON.stringify(model.slice(0, 24))}`, async t => {
+        const f = fixture(); f.input.facts['model.default'] = `anthropic/${model}`;
+        const report = await runDeviceDiagnostics(f.input);
+        t.is(report.checks.find(c => c.name === 'model.default')?.detail, 'Custom identifier');
+        t.true((await f.adapter.read(report.path)).includes('| model.default | OK | 0 | Custom identifier |'));
+    });
+}
+
+test('facts have a closed set of names and bounded values', async t => {
+    const f = fixture();
+    f.input.facts = {
+        'plugin.version': '2.4.1', 'obsidian.apiVersion': '1.14.5',
+        'plugin.build': 'aaa2cd5 2026-11-13T07:40:59.306Z watch',
+        'navigator.userAgent': 'Mozilla/5.0\nż' + 'A'.repeat(301),
+        'window.size': '412x880', 'vault.configDir': '.obsidian-mobile',
+        'model.default': 'lm_studio/org/model:1.0_test-2', 'provider.openai': true,
+        'plugin.startupMs': Infinity, 'agents.count': -1, 'tools.count': 'secret',
+        'embedding.status': privateMessage, 'isPhone': privateMessage,
+        'provider.private': true, 'private row name': privateMessage,
+    };
+    Object.assign(f.input.capabilities, { 'private capability': true });
+    const report = await runDeviceDiagnostics(f.input);
+    t.deepEqual(report.checks.slice(0, 13).map(c => [c.name, c.status, c.detail]), [
+        ['plugin.version', 'ok', '2.4.1'], ['obsidian.apiVersion', 'ok', '1.14.5'],
+        ['plugin.build', 'ok', 'aaa2cd5 2026-11-13T07:40:59.306Z watch'],
+        ['navigator.userAgent', 'ok', 'Mozilla/5.0' + 'A'.repeat(287)],
+        ['window.size', 'ok', '412x880'], ['vault.configDir', 'ok', '.obsidian-mobile'],
+        ['model.default', 'ok', 'lm_studio/org/model:1.0_test-2'], ['provider.openai', 'ok', 'Key set: Yes'],
+        ['plugin.startupMs', 'skipped', 'Unavailable'], ['agents.count', 'skipped', 'Unavailable'],
+        ['tools.count', 'skipped', 'Unavailable'], ['embedding.status', 'skipped', 'Unavailable'], ['isPhone', 'skipped', 'Unavailable'],
+    ]);
+    t.false(report.markdown.includes('private')); t.false(report.markdown.includes('kuba'));
+});
+
+for (const dir of ['/storage/Vault/.obsidian', 'C:\\Users\\Kuba', 'a'.repeat(65)]) {
+    test(`configDir rejects paths and overlong names: ${dir.slice(0, 24)}`, async t => {
+        const f = fixture(); f.input.facts['vault.configDir'] = dir;
+        const report = await runDeviceDiagnostics(f.input);
+        t.is(report.checks.find(c => c.name === 'vault.configDir')?.detail, 'Unavailable');
+        t.true((await f.adapter.read(report.path)).includes('| vault.configDir | SKIPPED | 0 | Unavailable |'));
+    });
+}
+
+test('short settings secrets preserve report words; long and hydrated secrets are removed exactly', async t => {
+    const f = fixture();
+    const apiKeys = { short: 'conn', long: 'abcdefghijklmnopqrst' };
+    Object.defineProperty(apiKeys, 'hydrated', { value: 'hydrated-secret-12345', enumerable: false });
+    f.input.settings = { apiKeys };
+    f.input.facts['navigator.userAgent'] = 'Engine abcdefghijklmnopqrst hydrated-secret-12345';
+    f.input.facts['model.default'] = 'anthropic/claude-sonnet-5-5';
+    const report = await runDeviceDiagnostics(f.input);
+    for (const line of [
+        '| plugin.version | OK | 0 | 2.4.1 |',
+        '| model.default | OK | 0 | anthropic/claude-sonnet-5-5 |',
+        '| model.connection | SKIPPED | 0 | No consent; no request sent |',
+        '| navigator.userAgent | OK | 0 | Engine [REDACTED] [REDACTED] |',
+    ]) t.is(report.markdown.split('\n').find(row => row === line), line);
+    t.is(await f.adapter.read(report.path), report.markdown);
+});
+
+test('connection exceptions and huge adapter messages cannot become report text', async t => {
+    const f = fixture(); f.input.consent = async () => true;
+    f.input.connection = async () => { throw new Error(privateMessage); };
+    f.adapter.rename = async () => { throw new Error(privateMessage + '/a'.repeat(50000)); };
+    const report = await runDeviceDiagnostics(f.input);
     t.is(report.errors, 2);
-    t.regex(saved, /\| fs.rename \| ERROR \| 0 \| ENOENT:\[PATH\] \[EMAIL\]; \?key=\[REDACTED\]; \[REDACTED\] \|/);
-    t.regex(saved, /error: HTTP 404 POST \/v1\/messages returned invalid model anthropic\/claude-sonnet-5-5 \[EMAIL\]; \?key=\[REDACTED\]; \[REDACTED\]; \[REDACTED\]/);
-    for (const output of [saved, report.markdown]) {
-        for (const privateValue of ['kuba', 'private123', 'abc', 'sk-', 'WXYZ', 'priv***e123',
-            '/storage/emulated/0/Documents/Moj Vault/prywatna notatka.md', 'Authorization: Bearer', 'provider-secret']) {
-            t.false(output.includes(privateValue), privateValue);
-        }
-        for (const fact of diagnosticFacts) t.true(output.includes(fact), fact);
+    t.is(report.checks.find(c => c.name === 'model.connection')?.detail, 'No connection or CORS blocked the request');
+    t.is(report.checks.find(c => c.name === 'fs.rename')?.detail, 'Class: Error; code: unknown');
+    t.is(await f.adapter.read(report.path), report.markdown);
+    t.false(report.markdown.includes('prywatna'));
+});
+
+test('report assembly with 30 settings secrets stays below 50 ms with scheduling headroom', async t => {
+    const { renderDiagnosticMarkdown, secretFilter } = await import('./report.js');
+    const f = fixture();
+    const report = await runDeviceDiagnostics(f.input);
+    const settings = { apiKeys: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String(i), `diagnostic-secret-${i}-1234567890`])) };
+    const durations: number[] = [];
+    let output = '';
+    // Median of warmed batches avoids attributing process scheduling/GC to assembly.
+    for (let batch = 0; batch < 21; batch++) {
+        const start = performance.now();
+        for (let i = 0; i < 10; i++) output = renderDiagnosticMarkdown(report.checks, secretFilter(settings));
+        if (batch > 0) durations.push((performance.now() - start) / 10);
     }
+    const median = durations.sort((a, b) => a - b)[10];
+    t.true(median < 50, `Median assembly: ${median.toFixed(3)} ms`);
+    t.log(`Median assembly with 30 secrets: ${median.toFixed(3)} ms`);
+    t.true(output.includes('| fs.rename | OK | 0 | Verified |'));
+    t.true(output.includes('| model.connection | SKIPPED | 0 | No consent; no request sent |'));
+});
+
+for (const [kind, status, explanation] of [
+    ['http', 401, 'API key rejected'], ['http', 403, 'API key rejected'],
+    ['http', 404, 'Unknown model or address'], ['http', 429, 'Rate limit reached'],
+    ['http', 500, 'Provider unavailable'], ['http', 503, 'Provider unavailable'],
+    ['http', 400, 'HTTP request failed'], ['transport', null, 'No connection or CORS blocked the request'],
+    ['timeout', null, 'Connection timed out'], ['aborted', null, 'Connection aborted'],
+    ['invalid_stream', 200, 'The response is not a model stream'], ['empty_stream', 200, 'No stream chunks received'],
+] as const) {
+    test(`saved connection explanation: ${kind}/${status}`, async t => {
+        const f = fixture(); f.input.consent = async () => true;
+        f.input.connection = async () => ({ status: 'error', kind, httpStatus: status, providerErrorType: null, chunks: 0, firstChunkMs: null, totalMs: 12 });
+        const report = await runDeviceDiagnostics(f.input);
+        const expected = `HTTP: ${status ?? 'Unavailable'}; chunks: 0; first chunk (ms): Unavailable; total (ms): 12; error: ${explanation}; Kind: ${kind}`;
+        t.is(report.checks.find(c => c.name === 'model.connection')?.detail, expected);
+        t.true((await f.adapter.read(report.path)).includes(`| model.connection | ERROR | 0 | ${expected} |`));
+    });
+}
+
+for (const bad of ['contains spaces', 'a'.repeat(200)]) test(`invalid provider type is omitted from the complete report: ${bad.slice(0, 20)}`, async t => {
+    const f = fixture(); f.input.consent = async () => true;
+    f.input.connection = async () => ({ status: 'error', kind: 'http', httpStatus: 401, providerErrorType: bad, chunks: 1, firstChunkMs: 2, totalMs: 3 });
+    const report = await runDeviceDiagnostics(f.input);
+    t.is(report.checks.find(c => c.name === 'model.connection')?.detail,
+        'HTTP: 401; chunks: 1; first chunk (ms): 2; total (ms): 3; error: API key rejected; Kind: http');
+    t.is(await f.adapter.read(report.path), report.markdown);
+    t.false(report.markdown.includes(bad));
+});
+
+test.serial('Polish report uses fixed localized errors and the custom identifier replacement', async t => {
+    setLocale('pl');
+    try {
+        const f = fixture();
+        f.input.facts['model.default'] = 'anthropic/private model';
+        f.adapter.rename = async () => { throw Object.assign(new Error(privateMessage), { code: 'EACCES' }); };
+        f.input.consent = async () => true;
+        f.input.connection = async () => ({ status: 'error', kind: 'http', httpStatus: 401, providerErrorType: 'authentication_error', chunks: 1, firstChunkMs: 2, totalMs: 3 });
+        const report = await runDeviceDiagnostics(f.input);
+        t.is(await f.adapter.read(report.path), report.markdown);
+        for (const expected of [
+            '| model.default | OK | 0 | niestandardowy identyfikator |',
+            '| fs.rename | BŁĄD | 0 | Klasa: Error; kod: EACCES |',
+            '| model.connection | BŁĄD | 0 | HTTP: 401; porcje: 1; pierwsza porcja (ms): 2; razem (ms): 3; błąd: Klucz API odrzucony; Rodzaj: http; Typ błędu dostawcy: authentication_error |',
+        ]) t.is(report.markdown.split('\n').find(line => line === expected), expected);
+    } finally { setLocale('en'); }
+});
+
+test('invalid version, build, window and provider cannot introduce free text', async t => {
+    const f = fixture();
+    f.input.facts = {
+        'plugin.version': privateMessage, 'obsidian.apiVersion': '1.14.5\n',
+        'plugin.build': privateMessage, 'window.size': '412x880 secret',
+        'model.default': 'unknown/test', 'provider.openai': privateMessage,
+    };
+    const report = await runDeviceDiagnostics(f.input);
+    t.deepEqual(report.checks.slice(0, 6).map(c => [c.name, c.status, c.detail]), [
+        ['plugin.version', 'skipped', 'Unavailable'], ['obsidian.apiVersion', 'skipped', 'Unavailable'],
+        ['plugin.build', 'skipped', 'Unavailable'], ['window.size', 'skipped', 'Unavailable'],
+        ['model.default', 'ok', 'Custom identifier'], ['provider.openai', 'skipped', 'Unavailable'],
+    ]);
+    t.is(await f.adapter.read(report.path), report.markdown);
+    t.false(report.markdown.includes('kuba'));
 });

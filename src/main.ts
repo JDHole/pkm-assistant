@@ -14,7 +14,7 @@ const {
   apiVersion,
 } = Obsidian;
 
-import { BUILD_MARKER, runDeviceDiagnostics, diagnosticRedactor, probeConnection, DiagnosticsConsentModal, showDiagnosticReport } from '../modules/diagnostics/index.js';
+import { BUILD_MARKER, runDeviceDiagnostics, probeConnection, DiagnosticsConsentModal, showDiagnosticReport } from '../modules/diagnostics/index.js';
 import { createModelForRole, getModelsForRole } from '../modules/models/index.js';
 import type { ChatProvider, PkmModelSettings, ResolverPluginLike } from '../modules/models/index.js';
 import { PluginRuntime } from '../core/runtime/PluginRuntime.js';
@@ -951,7 +951,6 @@ export default class PkmAssistantPlugin extends PluginBase {
       };
       // Raw engine identification only; all platform decisions use Platform above.
       const { userAgent } = navigator;
-      const redact = diagnosticRedactor(settings);
       const report = await runDeviceDiagnostics({
         adapter: this.app.vault.adapter, settings,
         platform: flags.isAndroidApp ? 'android' : flags.isIosApp ? 'ios' : flags.isMobile ? 'mobile' : 'desktop',
@@ -969,9 +968,7 @@ export default class PkmAssistantPlugin extends PluginBase {
           'model.default': providerId && modelId ? `${providerId}/${modelId}` : null,
           'model.useDeviceModels': pkm?.useDeviceModels === true,
           ...Object.fromEntries(Object.keys(providers).map(id => [
-            `provider.${id}`, t('diagnostics.key_set', { value: t(
-              chat?.apiKeys?.[id] || pkm?.secureStorage?.refs?.[`pkmAssistant.chat.apiKeys.${id}`]
-                ? 'diagnostics.yes' : 'diagnostics.no') }),
+            `provider.${id}`, !!(chat?.apiKeys?.[id] || pkm?.secureStorage?.refs?.[`pkmAssistant.chat.apiKeys.${id}`]),
           ])),
         },
         capabilities: {
@@ -989,13 +986,13 @@ export default class PkmAssistantPlugin extends PluginBase {
           return consentModal.decision;
         },
         connection: async () => {
-          if (!controller || run.cancelled) return { status: 'skipped', detail: t('diagnostics.no_abort_controller') };
+          if (!controller || run.cancelled) return { status: 'skipped', reason: 'no_abort_controller' };
           const provider = providerId ? providers[providerId] : undefined;
-          if (!provider || !modelId) return { status: 'skipped', detail: t('diagnostics.no_model') };
-          if (provider.info.needsApiKey && !chat?.apiKeys?.[provider.info.id]) return { status: 'skipped', detail: t('diagnostics.no_key') };
+          if (!provider || !modelId) return { status: 'skipped', reason: 'no_model' };
+          if (provider.info.needsApiKey && !chat?.apiKeys?.[provider.info.id]) return { status: 'skipped', reason: 'no_key' };
           return probeConnection(provider, {
             modelId, apiKey: chat?.apiKeys?.[provider.info.id], endpoint: chat?.hosts?.[provider.info.id], log,
-          }, this.runtimeConfig.chat.transport, redact, controller.signal);
+          }, this.runtimeConfig.chat.transport, controller.signal);
         },
       });
       if (!run.cancelled) showDiagnosticReport(this.app, report);
