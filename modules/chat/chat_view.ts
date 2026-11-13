@@ -1,4 +1,5 @@
 import { cancelMessageEdit } from './chat/messageEdit.js';
+import type { Menu } from 'obsidian';
 /**
  * ChatView — coordinator.
  * Imports method modules from chat/ and wires them onto the prototype.
@@ -80,6 +81,9 @@ export class ChatView extends PluginItemView {
     declare _activeTodoState: TodoState | null;
     declare _prevTodoModel: TodoPanelModel | null;
     declare _bottomBarMode: BottomBarMode;
+    declare _phoneSessionMenu: Menu | null;
+    declare _phoneSessionMenuGeneration: number;
+    declare _phoneSessionMenuClosed: boolean;
 
     // ── Metody mixinów wołane z KONSTRUKTORA (reszta jedzie przez `ChatViewLike`) ──
     declare _createRollingWindow: (agentName?: string | null) => RollingWindow;
@@ -99,6 +103,9 @@ export class ChatView extends PluginItemView {
 
     constructor(leaf: unknown, plugin: ChatPlugin) {
         super(leaf, plugin);
+        this._phoneSessionMenu = null;
+        this._phoneSessionMenuGeneration = 0;
+        this._phoneSessionMenuClosed = false;
 
         // Initialize RollingWindow (summarizer attached later when model available)
         this.rollingWindow = this._createRollingWindow();
@@ -177,6 +184,7 @@ export class ChatView extends PluginItemView {
     }
 
     async onOpen(this: ChatViewLike) {
+        this._phoneSessionMenuClosed = false;
         if (!this.plugin._ready) {
             this.container.empty();
             this.container.addClass('pkm-chat-view');
@@ -216,6 +224,9 @@ export class ChatView extends PluginItemView {
     // wiadomości; dopiero potem niszczymy UI i zapisujemy wszystkie zakładki.
     onClose(this: ChatViewLike): Promise<void>;
     onClose(this: ChatViewLike): Promise<void> | void {
+        // Invalidate synchronously, before waiting for send admissions or saving.
+        this._phoneSessionMenuClosed = true;
+        this._dismissPhoneSessionMenu();
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
         // Odpinamy dostawcę — wyniki zostają w kolejce notifiera do następnego otwarcia.
         this.plugin?.subTaskNotifier?.setDeliverer?.(null);
@@ -292,6 +303,13 @@ export class ChatView extends PluginItemView {
         };
         const admission = this._waitForSendAdmissions?.();
         return admission ? admission.then(finishClose) : finishClose();
+    }
+
+    _dismissPhoneSessionMenu() {
+        this._phoneSessionMenuGeneration++;
+        const menu = this._phoneSessionMenu;
+        this._phoneSessionMenu = null;
+        menu?.close();
     }
 
     _subscribeAgentManagerEvents(this: ChatViewLike) {

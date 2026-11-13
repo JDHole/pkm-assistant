@@ -28,6 +28,7 @@ const tabSwitches = new WeakMap<ChatViewLike, object>();
  * Called once in renderView.
  */
 export function _initTabs(this: ChatViewLike) {
+    if (Platform.isPhone) this._dismissPhoneSessionMenu();
     const activeAgent = this.plugin?.agentManager?.getActiveAgent();
     const activeAgentName = activeAgent?.name || 'Jaskier';
 
@@ -56,6 +57,7 @@ export function _initTabs(this: ChatViewLike) {
  * Render the tab bar (replaces old pkm-chat-header).
  */
 export function _renderTabBar(this: ChatViewLike, container: HTMLElement) {
+    if (Platform.isPhone) this._dismissPhoneSessionMenu();
     container.empty();
     const topbar = container.createDiv({ cls: 'cs-chat-topbar cs-root' });
     const activeAgentColor = this._getAgentColor();
@@ -101,8 +103,15 @@ export function _renderTabBar(this: ChatViewLike, container: HTMLElement) {
             attr: { type: 'button', 'aria-label': t('chat.session_menu'), 'aria-haspopup': 'menu' },
         });
         button.addEventListener('click', (event: MouseEvent) => {
+            // A detached button cannot resurrect a menu for an old topbar.
+            if (this._phoneSessionMenuClosed || this._tabBarContainer !== container || container.firstChild !== topbar) return;
+            this._dismissPhoneSessionMenu();
+            const generation = this._phoneSessionMenuGeneration;
+            const isCurrent = () => !this._phoneSessionMenuClosed
+                && this._phoneSessionMenuGeneration === generation
+                && container.firstChild === topbar;
             void import('./phoneSessionMenu.js').then(({ showPhoneSessionMenu }) => {
-                showPhoneSessionMenu(this, event);
+                if (isCurrent()) this._phoneSessionMenu = showPhoneSessionMenu(this, event, isCurrent);
             }).catch((error: unknown) => log.error('Chat', 'Session menu failed:', error));
         });
     }

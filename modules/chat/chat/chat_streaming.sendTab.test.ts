@@ -914,7 +914,13 @@ function closeView(view: unknown): Promise<void> {
     if (!klass || !ts.isClassDeclaration(klass)) throw new Error('ChatView missing');
     const method = klass.members.find(m => ts.isMethodDeclaration(m) && m.name.getText(source) === 'onClose' && m.body);
     if (!method || !ts.isMethodDeclaration(method) || !method.body) throw new Error('onClose missing');
-    const code = ts.transpile('function close() ' + method.body.getText(source) + '\nreturn close.call(this);');
+    const dismiss = klass.members.find(m => ts.isMethodDeclaration(m) && m.name.getText(source) === '_dismissPhoneSessionMenu');
+    if (!dismiss || !ts.isMethodDeclaration(dismiss) || !dismiss.body) throw new Error('menu cleanup missing');
+    // This partial view bypasses the constructor. Wire the new production cleanup too;
+    // the dedicated menu tests exercise the complete ChatView with an open native menu.
+    const code = ts.transpile('this._phoneSessionMenuGeneration = 0; this._phoneSessionMenu = null;\n'
+        + 'this._dismissPhoneSessionMenu = function () ' + dismiss.body.getText(source) + ';\n'
+        + 'function close() ' + method.body.getText(source) + '\nreturn close.call(this);');
     return new Function(code).call(view);
 }
 

@@ -4,28 +4,20 @@ import { Platform, Modal } from 'obsidian';
 import { setLocale } from '../../../core/i18n/index.js';
 import { AgentMemory } from '../../memory/index.js';
 import { SvgHelper } from '../../crystal-soul/index.js';
+import { log } from '../../../core/utils/Logger.js';
 import type { ChatViewLike } from './chatViewShape.js';
 
-// Only the native host boundary is replaced. Harness is read-only and has no Menu.
+// Reuse the harness Menu, including its opened/close lifecycle. Only record events/notices.
 const hostSource = `
 export * from 'obsidian';
-import { Notice as BaseNotice } from 'obsidian';
+import { Notice as BaseNotice, Menu as BaseMenu } from 'obsidian';
 export const notices = [], menus = [];
+export const getOpenMenus = () => BaseMenu.opened;
 export class Notice extends BaseNotice {
     constructor(message, timeout) { super(message, timeout); notices.push(message); }
 }
-export class Menu {
-    items = [];
-    addItem(build) {
-        const item = { title: '', icon: '', disabled: false,
-            setTitle(value) { this.title = value; return this; },
-            setIcon(value) { this.icon = value; return this; },
-            setDisabled(value) { this.disabled = value; return this; },
-            onClick(value) { this.choose = value; return this; } };
-        build(item); this.items.push(item); return this;
-    }
-    addSeparator() { this.items.push('separator'); return this; }
-    showAtMouseEvent(event) { this.event = event; menus.push(this); return this; }
+export class Menu extends BaseMenu {
+    showAtMouseEvent(event) { this.event = event; menus.push(this); return super.showAtMouseEvent(event); }
 }`;
 const hostUrl = 'data:text/javascript,' + encodeURIComponent(hostSource);
 register('data:text/javascript,' + encodeURIComponent(`
@@ -38,9 +30,11 @@ export async function load(url, context, next) {
     if (url.endsWith('.css')) return { format: 'module', source: 'export default {}', shortCircuit: true };
     return next(url, context);
 }`));
-type Item = { title: string; icon: string; disabled: boolean; choose(): Promise<void> | void };
-type HostMenu = { items: (Item | 'separator')[]; event: Event };
-const host = await import('obsidian') as unknown as typeof import('obsidian') & { menus: HostMenu[]; notices: string[] };
+type Item = { title: string; icon: string; disabled: boolean; callback(): Promise<void> | void };
+type HostMenu = { items: (Item | 'separator')[]; event: Event; close(): void };
+const host = await import('obsidian') as unknown as typeof import('obsidian') & {
+    menus: HostMenu[]; notices: string[]; getOpenMenus(): HostMenu[];
+};
 const { ChatView } = await import('../chat_view.js');
 const { SessionCloseModal } = await import('../SessionCloseModal.js');
 const { SaveSessionModal } = await import('../SaveSessionModal.js');
@@ -100,6 +94,7 @@ async function until<T>(read: () => T | undefined): Promise<T> {
 async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
     Platform.isPhone = platform === 'phone'; Platform.isMobile = platform !== 'desktop'; setLocale(locale);
     host.notices.length = 0; host.menus.length = 0;
+    for (const menu of host.getOpenMenus()) menu.close();
     const div = globalThis.createDiv;
     globalThis.createDiv = ((...args: Parameters<typeof createDiv>) => browserEvents(div(...args))) as typeof createDiv;
     const windowEvents = new EventTarget();
@@ -132,6 +127,7 @@ async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
     browserEvents(view.container);
     await view.renderView();
     t.teardown(() => {
+        view._dismissPhoneSessionMenu();
         view.attachmentManager?.destroy(); view.mentionAutocomplete?.destroy(); view._tokenViewer?.closePopover();
         view._closeTriggerPopup();
         Modal.prototype.open = open; Modal.prototype.close = close; SvgHelper.toElement = svg;
@@ -152,7 +148,7 @@ async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
         if (entry === 'menu') {
             const item = (await menu()).items[menuIndex[id]];
             if (item === 'separator') throw new Error('Expected menu action');
-            if (!item.disabled) await item.choose();
+            if (!item.disabled) await item.callback();
         } else {
             grid().children[sidebarIndex[id]].dispatchEvent(new Event('click'));
         }
@@ -318,5 +314,87 @@ for (const [section, marker] of [['skills', '@@skill:daily'], ['sub-agents', '@s
         row.dispatchEvent(new Event('mousedown', { cancelable: true }));
         t.is(f.view.input_area.value, marker + ' ');
         t.is(popup.isOpen(), false);
+    });
+}
+
+test.serial('U3 closing ChatView closes its menu before pending admission and ignores stale actions', async t => {
+    const f = await fixture(t);
+    await f.view.rollingWindow.addMessage('user', 'Keep the closed conversation.');
+    const menu = await f.menu();
+    t.deepEqual(host.getOpenMenus(), [menu]);
+    let finish!: () => void;
+    f.view._waitForSendAdmissions = () => new Promise<void>(resolve => { finish = resolve; });
+    const closing = f.view.onClose();
+    try {
+        t.is(host.getOpenMenus().length, 0);
+        // Even a retained native callback cannot close the conversation or open UI.
+        for (const index of [2, 7, 8]) await (menu.items[index] as Item).callback();
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Keep the closed conversation.']);
+        t.is(f.view.container.querySelector('.cs-token-popover'), null);
+        t.is(f.view.container.querySelector('.pkm-trigger-picker'), null);
+    } finally { finish(); await closing; }
+    t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content),
+        ['Keep the closed conversation.']);
+});
+
+for (const rebuild of ['init', 'topbar', 'view'] as const) {
+    test.serial(`U3 ${rebuild} rebuild dismisses the old menu and invalidates its actions`, async t => {
+        const f = await fixture(t);
+        await f.view.rollingWindow.addMessage('user', 'Still the current conversation.');
+        const menu = await f.menu();
+        t.deepEqual(host.getOpenMenus(), [menu]);
+        if (rebuild === 'init') f.view._initTabs();
+        else if (rebuild === 'topbar') f.view._renderTabBar(f.view._tabBarContainer!);
+        else await f.view.renderView();
+        t.is(host.getOpenMenus().length, 0);
+        await (menu.items[2] as Item).callback();
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Still the current conversation.']);
+        const current = await f.menu();
+        await (current.items[2] as Item).callback();
+        t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content),
+            ['Still the current conversation.']);
+        t.deepEqual(f.view.rollingWindow.messages, []);
+    });
+}
+
+for (const boundary of ['close', 'rebuild'] as const) {
+    test.serial(`U3 lazy menu import cannot open after ${boundary}`, async t => {
+        const f = await fixture(t);
+        const previous = await f.menu();
+        t.deepEqual(host.getOpenMenus(), [previous]);
+        const button = f.view.container.querySelector('.cs-chat-menu')!;
+        // import().then always yields, even when the module is already cached.
+        button.dispatchEvent(new Event('click'));
+        if (boundary === 'close') await f.view.onClose();
+        else await f.view.renderView();
+        await import('./phoneSessionMenu.js');
+        await new Promise<void>(resolve => setImmediate(resolve));
+        button.dispatchEvent(new Event('click')); // Detached/closed entry is inert too.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        t.deepEqual(host.menus, [previous]);
+        t.is(host.getOpenMenus().length, 0);
+        if (boundary === 'rebuild') {
+            const current = await f.menu();
+            t.deepEqual(host.getOpenMenus(), [current]);
+        }
+    });
+}
+
+for (const entry of ['menu', 'sidebar'] as const) {
+    test.serial(`U3 ${entry}: close failure is caught and logged, retaining the conversation`, async t => {
+        const f = await fixture(t);
+        await f.view.rollingWindow.addMessage('user', 'Retain on close failure.');
+        const warnings: unknown[][] = [];
+        const warn = log.warn;
+        log.warn = (...args) => { if (args[0] === 'Chat') warnings.push(args); };
+        t.teardown(() => { log.warn = warn; });
+        // Real close handler reaches this boundary after capturing the active session.
+        f.view._createRollingWindow = () => { throw new Error('close failed'); };
+        await f.invoke(entry, 'close');
+        await until(() => warnings.length ? true : undefined);
+        t.deepEqual(warnings, [['Chat', 'Close tab failed: close failed']]);
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Retain on close failure.']);
+        t.deepEqual((await f.memory.loadActiveSession(f.memory.activeSessionPath!)).messages.map(m => m.content),
+            ['Retain on close failure.']);
     });
 }

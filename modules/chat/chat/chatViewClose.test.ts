@@ -23,6 +23,9 @@ test('onClose zamyka trigger popup', async t => {
     const body = extractBody(source, 'onClose(this: ChatViewLike): Promise<void> | void {');
     let closeCalls = 0;
     const host = {
+        _phoneSessionMenuGeneration: 0,
+        _phoneSessionMenu: null,
+        _dismissPhoneSessionMenu: new Function(extractBody(source, '_dismissPhoneSessionMenu() {')),
         plugin: { subTaskNotifier: { setDeliverer() {} } },
         _unwireSubTaskStrip: null,
         _unsubscribeSkinEvents: null,

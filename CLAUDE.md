@@ -165,4 +165,3 @@ Wygląd telefonu jest ograniczony do `body.is-phone` / `Platform.isPhone` w modu
 chat. `_checkEmbeddingProviderConfigured` pomija notice na `Platform.isMobile`,
 zgodnie z bezwarunkowym `disabled_mobile` w inicjalizacji VaultIndexer; desktopowy
 komunikat pozostaje bez zmian. Test obu języków i platform: `src/main.mobile.test.ts`.
-Pomiary i ograniczenia weryfikacji: [raport U1](audyt/mobile-m3-u1.md).

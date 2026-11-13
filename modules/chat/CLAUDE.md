@@ -2069,8 +2069,12 @@ mieszczą się jednocześnie. Popovery kotwiczą na panelu, poza clippingiem prz
 przyciski-anchor mają `position: static` i brak transformacji również po hover/active.
 Ukrywana jest tylko bezpośrednia etykieta autonomii, nie napisy w popoverach.
 
-Akcje dymków są stale widoczne w normalnym przepływie, z opacity 0.7; nie zasłaniają
-tekstu sąsiedniego dymka. `_renderUserText` nadal tworzy bezpieczne węzły tekstowe
+Akcje dymków są stale widoczne, wyrównane do prawej, bez wypełnienia i cienia.
+U3 zachowuje cele 44x44 px, z ikoną 18 px i opacity 0.55. Marginesy pionowe -6 px
+wykorzystują padding dymka i ograniczają dodatkową wysokość rzędu do 32 px.
+Rząd nie zawija przycisków; bez dodatkowych odstępów mieści też piątą akcję,
+godzinę (może zawinąć tekst) i ikonę cache przy szerokości szuflady 300 px.
+`_renderUserText` nadal tworzy bezpieczne węzły tekstowe
 wewnątrz `p`, z osobnymi badge'ami wzmianek. Telefon zachowuje LF przez `pre-wrap`;
 desktopowe Shift+Enter nadal zapisuje LF, lecz zwykły dymek wizualnie skleja linie.
 Menu cytatu nadal nasłuchuje wyłącznie `mouseup`/`keyup`. `selectionchange`/`touchend`
@@ -2078,7 +2082,12 @@ i współpracę z natywnym menu Androida zostawiono następnej paczce zgodnie z 
 
 Testy TS: `chat/chat_ui.mobile.test.ts` (etykiety PL/EN i DOM trzech platform,
 wysyłka wielolinijkowa, rezerwa desktop/tablet i przejście na telefon).
-Pomiary Chrome i granice dowodu: [raport U1](../../audyt/mobile-m3-u1.md).
+
+Tylko telefon łamie długie ciągi w tekście wiadomości (również inline code/strong),
+nagłówkach i treści kafelków oraz etykiecie modelu przez `overflow-wrap: anywhere`.
+Okna sesji dziedziczą tę regułę z `src/styles.css`. `pre` zachowuje formatowanie,
+a `pre` i tabele mają własne przewijanie i `max-width: 100%`; tabela jest blokowym
+obszarem przewijania. Lista wiadomości nie udostępnia poziomego paska przewijania.
 
 ## Telefon: tymczasowe menu rozmowy (M3 U2)
 
@@ -2087,6 +2096,15 @@ ukrytego paska bocznego, do czasu jego przebudowy. Jedyna bramka nowego wejścia
 `Platform.isPhone` w `_renderTabBar`. Przycisk ma i18n `chat.session_menu`, leży
 po prawej wewnątrz topbara, poza przewijaniem zakładek. Desktop i tablet zachowują
 poprzedni DOM. Import menu jest leniwy, przy dotknięciu przycisku.
+
+U3: ChatView trzyma uchwyt menu i pokolenie jego otwarcia. `_initTabs` (również
+przez `renderView`), `_renderTabBar` i `onClose` zamykają menu przez `Menu.close()`
+i unieważniają oczekujący import oraz callbacki akcji. Zamknięcie robi to synchronicznie,
+przed oczekiwaniem na przyjęcie wiadomości i zapis sesji. Nowe kliknięcie zastępuje
+poprzednie menu; odłączony przycisk nie może go otworzyć. Flaga zamknięcia gaśnie
+wyłącznie w `onOpen`. Host sam chowa menu po wyborze; ostatni uchwyt pozostaje
+do następnego otwarcia/przebudowy/zamknięcia, bez zależności od kolejności `onHide`
+i callbacku pozycji natywnego menu.
 
 `chat/sessionActions.ts` jest jedyną definicją pięciu akcji sesji: identyfikator,
 klucz i18n, ikona natywnego menu i dotychczasowa ikona SVG paska, handler, zajętość.
@@ -2111,9 +2129,15 @@ SaveSessionModal ma już grupy pionowe (komentarz o czterech kolumnach jest hist
 Klasa szerokiego archiwum jest współdzielona z shell, więc reguła szerokości konsolidacji
 wymaga potomka `.cs-consolidation-modal` i nie zmienia ArchiveModal.
 
-Testy: `chat/phoneSessionMenu.test.ts` (35 przypadków: trzy platformy i dwa języki,
+Testy: `chat/phoneSessionMenu.test.ts` (43 przypadki: trzy platformy i dwa języki,
 DOM paska, rzeczywiste zapisy/okna, akcje obu wejść, generowanie, błędy, busy,
 artefakty, kontekst, wybór `/`). Dwa wcześniejsze testy czytające źródła dostosowano
 do nowego położenia funkcji, bez osłabiania asercji. Atrapa Menu/Notice i uzupełnienie
-DOM są lokalne dla testu. Harness nie eksportuje jeszcze Menu; proponowany patch
-jest poza repo i nie został nałożony. Dowody i ograniczenia: [raport U2](../../audyt/mobile-m3-u2.md).
+DOM są lokalne dla testu. Menu używa obecnej atrapy harnessu z `opened` i `close()`;
+lokalna podklasa tylko zapisuje zdarzenie otwarcia. U3 sprawdza zamknięcie podczas
+oczekiwania na przyjęcie wiadomości, nieaktywne stare akcje, trzy ścieżki przebudowy,
+import kończący się po zamknięciu/przebudowie oraz identyczny log błędu zamykania
+z menu i paska. Testuje produkcyjne ChatView i rzeczywisty zapis AgentMemory.
+Adaptery częściowego widoku w `chat_streaming.sendTab.test.ts`, `chatViewClose.test.ts`,
+`chat_f7.test.ts` i `chat_f8.test.ts` dołączają także produkcyjne sprzątanie menu
+oraz jego początkowy stan, ponieważ omijają konstruktor.

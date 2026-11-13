@@ -3974,6 +3974,7 @@ body.is-phone .pkm-chat-view .pkm-chat-messages {
   gap: 6px;
   mask-image: none;
   -webkit-mask-image: none;
+  overflow-x: hidden;
 }
 
 body.is-phone .pkm-chat-view .pkm-chat-body { padding: 0; }
@@ -3994,6 +3995,32 @@ body.is-phone .pkm-chat-view .cs-message__text p { margin-block: 0.45em; }
 body.is-phone .pkm-chat-view .cs-message--user .cs-message__text { white-space: pre-wrap; }
 body.is-phone .pkm-chat-view .cs-tile__head { min-width: 44px; min-height: 44px; font-size: 14px; }
 body.is-phone .pkm-chat-view .pkm-device-model-label { font-size: 12px; padding-left: 4px; }
+
+/* Long paths must contribute a small min-content width, including inline code.
+   Preformatted blocks and tables keep their own horizontal scroll surface. */
+body.is-phone .pkm-chat-view :is(.cs-message__text, .cs-tile__head, .cs-tile__body, .pkm-device-model-label) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+body.is-phone .pkm-chat-view :is(.cs-tile__title, .cs-tile__summary, .cs-tile__meta) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+body.is-phone .pkm-chat-view .cs-tile__meta { flex-shrink: 1; }
+body.is-phone :is(.pkm-chat-messages, .cs-session-close-modal, .cs-open-session-modal, .cs-save-session-modal, .cs-consolidation-modal) :is(pre, table) {
+  max-width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+body.is-phone :is(.pkm-chat-messages, .cs-session-close-modal, .cs-open-session-modal, .cs-save-session-modal, .cs-consolidation-modal) pre {
+  white-space: pre;
+}
+body.is-phone :is(.pkm-chat-messages, .cs-session-close-modal, .cs-open-session-modal, .cs-save-session-modal, .cs-consolidation-modal) table {
+  display: block;
+}
 
 /* In-flow panel: its actual height reserves space, even without ResizeObserver.
    Keep overflow visible: mention autocomplete is positioned above the textarea. */
@@ -4067,17 +4094,20 @@ body.is-phone .pkm-chat-view .cs-input-send {
 }
 body.is-phone .pkm-chat-view .cs-input-send svg { width: 22px; height: 22px; transform: none; opacity: 1; }
 
-/* Touch actions are always visible, in flow so they cannot cover nearby text. */
+/* Keep 44px touch targets; use the surrounding padding to add only 32px per row. */
 body.is-phone .pkm-chat-view .cs-message__meta {
   display: flex;
   position: static;
   justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 2px;
+  flex-wrap: nowrap;
+  gap: 0;
+  margin-block: -6px;
   padding: 0;
   border: none;
   background: transparent;
 }
+body.is-phone .pkm-chat-view .cs-message__meta > span { min-width: 0; overflow-wrap: anywhere; }
+body.is-phone .pkm-chat-view .cs-message__meta .cs-cache-savings-badge { margin-left: 0; }
 body.is-phone .pkm-chat-view .cs-message__meta-btn,
 body.is-phone .pkm-chat-view .cs-tile__action {
   min-width: 44px;
@@ -4085,6 +4115,15 @@ body.is-phone .pkm-chat-view .cs-tile__action {
   justify-content: center;
   opacity: 0.7;
 }
+body.is-phone .pkm-chat-view .cs-message__meta-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  opacity: 0.55;
+}
+body.is-phone .pkm-chat-view .cs-message__meta-btn svg { width: 18px; height: 18px; }
 body.is-phone .pkm-chat-view .cs-tile__actions { flex-wrap: wrap; }
 
 /* M3 U2: temporary native session menu, phone only. */

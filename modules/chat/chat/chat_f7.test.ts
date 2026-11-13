@@ -128,7 +128,12 @@ for (const close of ['tab', 'new-session', 'view', 'beforeunload', 'plugin-unloa
         const method = cls.members.find(m => ts.isMethodDeclaration(m) && m.name.getText(source) === 'onClose' && m.body) as ts.MethodDeclaration;
         const body = ts.transpile(method.body!.getText(source), { target: ts.ScriptTarget.ES2022 });
         const run = new Function(`return async function() ${body}`)() as (this: unknown) => Promise<void>;
-        Object.assign(view, { _cleanupAskUser() {}, stop_all_turns() {} });
+        const dismiss = cls.members.find(m => ts.isMethodDeclaration(m) && m.name.getText(source) === '_dismissPhoneSessionMenu') as ts.MethodDeclaration;
+        Object.assign(view, {
+            _cleanupAskUser() {}, stop_all_turns() {},
+            _phoneSessionMenuGeneration: 0, _phoneSessionMenu: null,
+            _dismissPhoneSessionMenu: new Function(ts.transpile(dismiss.body!.getText(source), { target: ts.ScriptTarget.ES2022 })),
+        });
         await run.call(view);
     }
     // Drain actual AgentMemory writes, including fire-and-forget lifecycle calls.

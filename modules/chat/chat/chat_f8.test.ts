@@ -198,6 +198,8 @@ test.serial('F8-3: quit → beforeunload → plugin unload → onClose: jedno zd
         app: { workspace: { on(event: string, callback: typeof quit) { if (event === 'quit') quit = callback; return {}; } } },
         registerEvent() {}, registerInterval(id: number) { window.clearInterval(id); },
         _restoreActiveSession: async () => {}, stop_all_turns() {}, _cleanupAskUser() {},
+        _phoneSessionMenuGeneration: 0, _phoneSessionMenu: null,
+        _dismissPhoneSessionMenu: ChatView.prototype._dismissPhoneSessionMenu,
     });
     await initSessionManager.call(f.view as never);
     const tasks: Promise<unknown>[] = [];
