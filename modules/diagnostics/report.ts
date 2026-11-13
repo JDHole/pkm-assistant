@@ -59,7 +59,7 @@ export function renderDiagnosticMarkdown(checks: DiagnosticCheck[], redact: (tex
     const cell = (value: string) => value.replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ').replace(/[<>]/g, '');
     // Filter before Markdown escaping too, so escaping cannot split a known secret.
     return redact([
-        `# ${t('diagnostics.title')}`, '', t('diagnostics.privacy'), '',
+        `# ${t('diagnostics.title')}`, '', t('diagnostics.privacy'), '', t('diagnostics.startup_explanation'), '',
         `| ${t('diagnostics.columns')} |`, '| --- | --- | ---: | --- |',
         ...checks.map(c => `| ${cell(redact(c.name))} | ${t(`diagnostics.status.${c.status}`)} | ${count(c.ms) ?? 0} | ${cell(redact(c.detail))} |`), '',
     ].join('\n'));

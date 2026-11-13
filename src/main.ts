@@ -14,7 +14,7 @@ const {
   apiVersion,
 } = Obsidian;
 
-import { BUILD_MARKER, runDeviceDiagnostics, probeConnection, DiagnosticsConsentModal, showDiagnosticReport } from '../modules/diagnostics/index.js';
+import { BUILD_MARKER, runDeviceDiagnostics, probeConnection, DiagnosticsConsentModal, showDiagnosticReport, StartupTimer } from '../modules/diagnostics/index.js';
 import { createModelForRole, getModelsForRole } from '../modules/models/index.js';
 import type { ChatProvider, PkmModelSettings, ResolverPluginLike } from '../modules/models/index.js';
 import { PluginRuntime } from '../core/runtime/PluginRuntime.js';
@@ -189,6 +189,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare _api: unknown;
   readonly diagnosticBuildMarker = BUILD_MARKER;
   private diagnosticStartedAt = 0;
+  private diagnosticStartupPhases: StartupTimer | null = null;
   private diagnosticStartupMs: number | null = null;
   private diagnosticController: { abort: () => void } | null = null;
   declare _readyCallbacks: Array<() => void>;
@@ -251,6 +252,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   get api() { return this._api; }
   async onload() {
     this.diagnosticStartedAt = performance.now();
+    this.diagnosticStartupPhases = new StartupTimer(() => performance.now(), this.diagnosticStartedAt);
     log.info('Plugin', `=== PKM Assistant v${this.manifest.version} START ===`);
     log.debug('Plugin', 'onload() - rejestracja komponentów');
     this._ready = false;
@@ -504,6 +506,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   async initialize() {
+    this.diagnosticStartupPhases?.mark('layoutWaitMs');
     const initStart = Date.now();
     log.info('Plugin', 'initialize() START — czekam na runtime...');
 
@@ -544,6 +547,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // Obsidiana. Obejmuje ustawienia, ich kopię zapasową, folder backupów i logi pluginu -
     // pliki sesji pamięci agentów są od tego świadomym wyjątkiem (SECURITY.md).
     await this.ensureGitignoreEntries(VAULT_GITIGNORE_ENTRIES);
+    this.diagnosticStartupPhases?.mark('runtimeMs');
     log.timing('Plugin', 'runtime loaded', initStart);
 
     // Re-check debug mode after env is loaded (settings now available)
@@ -617,6 +621,7 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     this.secretsStorage = new SecretsStorage(this.app);
     await this._unlockSecureStorageAtStartup();
+    this.diagnosticStartupPhases?.mark('secretsMs');
 
     // Apply user color globally
     this.applyUserColor();
@@ -629,6 +634,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       await SkinManager.initialize(this as Parameters<typeof SkinManager.initialize>[0]);
       this.skinManager = SkinManager;
       log.info('Plugin', `SkinManager OK: aktywny skin ${SkinManager.getActiveSkinId()}`);
+      this.diagnosticStartupPhases?.mark('skinMs');
     } catch (e) {
       log.warn('Plugin', 'SkinManager init failed:', e);
     }
@@ -651,6 +657,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';
       log.info('Plugin', `AgentManager OK: ${agentCount} agentów, aktywny: ${activeAgent}`);
+      this.diagnosticStartupPhases?.mark('agentsMs');
     } catch (e) {
       log.error('Plugin', 'AgentManager FAIL:', e);
     }
@@ -868,6 +875,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         // do `.message`, bez zmiany runtime (asercja, nie guard; `?.` zostaje jak było).
         log.warn('Plugin', 'External MCP autostart problem (ignorowane):', (e as { message?: string } | null)?.message);
       }
+      this.diagnosticStartupPhases?.mark('toolsMs');
     } catch (e: unknown) {
       log.error('Plugin', 'MCP system FAIL:', e);
     }
@@ -906,7 +914,9 @@ export default class PkmAssistantPlugin extends PluginBase {
     await this._loadCrystalSoulTheme();
 
     // Signal that plugin is fully initialized
-    this.diagnosticStartupMs = Math.round(performance.now() - this.diagnosticStartedAt);
+    const diagnosticFinishedAt = performance.now();
+    this.diagnosticStartupMs = Math.round(diagnosticFinishedAt - this.diagnosticStartedAt);
+    this.diagnosticStartupPhases?.mark('finishMs', diagnosticFinishedAt);
     this._ready = true;
     for (const cb of this._readyCallbacks) {
       try { cb(); } catch (e) { log.error('Plugin', 'onReady callback error:', e); }
@@ -951,6 +961,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       };
       // Raw engine identification only; all platform decisions use Platform above.
       const { userAgent } = navigator;
+      const startup = this.diagnosticStartupPhases?.snapshot();
       const report = await runDeviceDiagnostics({
         adapter: this.app.vault.adapter, settings,
         platform: flags.isAndroidApp ? 'android' : flags.isIosApp ? 'ios' : flags.isMobile ? 'mobile' : 'desktop',
@@ -959,6 +970,10 @@ export default class PkmAssistantPlugin extends PluginBase {
           ...flags, 'navigator.userAgent': userAgent, 'window.size': `${window.innerWidth}x${window.innerHeight}`,
           'vault.configDir': this.app.vault.configDir,
           'plugin.ready': this._ready, 'plugin.startupMs': this.diagnosticStartupMs,
+          'startup.layoutWaitMs': startup?.layoutWaitMs, 'startup.runtimeMs': startup?.runtimeMs,
+          'startup.secretsMs': startup?.secretsMs, 'startup.skinMs': startup?.skinMs,
+          'startup.agentsMs': startup?.agentsMs, 'startup.toolsMs': startup?.toolsMs,
+          'startup.finishMs': startup?.finishMs,
           'agents.count': this.agentManager?.agents.size ?? null, 'tools.count': this.toolRegistry?.getAllTools().length ?? null,
           'mcp.total': servers?.length ?? null, 'mcp.stdio': servers?.filter(server => server.transport === 'stdio').length ?? null,
           'mcp.http': servers?.filter(server => server.transport === 'http').length ?? null,

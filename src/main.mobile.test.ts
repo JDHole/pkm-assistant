@@ -154,7 +154,7 @@ test.serial('mobile Obsidian App registers state/open with no Electron and repor
 
 for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, { mobile: true, missingAbort: false }, { mobile: true, missingAbort: true }]) test.serial(`device diagnostics composition: ${mobile ? 'mobile' : 'desktop'}, missing AbortController=${missingAbort}`, async t => {
     Platform.isMobile = mobile;
-    const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
+    const { DiagnosticsConsentModal, StartupTimer } = await import('../modules/diagnostics/index.js');
     // The host modal stub does not run lifecycle hooks. Simulate closing the real consent UI.
     mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) { this.onOpen(); this.onClose(); });
     let reportSummary = '';
@@ -184,11 +184,20 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
         chat: { apiKeys: { openai: 'composition-secret-123456' } },
         modelLibrary: { main: [{ platform: 'openai', model: 'test-model', isDefault: true }] }, useDeviceModels: true,
     } };
+    let startupNow = 100;
+    const diagnosticStartupPhases = new StartupTimer(() => startupNow);
+    startupNow = 1100; diagnosticStartupPhases.mark('layoutWaitMs');
+    startupNow = 1120; diagnosticStartupPhases.mark('runtimeMs');
+    startupNow = 1150; diagnosticStartupPhases.mark('secretsMs');
+    startupNow = 1190; diagnosticStartupPhases.mark('skinMs');
+    startupNow = 1240; diagnosticStartupPhases.mark('agentsMs');
+    startupNow = 1300; diagnosticStartupPhases.mark('toolsMs');
+    startupNow = 1334; diagnosticStartupPhases.mark('finishMs');
     const host = {
         app: { vault: { adapter, configDir: '.custom-config', getMarkdownFiles: () => [{}, {}, {}] } },
         manifest: { version: '2.4.1' }, runtimeConfig,
         env: { settings, config: runtimeConfig },
-        _ready: true, diagnosticStartupMs: 1234, diagnosticController: null,
+        _ready: true, diagnosticStartupMs: 1234, diagnosticStartupPhases, diagnosticController: null,
         agentManager: { agents: new Map([['one', {}], ['two', {}]]) },
         toolRegistry: { getAllTools: () => [{}, {}, {}, {}] },
         externalMcpManager: { listServersForUi: () => [{ transport: 'stdio' }, { transport: 'http' }] },
@@ -210,6 +219,18 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
         `| ${mobile ? 'disabled_mobile' : 'ready'} |`, '| openai/test-model |', '| Key set: Yes |',
         '| model.useDeviceModels | OK |', '| model.connection | SKIPPED | 0 | No consent; no request sent |',
     ]) t.true(content.includes(fragment), fragment);
+    // Fact duration is in the last column; the third measures collecting the fact.
+    t.deepEqual(content.split('\n').filter(line => /^\| (startup\.|plugin.startupMs)/.test(line))
+        .map(line => line.replace(/\| OK \| \d+ \|/, '| OK | <collection-ms> |')), [
+        '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+        '| startup.layoutWaitMs | OK | <collection-ms> | 1000 |',
+        '| startup.runtimeMs | OK | <collection-ms> | 20 |',
+        '| startup.secretsMs | OK | <collection-ms> | 30 |',
+        '| startup.skinMs | OK | <collection-ms> | 40 |',
+        '| startup.agentsMs | OK | <collection-ms> | 50 |',
+        '| startup.toolsMs | OK | <collection-ms> | 60 |',
+        '| startup.finishMs | OK | <collection-ms> | 34 |',
+    ]);
     t.regex(content, mobile ? /\| isMobile \| OK \| \d+ \| true \|/ : /\| isMobile \| OK \| \d+ \| false \|/);
     t.false(content.includes('composition-secret-123456'));
     t.is(requests, 0);

@@ -22,6 +22,7 @@ export const en: Record<string, string> = {
   "diagnostics.connection.invalid_stream": "The response is not a model stream",
   "diagnostics.no_abort_controller": "Connection test unavailable: AbortController is missing or the run was cancelled.",
   "diagnostics.title": "Device diagnostics",
+  "diagnostics.startup_explanation": "startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself.",
   "diagnostics.run": "Run device diagnostics",
   "diagnostics.settings_desc": "Save a private device report in your vault. A model connection test requires separate consent.",
   "diagnostics.consent": "Include a connection test? This sends one short test message to your default model provider and may incur a small charge. No notes or conversations are sent. You can save the local report without this test.",

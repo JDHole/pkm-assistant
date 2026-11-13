@@ -8,6 +8,11 @@ Osobny moduł, bo to samodzielna funkcja, nie infrastruktura core ani część r
 - `index.ts`: jedyne drzwi. `runDeviceDiagnostics`, `probeConnection`, `BUILD_MARKER`,
   `DiagnosticsConsentModal`, `showDiagnosticReport`, typy `DiagnosticInput`,
   `DiagnosticReport`, `ConnectionResult`.
+- `StartupTimer.ts`: czysty licznik, eksporty `StartupTimer` i zamknięty typ
+  `StartupPhase`. Konstruktor `(now, startedAt = now())` rozpoczyna pomiar;
+  `mark(phase, at?)` zamyka przedział, `snapshot()` zwraca niezależną migawkę
+  częściowych czasów w ms. Opcjonalne `at` pozwala współdzielić końcową próbkę
+  zegara z dotychczasowym `plugin.startupMs`. Brak Obsidiana, Node oraz I/O.
 - `diagnostics.ts`: sprawdzenia przez wstrzyknięty adapter i migawkę platformy,
   zapis raportu, status/czas/szczegół oraz liczniki. Bez Obsidiana i Node w logice.
 - `values.ts`: zamknięty słownik nazw faktów/możliwości i walidacja ich wartości.
@@ -35,6 +40,10 @@ Dopuszcza wyłącznie poniższe źródła i kształty; nieznane nazwy w `facts` 
   Wzorzec rozmiaru pozostaje celowo: composition root składa go z liczbowych
   `innerWidth/innerHeight`, a granica odrzuca wszelkie dopiski i wolny tekst.
   To ograniczony pomiar wymiarów, nie identyfikator ani pole błędu.
+- Czas całkowity `plugin.startupMs` oraz siedem liczbowych faktów U11:
+  `startup.layoutWaitMs`, `startup.runtimeMs`, `startup.secretsMs`, `startup.skinMs`,
+  `startup.agentsMs`, `startup.toolsMs`, `startup.finishMs`. Ten sam format liczby;
+  brak, string, Infinity i liczba ujemna dają `Unavailable`, obce nazwy są pomijane.
 - Wersje pluginu i API Obsidiana: trzy człony po 1-5 cyfr, opcjonalny sufiks
   `-`/`+` i 1-32 znaków `[A-Za-z0-9.-]`, łącznie do 64 znaków.
 - Build: `dev` albo 7-40 małych cyfr hex, opcjonalnie spacja i czas UTC
@@ -105,6 +114,27 @@ oraz mierzy start od `onload` do `_ready`. Informacje w core dostają build i ca
 przez plugin. Komenda działa także przed pełną gotowością (braki są oznaczone).
 Jeden aktywny bieg na instancję; unload zamyka zgodę i przerywa transport.
 
+U11 mierzy oba urządzenia tym samym zegarem `performance.now()`. `layoutWaitMs`
+biegnie od pierwszej linii `onload` do wejścia w `initialize`: to oczekiwanie na
+Obsidiana, nie czas samej inicjalizacji pluginu (obejmuje też rejestracje w onload
+i ewentualny boot runtime w tle). Kolejne granice następują po:
+`runtimeMs` - migracji folderu, `env.whenLoaded()` i `ensureGitignoreEntries`;
+`secretsMs` - logach, trace, rejestrze subów i odblokowaniu sejfu;
+`skinMs` - kolorze użytkownika i SkinManager;
+`agentsMs` - migracji modeli, sprawdzeniu embeddingu i AgentManager;
+`toolsMs` - ArtifactStore, AccessGuard, uruchomieniu indeksatora bez await,
+narzędziach, draft runtime i całym bloku MCP (w tym await ServerManager);
+`finishMs` - menu, release notes i motywie, przed `_ready`.
+Prace uruchomione w tle nadal nie są oczekiwane przez start. Nie zmieniono
+kolejności wywołań ani obliczenia czasu całkowitego. Suma kompletnych faz jest
+równa `plugin.startupMs` z dokładnością niezależnych zaokrągleń do ms.
+Pierwszy `mark` danej fazy wygrywa: duplikat jest idempotentny i nie przesuwa
+granicy kolejnej fazy. Brak znacznika (także wyjątek przed końcem try SkinManager,
+AgentManager lub MCP) oznacza brak wartości, nigdy zero. Następny znacznik liczy
+czas od ostatniej zapisanej granicy, więc obejmuje również pominięty przedział;
+przy takim raporcie nie można przypisać całego tego czasu tylko kolejnej fazie.
+PL/EN dodają stałe objaśnienie rozdziału oczekiwania na Obsidiana i pracy pluginu.
+
 Kryptografia używa świeżego `SecretsStorage(null)`, testowego hasła/próbki i `lock`
 w finally, bez sejfu użytkownika. Test plików weryfikuje odczyt, append, stat,
 rename/list/remove i sprząta wyłącznie własny `tmp-<id>` w finally. Rekurencyjny
@@ -122,6 +152,12 @@ flagą, nigdy go nie wywołujemy.
 
 ## Testy
 
+- `StartupTimer.test.ts`: literalne czasy i suma, pominięte fazy, duplikaty,
+  zaokrąglenia i nieujemność, wspólne próbki początku/końca oraz izolacja migawki.
+- U11 w `diagnostics.test.ts`: siedem liczb w zapisanym raporcie, odrzucenie
+  string/Infinity/ujemnej/braku, pomijanie obcej nazwy i objaśnienie PL/EN.
+  `src/main.mobile.test.ts`: kontrolowany zegar licznika i literalne wiersze faz
+  przez produkcyjną komendę raportu na desktopie, mobile i bez AbortController.
 - `diagnostics.test.ts`: odczyt pliku z adaptera RAM, kolejność i liczniki,
   kryptografia, awarie rename/mkdir/rmdir, brak append i cichy błąd dopisania,
   izolowane sprzątanie i odmowa bez żądania. D1: prywatny komunikat EACCES znika

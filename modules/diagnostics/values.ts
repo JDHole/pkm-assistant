@@ -73,6 +73,9 @@ const factFormats: Record<string, (value: unknown) => string | null> = {
     // A folder name only. Reject paths rather than salvaging a private basename.
     'vault.configDir': value => shaped(value, /^[A-Za-z0-9._ -]{1,64}$/, 64),
     'plugin.ready': booleanFact, 'plugin.startupMs': numberFact,
+    'startup.layoutWaitMs': numberFact, 'startup.runtimeMs': numberFact,
+    'startup.secretsMs': numberFact, 'startup.skinMs': numberFact,
+    'startup.agentsMs': numberFact, 'startup.toolsMs': numberFact, 'startup.finishMs': numberFact,
     'agents.count': numberFact, 'tools.count': numberFact,
     'mcp.total': numberFact, 'mcp.stdio': numberFact, 'mcp.http': numberFact,
     'embedding.status': value => typeof value === 'string' && ['idle', 'disabled_mobile', 'no_provider', 'building', 'ready', 'error'].includes(value) ? value : null,

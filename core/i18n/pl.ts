@@ -22,6 +22,7 @@ export const pl: Record<string, string> = {
   "diagnostics.connection.invalid_stream": "Odpowiedź nie jest strumieniem modelu",
   "diagnostics.no_abort_controller": "Test połączenia niedostępny: brak AbortController lub przebieg anulowano.",
   "diagnostics.title": "Diagnostyka urządzenia",
+  "diagnostics.startup_explanation": "startup.layoutWaitMs to oczekiwanie na Obsidiana przed inicjalizacją pluginu; pozostałe fazy startu mierzą sam plugin.",
   "diagnostics.run": "Uruchom diagnostykę urządzenia",
   "diagnostics.settings_desc": "Zapisz prywatny raport urządzenia w vaulcie. Test połączenia z modelem wymaga osobnej zgody.",
   "diagnostics.consent": "Dodać test połączenia? Wyśle on jedną krótką wiadomość testową do dostawcy domyślnego modelu i może naliczyć małą opłatę. Nie wysyła notatek ani rozmów. Możesz zapisać raport lokalny bez tego testu.",

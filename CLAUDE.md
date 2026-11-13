@@ -158,6 +158,8 @@ wynik połączenia. Moduł diagnostics waliduje nazwy/kształty faktów i skład
 objaśnienia bez komunikatów adaptera lub dostawcy. Zmiana raportu dotyczy obu
 platform zgodnie z D1; zachowanie rozmowy nie zmienia się. Szczegółowy kontrakt
 prywatności i warunki rozszerzania raportu: `modules/diagnostics/CLAUDE.md`.
+M3 U11 rozbija wspólny raport na siedem liczbowych faz startu, oddzielając
+oczekiwanie na layout Obsidiana od inicjalizacji pluginu; kolejność startu bez zmian.
 
 ## Mobile M3 U1 - szuflada rozmowy
 

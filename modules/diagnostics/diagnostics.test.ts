@@ -45,6 +45,53 @@ function fixture() {
 }
 test.beforeEach(() => setLocale('en'));
 
+test('startup vocabulary writes all seven numeric durations and omits unknown names', async t => {
+    const f = fixture();
+    f.input.facts = {
+        'startup.layoutWaitMs': 1000, 'startup.runtimeMs': 20.6, 'startup.secretsMs': 30.2,
+        'startup.skinMs': 0, 'startup.agentsMs': 50, 'startup.toolsMs': 60, 'startup.finishMs': 34,
+        'startup.cokolwiek': 999,
+    };
+    const result = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(result.path);
+    t.deepEqual(saved.split('\n').filter(line => line.startsWith('| startup.')), [
+        '| startup.layoutWaitMs | OK | 0 | 1000 |', '| startup.runtimeMs | OK | 0 | 21 |',
+        '| startup.secretsMs | OK | 0 | 30 |', '| startup.skinMs | OK | 0 | 0 |',
+        '| startup.agentsMs | OK | 0 | 50 |', '| startup.toolsMs | OK | 0 | 60 |',
+        '| startup.finishMs | OK | 0 | 34 |',
+    ]);
+});
+
+for (const invalid of ['123', Infinity, -1, undefined]) test(`startup vocabulary rejects ${String(invalid)} in every phase`, async t => {
+    const f = fixture();
+    f.input.facts = {
+        'plugin.startupMs': invalid,
+        'startup.layoutWaitMs': invalid, 'startup.runtimeMs': invalid, 'startup.secretsMs': invalid,
+        'startup.skinMs': invalid, 'startup.agentsMs': invalid, 'startup.toolsMs': invalid, 'startup.finishMs': invalid,
+    };
+    const result = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(result.path);
+    t.deepEqual(saved.split('\n').filter(line => /^\| (startup\.|plugin.startupMs)/.test(line)), [
+        '| plugin.startupMs | SKIPPED | 0 | Unavailable |',
+        '| startup.layoutWaitMs | SKIPPED | 0 | Unavailable |',
+        '| startup.runtimeMs | SKIPPED | 0 | Unavailable |',
+        '| startup.secretsMs | SKIPPED | 0 | Unavailable |',
+        '| startup.skinMs | SKIPPED | 0 | Unavailable |',
+        '| startup.agentsMs | SKIPPED | 0 | Unavailable |',
+        '| startup.toolsMs | SKIPPED | 0 | Unavailable |',
+        '| startup.finishMs | SKIPPED | 0 | Unavailable |',
+    ]);
+});
+
+for (const locale of ['en', 'pl']) test.serial(`startup explanation is saved in ${locale}`, async t => {
+    setLocale(locale);
+    const f = fixture();
+    const result = await runDeviceDiagnostics(f.input);
+    t.true((await f.adapter.read(result.path)).includes(locale === 'pl'
+        ? 'startup.layoutWaitMs to oczekiwanie na Obsidiana przed inicjalizacją pluginu; pozostałe fazy startu mierzą sam plugin.'
+        : 'startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself.'));
+});
+
 test('in-memory diagnostics writes verified results and leaves only its report', async t => {
     const f = fixture();
     const result = await runDeviceDiagnostics(f.input);
