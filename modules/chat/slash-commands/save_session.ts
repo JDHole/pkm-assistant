@@ -269,7 +269,6 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
         // Once admitted, the memory transaction finishes its file/state bookkeeping.
         // A closing view must never apply its subsequent UI action.
         const result = await workflow.applyDecision(activeSession, prep, decision);
-        if (!isSessionViewAlive(view)) return;
 
         if (result.cancelled) {
             resetOriginalDraft();
@@ -278,7 +277,7 @@ export async function runSaveSessionFlow({ view, plugin, resetAfterArchive = fal
 
         if (resetAfterArchive && path) {
             plugin.subTaskRegistry?.pruneSession?.(path);
-            view._renderSubTaskStrip?.();
+            if (isSessionViewAlive(view)) view._renderSubTaskStrip?.();
         }
         resetOriginalDraft();
         await applyPostArchiveAction(view, plugin, agentMemory, result, path, resetAfterArchive);
@@ -404,7 +403,6 @@ export async function applyPostArchiveAction(
     closingSessionPath: string | null | undefined,
     resetAfterArchive = false,
 ): Promise<void> {
-    if (!isSessionViewAlive(view)) return;
     // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
     // (`core/security/SessionWriteConsent.ts`) jest kluczowana `origin.sessionPath` - WSZYSTKIE
     // TRZY warianty tej funkcji (`archive`/`archive_new`/`archive_close`) kończą TĘ sesję, więc
@@ -418,6 +416,8 @@ export async function applyPostArchiveAction(
         plugin.mcpClient?.sessionWriteConsent.clearSession(closingSessionPath);
         plugin.subTaskRegistry?.closeSessionThreads?.(agentMemory.agentName, closingSessionPath);
     }
+    // Session permissions outlive the view; only the UI continuation can be cancelled.
+    if (!isSessionViewAlive(view)) return;
 
     const action = result.action || 'archive';
     const activeTab = view.chatTabs?.find((tab: ChatTabLike) => tab.isActive);

@@ -887,6 +887,25 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
   odmowa pamięci jest logowana, zamiast odtwarzać odrzucony lub zarchiwizowany plik.
   Wiadomości i szkic pozostają w obiekcie zamkniętego widoku; nie dodajemy trwałego
   zapisu szkicu ani odzyskiwania po zabiciu procesu Androida.
+- **M3 U6: sprzątanie sesji jest niezależne od życia widoku.** Po przyjęciu decyzji
+  i zakończeniu jej I/O odrzucenie kończy usunięcie todo, wyczyszczenie zgód oraz
+  zamknięcie wątków dla przechwyconej ścieżki, także po `onClose`. Kontrola
+  `owner.current()` stoi dopiero przed resetem kursora i widoku. Archiwizacja
+  zawsze dochodzi do `applyPostArchiveAction`: czyszczenie zgód i wątków jest
+  przed kontrolą życia, wspólne dla `archive`, `archive_new` i `archive_close`.
+  Pruning zakończonych subów zachowuje wcześniejszą politykę wejścia Nowa rozmowa
+  (`resetAfterArchive`); tylko odświeżenie paska wymaga żywego widoku. Nie rozszerzamy
+  kasowania todo na archiwizację ani nie zmieniamy best-effort odrzucenia.
+  Kontrole przed przyjęciem decyzji, przed zmianą tożsamości zakładki, resetem
+  rozmowy/szkicu, powiadomieniami i po I/O nowej sesji pozostają. Nie wolno
+  osłabiać globalnego `current()`, aby naprawić sprzątanie: chroni także load/restore.
+  Testy U6 w `chat/phoneSessionMenu.test.ts` (24 przypadki) używają produkcyjnego
+  ChatView, AgentMemory, SessionWriteConsent, SubTaskRegistry i publicznego todo.
+  Sprawdzają zamknięcie podczas zapisu `.discarded/` oraz usuwania todo, ponowne
+  użycie ścieżki w tej samej minucie bez dziedziczenia zgody/zadań, trzy warianty
+  archiwizacji przez Nową rozmowę i slash, pruning oraz anulowanie przed przyjęciem.
+  Macierz obejmuje telefon (menu Nowej rozmowy) i desktop (pasek); sprawdzane są
+  też nienaruszone wiadomości, szkic i tożsamość zamkniętego widoku oraz cudze zgody/wątki.
 - **ConsolidationProgressModal celowo pozostaje niezależny.** Jego właścicielem jest
   przebieg w `memoryOpsCenter` i `RunController`, a nie ChatView. Decyzje dotyczą
   przechwyconej pamięci agenta i kroków konsolidacji, bez resetowania RollingWindow
@@ -928,8 +947,8 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
   dla świeżej zakładki. Warianty `archive_new` (od razu nowa sesja) i `archive_close` (zamknij
   zakładkę) mają własną, jawną obsługę tych samych pól.
 - ⚠️ **DWIE drogi kończą sesję i obie sprzątają zgodę oraz wątki tej sesji** -
-  `handleNewSession` (ten plik) łapie nazwę agenta i `activeMemory.activeSessionPath` PRZED
-  discard/`startNewSession()` i tuż przed własną wymianą tożsamości woła
+  `handleNewSession` (`chat/chat_session.ts`) przechwytuje właściciela i ścieżkę PRZED
+  discard/`startNewSession()` i po odrzuceniu, niezależnie od życia widoku, woła
   `sessionWriteConsent.clearSession(path)` oraz `subTaskRegistry.closeSessionThreads(agentName, path)`;
   `modules/chat/slash-commands/save_session.ts`'s `applyPostArchiveAction()` (`/save session`
   oraz archiwizacja z `handleNewSession`) robi to samo dla WSZYSTKICH trzech wariantów (`archive`/`archive_new`/`archive_close`) - jedno

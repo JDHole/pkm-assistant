@@ -496,9 +496,8 @@ export async function handleNewSession(this: ChatViewLike) {
                 this._renderSubTaskStrip?.();
                 // Explicit path: selecting another tab during I/O must not retire its file.
                 await _retireActiveSession(owner.memory, 'discard', path);
-                if (!owner.current()) return;
+                // Once discard is admitted, retire its data even if the view closes.
                 await _retireTodoFileFor(this, owner.agentName, path);
-                if (!owner.current()) return;
             }
             if (path) {
                 // Unlike closing a tab, ending a session frees its path for reuse.
@@ -506,6 +505,8 @@ export async function handleNewSession(this: ChatViewLike) {
                 this.plugin?.mcpClient?.sessionWriteConsent.clearSession(path);
                 this.plugin?.subTaskRegistry?.closeSessionThreads?.(owner.agentName || '', path);
             }
+            // The remaining work belongs to the view, not the completed session.
+            if (!owner.current()) return;
             // Only reset the shared memory cursor when it still points to this conversation.
             if (owner.memory && (!owner.memory.activeSessionPath || owner.memory.activeSessionPath === path)
                 && (!owner.tab || owner.tab.isActive)) {

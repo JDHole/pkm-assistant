@@ -5,6 +5,9 @@ import { ConfirmModal } from '../../ui-components/index.js';
 import { Platform, Modal } from 'obsidian';
 import { setLocale } from '../../../core/i18n/index.js';
 import { AgentMemory } from '../../memory/index.js';
+import { SessionWriteConsent } from '../../../core/index.js';
+import { SubTaskRegistry } from '../../sub-agents/index.js';
+import { createTodoTool } from '../../tools/index.js';
 import { SvgHelper } from '../../crystal-soul/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import type { ChatViewLike } from './chatViewShape.js';
@@ -618,6 +621,159 @@ for (const entry of ['menu', 'sidebar'] as const) {
             await new Promise<void>(resolve => setImmediate(resolve));
             t.deepEqual(host.notices, phase === 'review' ? ['Consolidating memory...'] : []);
             await assertRetained(t, f);
+        });
+    }
+}
+
+/** U6 uses production registries and the public todo tool, not cleanup spies. */
+async function cleanupFixture(t: ExecutionContext, entry: 'menu' | 'sidebar') {
+    const f = await sessionFixture(t, entry);
+    const consent = new SessionWriteConsent();
+    const registry = new SubTaskRegistry();
+    Object.assign(f.view.plugin, { mcpClient: { sessionWriteConsent: consent }, subTaskRegistry: registry });
+    function idleThread(id: string, path: string, agentName = 'Mira') {
+        const owner = { agentName, sessionPath: path, sessionEpoch: `${id}-epoch` };
+        const thread = registry.createThread({ threadId: id, name: 'worker', owner, origin: owner, config: {} });
+        const task = registry.create({ id: `${id}-run`, name: 'worker', agentName, threadId: id, origin: owner });
+        registry.finish(task, { text: 'Completed task', toolsUsed: [], durationMs: 1, usage: null });
+        registry.endRun(id, { successful: true, transcript: [{ role: 'assistant', content: 'Completed task' }] });
+        return thread;
+    }
+    const oldThread = idleThread('old', f.path);
+    const otherThread = idleThread('other', 'sessions/other.md');
+    const otherAgent = idleThread('other-agent', f.path, 'Borys');
+    consent.grant(f.path, 'Important.md');
+    consent.grant('sessions/other.md', 'Important.md');
+    const todo = createTodoTool();
+    const todoPlugin = { app: { vault: { adapter: f.adapter } }, agentManager: {
+        getActiveAgent: () => ({ name: 'Mira' }),
+        getActiveMemory: () => ({ activeSessionPath: f.memory.activeSessionPath ?? undefined }),
+    } };
+    const created = await todo.execute({ action: 'create', items: ['old task'] }, f.view.app, todoPlugin);
+    t.like(created, { type: 'todo', total: 1, items: [{ text: 'old task', checked: false }] });
+    t.is(oldThread.phase, 'idle');
+    t.is(registry.getTask('old-run')?.status, 'done');
+    const todoPath = '.pkm-assistant/artifacts/todo/mira-mira_2026_11_13_12_00.md';
+    const todoBytes = await f.adapter.read(todoPath);
+    return { ...f, consent, registry, oldThread, otherThread, otherAgent, todo, todoPlugin, todoPath, todoBytes };
+}
+function assertClosedConversation(t: ExecutionContext, f: Awaited<ReturnType<typeof cleanupFixture>>, tabSnapshot: unknown) {
+    t.is(f.view.rollingWindow, f.originalWindow);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+    t.is(f.view.input_area.value, 'Unsent draft');
+    t.deepEqual(f.view.chatTabs, tabSnapshot);
+    t.is(f.consent.has('sessions/other.md', 'Important.md'), true);
+    t.is(f.otherThread.phase, 'idle');
+    t.is(f.otherAgent.phase, 'idle');
+}
+async function confirmDiscard(f: Awaited<ReturnType<typeof cleanupFixture>>, modal: InstanceType<typeof SessionCloseModal>) {
+    modal.contentEl.children[2].children[1].dispatchEvent(new Event('click'));
+    const confirm = await until(() => f.opened.find((m): m is ConfirmModal => m instanceof ConfirmModal));
+    confirm.contentEl.children[1].children[1].dispatchEvent(new Event('click'));
+}
+
+for (const entry of ['menu', 'sidebar'] as const) {
+    for (const stage of ['discard-write', 'todo-remove'] as const) {
+        test.serial(`U6 ${entry}: close during ${stage} retires consent, todo and threads before path reuse`, async t => {
+            const f = await cleanupFixture(t, entry);
+            const entered = deferred(), release = deferred();
+            t.teardown(() => release.resolve());
+            const write = f.adapter.write, remove = f.adapter.remove;
+            f.adapter.write = async (path, bytes) => {
+                if (stage === 'discard-write' && path.includes('/.discarded/')) { entered.resolve(); await release.promise; }
+                await write(path, bytes);
+            };
+            f.adapter.remove = async path => {
+                if (stage === 'todo-remove' && path === f.todoPath) { entered.resolve(); await release.promise; }
+                await remove(path);
+            };
+            const { modal, done } = await f.begin();
+            await confirmDiscard(f, modal);
+            await entered.promise;
+            const tabs = structuredClone(f.view.chatTabs);
+            const closing = f.view.onClose();
+            const notices = [...host.notices];
+            release.resolve();
+            await Promise.all([closing, done]);
+            t.is(f.consent.has(f.path, 'Important.md'), false);
+            t.is(await f.adapter.exists(f.todoPath), false);
+            t.is(f.oldThread.phase, 'closed');
+            t.is(f.registry.getTask('old-run'), undefined);
+            assertClosedConversation(t, f, tabs);
+            t.deepEqual(host.notices, notices);
+            t.is(await f.adapter.read(f.memory.paths.sessionsActive + '/.discarded/mira_2026-11-13_12-00.md'), f.bytes);
+
+            const next = new ChatView({ app: f.view.app, id: 'replacement' }, f.view.plugin) as ChatViewLike;
+            browserEvents(next.container);
+            await next.renderView();
+            t.teardown(() => next.onClose());
+            await next.rollingWindow.addMessage('user', 'A separate new conversation.');
+            await next.handleSaveSession();
+            t.is(f.memory.activeSessionPath, f.path, 'the same minute really reuses the discarded path');
+            t.is(f.consent.has(f.memory.activeSessionPath, 'Important.md'), false);
+            t.like(await f.todo.execute({ action: 'list' }, next.app, f.todoPlugin), { type: 'todo', total: 0, items: [] });
+            t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content), ['A separate new conversation.']);
+        });
+    }
+    for (const source of ['new', 'slash'] as const) for (const action of ['archive', 'archive_new', 'archive_close'] as const) {
+        test.serial(`U6 ${entry}/${source}/${action}: admitted archive cleans the session after view close`, async t => {
+            const f = await cleanupFixture(t, entry);
+            const entered = deferred(), release = deferred();
+            t.teardown(() => release.resolve());
+            const write = f.adapter.write;
+            f.adapter.write = async (path, bytes) => {
+                if (path.startsWith(f.memory.paths.sessionsArchive + '/')) { entered.resolve(); await release.promise; }
+                await write(path, bytes);
+            };
+            let done: Promise<unknown>;
+            if (source === 'new') {
+                const begun = await f.begin();
+                done = begun.done;
+                begun.modal.contentEl.children[2].children[0].dispatchEvent(new Event('click'));
+            } else done = f.view.slashCommands.execute('/save session', { view: f.view, plugin: f.view.plugin });
+            const review = await until(() => f.opened.find((m): m is InstanceType<typeof SaveSessionModal> => m instanceof SaveSessionModal && m.state === 'proposals'));
+            review.contentEl.querySelector('.pkm-review__actions')!.children[{ archive: 0, archive_new: 2, archive_close: 1 }[action]].dispatchEvent(new Event('click'));
+            await entered.promise;
+            const tabs = structuredClone(f.view.chatTabs);
+            const closing = f.view.onClose();
+            const notices = [...host.notices];
+            release.resolve();
+            await Promise.all([closing, done]);
+            t.is(f.consent.has(f.path, 'Important.md'), false);
+            t.is(f.oldThread.phase, 'closed');
+            t.is(f.registry.getTask('old-run')?.status, source === 'new' ? undefined : 'done', 'retain the existing pruning policy of each entry');
+            assertClosedConversation(t, f, tabs);
+            t.deepEqual(host.notices, notices);
+            t.deepEqual((await f.adapter.list(f.memory.paths.sessionsActive)).files, []);
+            t.is(f.memory.activeSessionPath, null);
+            const archive = f.memory.paths.sessionsArchive + '/mira_2026-11-13_12-00.md';
+            t.deepEqual((await f.memory.loadSession(archive)).messages.map(m => m.content), ['Keep the blue notebook.', 'The notebook stays blue.']);
+        });
+    }
+    for (const action of ['discard', 'archive', 'archive_new', 'archive_close'] as const) {
+        test.serial(`U6 ${entry}/${action}: close before admission keeps consent, todo and idle threads`, async t => {
+            const f = await cleanupFixture(t, entry);
+            let done: Promise<unknown>;
+            if (action === 'discard') {
+                const begun = await f.begin();
+                done = begun.done;
+                begun.modal.contentEl.children[2].children[1].dispatchEvent(new Event('click'));
+                const confirm = await until(() => f.opened.find((m): m is ConfirmModal => m instanceof ConfirmModal));
+                confirm.contentEl.children[1].children[1].dispatchEvent(new Event('click'));
+            } else {
+                done = f.view.slashCommands.execute('/save session', { view: f.view, plugin: f.view.plugin });
+                const review = await until(() => f.opened.find((m): m is InstanceType<typeof SaveSessionModal> => m instanceof SaveSessionModal && m.state === 'proposals'));
+                review.contentEl.querySelector('.pkm-review__actions')!.children[{ archive: 0, archive_new: 2, archive_close: 1 }[action]].dispatchEvent(new Event('click'));
+            }
+            // No await between the click and onClose: memory has not admitted the decision.
+            await f.view.onClose();
+            await done;
+            await assertRetained(t, f);
+            t.is(f.consent.has(f.path, 'Important.md'), true);
+            t.is(await f.adapter.read(f.todoPath), f.todoBytes);
+            t.like(await f.todo.execute({ action: 'list' }, f.view.app, f.todoPlugin), { type: 'todo', total: 1, items: [{ text: 'old task', checked: false }] });
+            t.is(f.oldThread.phase, 'idle');
+            t.is(f.registry.getTask('old-run')?.status, 'done');
         });
     }
 }
