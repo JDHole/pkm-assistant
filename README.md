@@ -15,6 +15,8 @@ Send a plan back with notes and the agent revises it in place:
 
 ---
 
+Phone support is under development; some features are available only on desktop.
+
 ## What is this?
 
 PKM Assistant is an Obsidian plugin that lets you create, customize, and run AI agents directly inside your vault. Each agent has its own personality, memory, skills, and tools - and you can see and edit **every piece of text** that gets sent to the AI model.

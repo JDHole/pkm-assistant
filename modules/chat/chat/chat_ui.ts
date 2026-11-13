@@ -7,7 +7,7 @@ import { cancelMessageEdit } from './messageEdit.js';
  * via Object.assign(ChatView.prototype, { ...exports }).
  */
 
-import { Notice, TFile } from 'obsidian';
+import { Notice, TFile, Platform } from 'obsidian';
 import { SkinManager, UiIcons, IconGenerator, setSvg, setSvgLabel, adoptSheet } from '../../crystal-soul/index.js';
 import { substituteVariables } from '../../skills/index.js';
 import { MentionAutocomplete, AttachmentManager, setNoteOpener } from '../../ui-components/index.js';
@@ -1234,8 +1234,8 @@ export function handle_input_keydown(this: ChatViewLike, e: KeyboardEvent) {
         }
     }
 
-    // Send on Enter (without Shift)
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Mobile keeps the native newline; sending uses the button. Popups retain priority.
+    if (e.key === 'Enter' && !e.shiftKey && !Platform.isMobile) {
         e.preventDefault();
         // Druga (i ostatnia) ścieżka z pola wpisywania — jawny znacznik człowieka.
         void this.send_message({ meta: HUMAN_MESSAGE_META });

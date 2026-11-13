@@ -299,6 +299,7 @@ export class SubAgentRunner {
     declare mcpClient: RunnerMcpClient | null;
     declare effectTargetIo: EffectTargetIo;
     private readonly drafts?: SubRunDrafts | { kind: 'unavailable' };
+    private readonly isMobile: boolean;
     /**
      * @param {Object} options
      * @param {Object} options.toolRegistry - ToolRegistry instance
@@ -311,8 +312,9 @@ export class SubAgentRunner {
     // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
     // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
     // realne obiekty `ToolRegistry`/`App`/plugin.
-    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' } }) {
+    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts, isMobile = false }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' }; isMobile?: boolean }) {
         this.drafts = drafts;
+        this.isMobile = isMobile;
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
         this.app = app as AppLike;
         this.plugin = plugin as RunnerPlugin;
@@ -631,7 +633,7 @@ export class SubAgentRunner {
             let tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
             if (this.drafts && 'kind' in this.drafts) {
                 if (tools.some(tool => isVaultContentWriter(tool.function.name)) || options.draftDependencies?.length)
-                    throw new Error(t('subagent.draft.unavailable'));
+                    throw new Error(this.isMobile ? t('subagent.draft.unavailable_mobile') : t('subagent.draft.unavailable'));
             } else if (this.drafts) {
                 draft = await this.drafts.open({ runId: label, threadId: threadId ?? label, origin,
                     writable: tools.some(tool => isVaultContentWriter(tool.function.name)),

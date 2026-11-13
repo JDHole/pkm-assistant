@@ -128,3 +128,16 @@ A test calls the code the way its caller would, and checks the observable result
 - A self-referential test - the expected value is computed by the same function under test.
 - Pinning a constant - the assertion just repeats a hand-maintained constant, a default config, or prompt text.
 - Fixture checks fixture - the assertion reads data built by the test itself, and the code under test never actually runs in the middle.
+
+## Mobile M1 P1 - wejście na telefon
+
+Manifest dopuszcza Obsidian Mobile (`isDesktopOnly: false`), ale obsługa telefonu jest
+w budowie. Composition root używa istniejącego `Platform.isMobile`: pomija desktopowy
+magazyn kopii roboczych i port Electron, przekazuje platformę do narzędzi delegacji.
+`openChatView` czeka na `setViewState`, następnie odsłania liść; brak prawego liścia
+kieruje do nowej karty. Ten kontrakt obowiązuje również na desktopie. Komentarz inline
+czeka na otwarcie i zachowuje pochodzenie `machine`; zakończony runtime nie odsłania
+widoku ani nie planuje wysłania po oczekiwaniu. Błąd hosta ma log i komunikat i18n.
+Test `src/main.mobile.test.ts` wykonuje metody produkcyjne z kontrolowanym workspace,
+sprawdza widoczność, komentarz, unload oraz cichy start mobile i rzeczywisty magazyn
+desktopowy. AVA nie zastępuje testu klawiatury i szuflady na fizycznym telefonie.

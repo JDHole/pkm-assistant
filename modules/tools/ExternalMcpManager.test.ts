@@ -2,7 +2,7 @@ import test from 'ava';
 import { ExternalMcpManager, normalizeMcpResult } from './ExternalMcpManager.js';
 import type { ExternalMcpPluginLike, McpCallToolResult, McpClientLike } from './ExternalMcpManager.js';
 import { ToolRegistry } from './ToolRegistry.js';
-import { t as tr } from '../../core/i18n/index.js';
+import { t as tr, setLocale, getLocale } from '../../core/i18n/index.js';
 
 /** Czym sterujemy atrapę klienta w konkretnym teście. */
 interface FakeClientOverrides {
@@ -935,4 +935,25 @@ test('outputSchema: type niepoprawny (string zamiast integer) — realny walidat
     const err = await t.throwsAsync(() => client.callTool({ name: 'probe_tool', arguments: { mode: 'bad_type' } }));
 
     t.true(String(err?.message).includes('does not match the tool'), `komunikat: ${err?.message}`);
+});
+
+
+for (const locale of ['pl', 'en']) test.serial(`M1 mobile stdio refusal is localized before client creation; HTTP still works (${locale})`, async t => {
+    const previous = getLocale(); setLocale(locale); t.teardown(() => setLocale(previous));
+    const registry = new ToolRegistry(), created: string[] = [];
+    const mgr = new ExternalMcpManager({}, { toolRegistry: registry, isMobile: true,
+        clientFactory: async cfg => { created.push(cfg.id); return { client: makeFakeClient({ tools: [{ name: 'lookup', inputSchema: { type: 'object' } }] }).client, transport: {} }; } });
+    t.teardown(() => mgr.closeAll());
+    const expected = { success: false, error: locale === 'pl'
+        ? 'Lokalne serwery MCP (stdio) działają tylko na desktopie. Na telefonie użyj serwera HTTP.'
+        : 'Local MCP servers (stdio) are available only on desktop. On mobile, use an HTTP server.' };
+    t.deepEqual(await mgr.connect({ id: 'local', command: 'cmd' }), expected);
+    t.deepEqual(await mgr.previewTools({ id: 'preview', transport: 'stdio', command: 'cmd' }), expected);
+    await mgr.autostart([{ id: 'auto', transport: 'stdio', command: 'cmd', enabled: true, autostart: true }]);
+    await mgr.whenAutostartSettled();
+    t.is(mgr.getStatus('auto').lastError, expected.error);
+    t.deepEqual(created, []);
+    t.deepEqual(await mgr.connect({ id: 'remote', transport: 'http', url: 'https://example.test/mcp' }), { success: true, tools: ['remote__lookup'] });
+    t.deepEqual(created, ['remote']);
+    t.deepEqual(registry.getAllTools().map(tool => tool.name), ['remote__lookup']);
 });

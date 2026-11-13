@@ -12,7 +12,7 @@
  * CZEGO TU NIE MA:
  *   • transportu HTTP — mieszka w `core/http/contracts.ts`;
  *   • `NormalizedError` / `normalizeError` — właściciel to `core/utils/errorUtils.ts`;
- *   • niczego, co dotyczy urządzeń mobilnych (`manifest.isDesktopOnly === true`).
+ *   • rozpoznawania platformy - composition root przekazuje zdolności hosta modułom.
  *
  * @packageDocumentation
  */
@@ -578,7 +578,7 @@ export interface PluginApi {
     waitForReady(): Promise<void>;
     showCrystalNotice(message: string, options?: CrystalNoticeOptions): NoticeHandle | null;
     applyUserColor(hex?: string): void;
-    openChatView(): void;
+    openChatView(): void | Promise<void>;
     openNote(path: string, event?: unknown): Promise<void>;
     registerEvent(ref: EventRefLike): void;
     registerInterval(id: number): number;

@@ -1,4 +1,5 @@
 import type { ParentConversationContext } from '../sub-agents/index.js';
+import { disabledScreenshotResult } from './ObsidianAppTool.js';
 import { log } from '../../core/utils/Logger.js';
 // `toolResultStatus` = jedna reguła „co jest porażką narzędzia" (klient, czat, suby).
 import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName, SessionWriteConsent, configuredChatSecrets } from '../../core/index.js';
@@ -989,7 +990,7 @@ export class MCPClient {
                 throw new Error(`Tool not found: ${toolCall.name}`);
             }
             if (toolCall.name === 'obsidian_app' && tool.source === 'built-in' && tool.screenshotEnabled === false && argsWithContext.action === 'screenshot') {
-                return { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'screenshot_disabled' } };
+                return disabledScreenshotResult(tool.isMobile === true);
             }
             if (toolCall.name === 'subagent_changes' && tool.source === 'built-in') {
                 const reviewContext = draftReviewContext({ plugin: this.plugin, registry: this.toolRegistry,

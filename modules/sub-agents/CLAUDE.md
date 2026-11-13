@@ -1071,3 +1071,14 @@ odczyt bez warstw, a kopii odmawia z przyczyną w aktualnym języku UI (PL/EN).
 Bez przyczyny używa odmowy ogólnej; brak fallbacku zapisu live. Warstwy poprzedników
 nadal wymagają pełnego właściciela. Testy P4 w `../tools/runnerDrafts.test.ts`
 sprawdzają realny odczyt, odmowę przez delegate, izolację A/B i kopię po ponowieniu.
+
+## Mobile M1 P1 - brak magazynu kopii
+
+Runner dostaje opcjonalne `isMobile` z composition root przez `DelegateTool` (także
+kontynuacje `sub_agent`). Domyślne false zachowuje desktopowy kontrakt. Tylko dla
+mobile i `drafts.kind === 'unavailable'` odmowa writera mówi PL/EN, że zapis przez
+kopię roboczą nie jest jeszcze dostępny na telefonie. Kod odmowy i brak fallbacku
+do żywego vaulta pozostają bez zmian; zadania tylko do odczytu nadal działają.
+Scenariusze mobile w `../tools/runnerDrafts.test.ts` wykonują publiczne delegate,
+kontynuację sub_agent oraz rzeczywisty odczyt przez runner/MCP; sprawdzają literalne
+teksty obu języków i niezmienioną treść pliku.

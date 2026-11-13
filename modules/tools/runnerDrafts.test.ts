@@ -28,7 +28,7 @@ import { createAddTextToImageTool } from './AddTextToImageTool.js';
 import { createMemorySaveTool } from './MemorySaveTool.js';
 import { createTodoTool } from './built-in-servers/artifacts/TodoTool.js';
 import { createKomunikatorTools } from './KomunikatorTools.js';
-import { createDelegateTool, stopAllDelegations, __test__ } from './DelegateTool.js';
+import { createDelegateTool, createSubAgentTool, stopAllDelegations, __test__ } from './DelegateTool.js';
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
@@ -655,4 +655,40 @@ for (const locale of ['pl', 'en']) test.serial(`P4 frozen failure reason survive
     t.is(await f.ownView(await writing).read('a.md'), 'Retry draft');
     t.is(decode(f.files.get('a.md')!), 'Baza');
     t.deepEqual(failedOrigin.sessionEpochFailure, { kind: 'append-failed', detail: 'EACCES A' });
+});
+
+
+for (const locale of ['pl', 'en']) test.serial(`M1 mobile refuses draft writers through both delegation tools (${locale})`, async t => {
+    const f = await runtime(t), previousLocale = getLocale();
+    setLocale(locale);
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); setLocale(previousLocale); });
+    f.agent.permissions.guidance_mode = true;
+    const deps = { drafts: { kind: 'unavailable' as const }, isMobile: true };
+    const delegate = createDelegateTool(f.app, deps);
+    const args = { task: 'Write', aspect: 'child', background: false, _invocationDelegationDepth: 1,
+        _invocationOrigin: origin, _invocationAgentName: 'Tester' };
+    const expected = locale === 'pl'
+        ? 'Błąd sub-agenta child: Zapis subagentów przez kopię roboczą nie jest jeszcze dostępny na telefonie. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.'
+        : 'Sub-agent child error: Sub-agent writes through drafts are not yet available on mobile. You can continue chatting and run read-only tasks.';
+    t.like(await delegate.execute(args, f.app, f.plugin as never), { success: false, error: expected, tools_used: [] });
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+
+    // A reusable writer-capable thread is created by the real runner before switching its host to mobile.
+    const previous = f.run(['write', 'read']);
+    (await f.requests.next()).done('Earlier answer');
+    t.is((await previous).result, 'Earlier answer');
+    const thread = f.registry.listThreads(origin).find(thread => thread.phase === 'idle')!;
+    const subAgent = createSubAgentTool(f.app, deps);
+    t.like(await subAgent.execute({ ...args, action: 'task', sub_id: thread.threadId }, f.app, f.plugin as never),
+        { success: false, error: expected, tools_used: [] });
+
+    f.config.tools = ['read'];
+    const reading = delegate.execute({ ...args, task: 'Read' }, f.app, f.plugin as never);
+    (await f.requests.next()).call('read', { path: 'a.md', scope: 'vault' });
+    const next = await f.requests.next();
+    t.deepEqual(lastTool(next), { success: true, path: 'a.md', content: 'Baza' });
+    next.done('Read Baza');
+    t.like(await reading, { success: true, result: 'Read Baza', tools_used: ['read'] });
+    t.is(decode(f.files.get('a.md')!), 'Baza');
 });

@@ -2009,3 +2009,13 @@ Testy P4 w `chat_session.archiveFlow.test.ts` nadal sprawdzają pojedynczy nowy 
 i wszystkie asercje tożsamości; oczekiwana nazwa zmienia się na `_2.md`.
 F4 dokłada dwie kolejne rozmowy, dwa odrzucenia, kolizję zastaną na dysku i kontynuację
 archiwum z sufiksem, z prawdziwymi ChatView, AgentMemory i StateManager.
+
+## Mobile M1 P1 - Enter
+
+`handle_input_keydown` używa istniejącego `Platform.isMobile`: Enter bez podpowiedzi
+pozostaje nieprzechwycony na mobile (nowa linia), wysyła przycisk. Desktop zachowuje
+Enter wysyłający i Shift+Enter bez wysłania. To zachowanie wejścia, nie układ, dlatego
+warunek nie używa `isPhone`. Obsługa `@` i `/` ma nadal pierwszeństwo.
+`chat/chat_ui.mobile.test.ts` renderuje prawdziwy ChatView i wywołuje zdarzenia pola
+oraz przycisku: obie platformy, Shift, wielowierszowa wiadomość i wybór podpowiedzi
+Enter/Tab. Test uzupełnia relację parentElement w atrapie DOM bez zmiany harnessu.

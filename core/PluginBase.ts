@@ -394,7 +394,7 @@ export abstract class PluginBase extends Plugin {
      * Czat mieszka w prawym panelu, więc otwarcie idzie inną drogą niż bazowe
      * `PluginItemView.open` (nowa karta w głównym obszarze).
      */
-    openChatView(): void {
+    openChatView(): void | Promise<void> {
         const workspace = this.app?.workspace as unknown as ChatWorkspace | undefined;
         if (!workspace) return;
 

@@ -783,20 +783,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.toolRegistry.registerTool(createMemoryDeleteTool());
       // brain_update: direct brain.md writes wyłączone; runtime pisze przez memory_save / /save session.
       // skill_list/skill_execute: skille odkrywane indeksem w prompcie, przepis przez read().
-      try {
-        if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
-        this.vaultDraftRuntime = await initializeVaultDrafts({ ...desktopDraftPorts(this.app), registry: this.subTaskRegistry });
-      } catch (error) {
-        log.error('VaultDrafts', 'Draft runtime unavailable:', error);
-        new Notice(t('subagent.draft.unavailable'), 10000);
-      }
-      if (this.vaultDraftRuntime?.issues.length) {
-        log.warn('VaultDrafts', 'Recovery issues:', this.vaultDraftRuntime.issues);
-        new Notice(t('chat.subdraft.recovery_error', { count: this.vaultDraftRuntime.issues.length }), 10000);
-      }
-      if (this.vaultDraftRuntime) this.toolRegistry.registerTool(this.vaultDraftRuntime.tool);
-      this.toolRegistry.registerTool(createDelegateTool(this.app, { drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' } }));
-      this.toolRegistry.registerTool(createSubAgentTool(this.app, { drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' } }));
+      await this.initializeVaultDraftRuntime(this.toolRegistry);
       // agent_delegate stays: it works without the communicator (context ping is optional/null-safe).
       this.toolRegistry.registerTool(createAgentDelegateTool());
       // Poczta (kom_send/kom_list/kom_read) zależy od KomunikatorManagera - tylko przy fladze ON.
@@ -807,15 +794,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         // Modal sprzątania po drugim ptaszku (kolejka - jeden modal na raz).
         this._komunikatorCleanupUnsub = registerKomunikatorCleanup(this);
       }
-      const obsidianAppEnabled = isObsidianAppEnabled(this.settings);
-      if (obsidianAppEnabled) {
-        this.toolRegistry.registerTool(createObsidianAppTool(createWorkspacePort(
-          this.app, (value): value is Obsidian.TFile => value instanceof Obsidian.TFile,
-        ), createCapturePort(() => {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only capture port, result validated as unknown in modules/obsidian-app (plan 11.2 pkt 3)
-          return require('electron');
-        })));
-      }
+      const obsidianAppEnabled = this.registerObsidianAppTool(this.toolRegistry);
       // Artefakty żywe (gatunek 1). Stare chat_todo/idea_review/plan_review skasowane (aliasy).
       this.toolRegistry.registerTool(createArtifactCreateTool());
       this.toolRegistry.registerTool(createArtifactReadTool());
@@ -933,6 +912,43 @@ export default class PkmAssistantPlugin extends PluginBase {
       t('main.ready', { time: elapsed, count: agentCount, plural: agentCount === 1 ? '' : 's', active: activeAgent?.name || '—' }),
       { type: 'success', timeout: 3000 }
     );
+  }
+
+  registerObsidianAppTool(toolRegistry: ToolRegistry): boolean {
+    const obsidianAppEnabled = isObsidianAppEnabled(this.settings);
+    if (obsidianAppEnabled) {
+      toolRegistry.registerTool(createObsidianAppTool(createWorkspacePort(
+        this.app, (value): value is Obsidian.TFile => value instanceof Obsidian.TFile,
+      ), Platform.isMobile ? null : createCapturePort(() => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only capture port, result validated as unknown in modules/obsidian-app (plan 11.2 pkt 3)
+        return require('electron');
+      }), { isMobile: Platform.isMobile }));
+    }
+    return obsidianAppEnabled;
+  }
+
+  /** Mobile has no atomic draft storage port yet; skip it before touching Node. */
+  async initializeVaultDraftRuntime(toolRegistry: ToolRegistry) {
+    if (!Platform.isMobile) {
+      try {
+        if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
+        this.vaultDraftRuntime = await initializeVaultDrafts({ ...desktopDraftPorts(this.app), registry: this.subTaskRegistry });
+      } catch (error) {
+        log.error('VaultDrafts', 'Draft runtime unavailable:', error);
+        new Notice(t('subagent.draft.unavailable'), 10000);
+      }
+    }
+    if (this.vaultDraftRuntime?.issues.length) {
+      log.warn('VaultDrafts', 'Recovery issues:', this.vaultDraftRuntime.issues);
+      new Notice(t('chat.subdraft.recovery_error', { count: this.vaultDraftRuntime.issues.length }), 10000);
+    }
+    if (this.vaultDraftRuntime) toolRegistry.registerTool(this.vaultDraftRuntime.tool);
+    const delegationDeps = {
+      drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' as const },
+      isMobile: !!Platform?.isMobile,
+    };
+    toolRegistry.registerTool(createDelegateTool(this.app, delegationDeps));
+    toolRegistry.registerTool(createSubAgentTool(this.app, delegationDeps));
   }
 
   async _unlockSecureStorageAtStartup() {
@@ -1058,7 +1074,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         iconName: "pkm-icon",
         // Przez i18n, jak bliźniacze `agents` niżej — nie twardy angielski napis.
         description: t('main.ribbon_chat'),
-        callback: () => { this.openChatView(); }
+        callback: () => { void this.openChatView(); }
       },
       agents: {
         iconName: "users",
@@ -1068,16 +1084,18 @@ export default class PkmAssistantPlugin extends PluginBase {
     }
   }
 
-  openChatView() {
-    const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
-    if (leaves.length > 0) {
-      void this.app.workspace.revealLeaf(leaves[0]);
-    } else {
-      const leaf = this.app.workspace.getRightLeaf(false);
-      void leaf!.setViewState({ type: CHAT_VIEW_TYPE, active: true });
-    }
-    if (this.app.workspace.rightSplit.collapsed) {
-      this.app.workspace.rightSplit.toggle();
+  async openChatView() {
+    try {
+      const workspace = this.app.workspace;
+      const existing = workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+      const leaf = existing ?? workspace.getRightLeaf(false) ?? workspace.getLeaf('tab');
+      if (workspace.rightSplit.collapsed) workspace.rightSplit.toggle();
+      if (!existing) await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
+      if (this.env?.state === 'disposed') return;
+      await workspace.revealLeaf(leaf);
+    } catch (error) {
+      log.error('Chat', 'Could not open chat:', error);
+      new Notice(t('chat.open_failed'));
     }
   }
 
@@ -1085,8 +1103,9 @@ export default class PkmAssistantPlugin extends PluginBase {
    * Send inline comment to active chat view.
    * Opens chat if not open, then sends a formatted message for the agent to edit the file.
    */
-  sendInlineComment(filePath: string, selectedText: string, comment: string) {
-    this.openChatView();
+  async sendInlineComment(filePath: string, selectedText: string, comment: string) {
+    await this.openChatView();
+    if (this.env?.state === 'disposed') return;
     // Ten jednorazowy budzik nie może być GOŁYM setTimeout — wyłączenie pluginu w oknie 300 ms
     // strzelałoby na zdemontowanym egzemplarzu. registerInterval przyjmuje uchwyt obu rodzajów
     // (clearInterval kasuje w JS też uchwyty setTimeout). Guard na `input_area`/`send_message`
@@ -1177,7 +1196,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         id: "pkm-open-chat",
         name: t('command.open_chat'),
         callback: () => {
-          this.openChatView();
+          void this.openChatView();
         }
       },
       open_agents: {

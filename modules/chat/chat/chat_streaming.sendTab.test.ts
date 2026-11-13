@@ -12,7 +12,7 @@ import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
-import { MarkdownRenderer, Notice } from 'obsidian';
+import { MarkdownRenderer, Notice, Platform } from 'obsidian';
 import { t as translate } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { cancelMessageEdit } from './messageEdit.js';
@@ -97,7 +97,7 @@ function installSendListeners(view: unknown) {
     const helpers = source.statements.filter(s => ts.isFunctionDeclaration(s) && ['resetInputArea', 'handleGlobalKeydown'].includes(s.name?.text || ''));
     const code = ts.transpile(helpers.map(s => s.getText(source).replace(/^export /, '')).join('\n') + '\nthis.resetInputArea = resetInputArea; this.handleGlobalKeydown = handleGlobalKeydown;\n' + keydown.getText(source).replace(/^export /, '') + '\nthis.handle_input_keydown = handle_input_keydown;\n'
         + registrations.map(s => s.getText(source)).join('\n'), { target: ts.ScriptTarget.ES2022 });
-    new Function('HUMAN_MESSAGE_META', 'cancelMessageEdit', code).call(view, HUMAN_MESSAGE_META, cancelMessageEdit);
+    new Function('HUMAN_MESSAGE_META', 'cancelMessageEdit', 'Platform', code).call(view, HUMAN_MESSAGE_META, cancelMessageEdit, Platform);
     const globalCode = render.body.statements.filter(s => /this.handleGlobalKeydownBound =|document.addEventListener\('keydown'/.test(s.getText(source))).map(s => s.getText(source)).join('\n');
     new Function(ts.transpile(globalCode)).call(view);
 }

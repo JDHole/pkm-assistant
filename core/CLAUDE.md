@@ -456,3 +456,13 @@ listingi i skany pamięci używają tego samego helpera; runtime review ma włas
 Test behawioralny publicznego MCP: `modules/tools/AdminVaultTools.test.ts` (F4).
 
 The optional `pkmAssistant.obsidianAppEnabled` setting defaults off; changing it requires a plugin reload. Permission actions `app.state` and `app.open` are read-level, with `app.open` checked against its vault target.
+
+## Mobile M1 P1
+
+Platforma pozostaje rozpoznawana w composition root przez Obsidian `Platform`.
+Kontrakt `PluginApi.openChatView` dopuszcza Promise, ponieważ widok trzeba najpierw
+zainicjalizować, a potem odsłonić. I18n PL/EN zawiera odmowy zapisu subagentów,
+stdio i zrzutu ekranu na telefonie oraz komunikat błędu otwierania czatu. Desktopowe
+odmowy magazynu i zrzutu zachowują dotychczasowe teksty. Testy zachowania są w
+`src/main.mobile.test.ts`, `modules/tools/runnerDrafts.test.ts`,
+`ExternalMcpManager.test.ts` i `ObsidianAppTool.test.ts` w module tools.

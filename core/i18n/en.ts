@@ -4,6 +4,10 @@
  * {{param}} for interpolation.
  */
 export const en: Record<string, string> = {
+  'mcp.obsidian_app.screenshot_mobile': 'Screenshots are not available on mobile. Use workspace state or open a note instead.',
+  'chat.open_failed': 'Could not open chat. Please try again.',
+  'subagent.draft.unavailable_mobile': 'Sub-agent writes through drafts are not yet available on mobile. You can continue chatting and run read-only tasks.',
+  'settings.mcp_stdio_mobile': 'Local MCP servers (stdio) are available only on desktop. On mobile, use an HTTP server.',
   'tools.label.subagent_changes': 'Sub-agent changes',
   'tool.subagent_changes': 'Sub-agent changes',
   "chat.subdraft.heading": "Draft changes",

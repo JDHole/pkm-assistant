@@ -200,7 +200,8 @@ uprawnień, host review, trwałe bajty i restart, kontrolowane bariery),
 ## 2.4.7 P5 — runtime, zdarzenia i sprzątanie
 
 `DesktopDraftStorage(fs, basePath)` jest implementacją portu prywatnego magazynu dla
-Obsidiana desktop (plugin ma `isDesktopOnly`). Node jest wstrzykiwany jako wąska
+Obsidiana desktop. Na mobile composition root pomija ten port i zostawia kopie
+niedostępne, bez fallbacku do zapisu live. Node jest wstrzykiwany jako wąska
 zdolność; moduł nie importuje runtime'u Node ani Obsidiana. Adapter odrzuca traversal,
 ścieżki spoza namespace i symlinki. Zapisuje staging create-only, wykonuje fsync
 zawartości, następnie sprawdza mayPublish i synchronicznie publikuje przez linkSync.

@@ -10,6 +10,7 @@ import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 import type { ServerCatalogEntry } from './ServerLoader.js';
 import type { SettingsSectionCtx } from '../../core/index.js';
 import type { App, Notice as ObsidianNotice } from 'obsidian';
+import { Platform } from 'obsidian';
 // no-alert (wytyczne katalogu Obsidiana): zamiennik window.confirm() bez blokowania pętli
 // zdarzeń — patrz nagłówek modules/ui-components/ConfirmModal.ts.
 import { confirmModal } from '../ui-components/index.js';
@@ -163,6 +164,7 @@ export function renderMcpServersSection(container: HTMLElement, ctx: ToolsSettin
  * @returns zawartość pliku albo null
  */
 function readClaudeDesktopConfigText(): string | null {
+    if (Platform.isMobile) return null;
     try {
         const win = window as Window & { process?: { env?: Record<string, string | undefined> }; require?: (id: string) => unknown };
         const appData = win.process?.env?.APPDATA || '';

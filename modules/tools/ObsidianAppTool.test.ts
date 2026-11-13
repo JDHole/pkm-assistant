@@ -1,4 +1,5 @@
 import test from 'ava';
+import { setLocale } from '../../core/i18n/index.js';
 import { createObsidianAppTool } from './ObsidianAppTool.js';
 import { ToolRegistry } from './ToolRegistry.js';
 import { MCPClient } from './MCPClient.js';
@@ -383,4 +384,23 @@ test('default screenshot is hidden and rejected through MCP without approval or 
     t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola', { autonomy: 'edge' }), expected);
     t.deepEqual(await createAppExecutor(port)({ action: 'screenshot' }), expected);
     t.is(portCalls, 0); t.is(approvals, 0);
+});
+
+for (const [locale, message] of [
+    ['en', 'Screenshots are not available on mobile. Use workspace state or open a note instead.'],
+    ['pl', 'Zrzuty ekranu nie są dostępne na telefonie. Możesz sprawdzić stan obszaru roboczego lub otworzyć notatkę.'],
+] as const) test.serial(`mobile screenshot refusal is readable through MCP and direct execution (${locale})`, async t => {
+    setLocale(locale); t.teardown(() => setLocale('en'));
+    let portCalls = 0; let approvals = 0;
+    const port = { listLeaves: () => { portCalls++; return []; }, getActivePath: () => null, fileExists: () => false, openPath: async () => {} };
+    const tool = createObsidianAppTool(port, null, { isMobile: true });
+    const registry = new ToolRegistry(); registry.registerTool(tool);
+    const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => { approvals++; return { result: 'approve' }; } } };
+    const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
+    const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message } };
+    t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola'), expected);
+    t.deepEqual(await tool.execute({ action: 'screenshot' }), expected);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
+    t.deepEqual([portCalls, approvals], [0, 0]);
 });

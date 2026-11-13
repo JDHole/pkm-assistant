@@ -37,7 +37,7 @@ export async function initializeVaultDrafts(input: {
         flush: () => pending, dispose: () => { for (const unsubscribe of off) unsubscribe(); } };
 }
 
-/** Obsidian desktop is the supported host (manifest.isDesktopOnly). */
+/** Desktop-only storage capability. The composition root skips this port on mobile. */
 export function desktopDraftPorts(app: App): Pick<Parameters<typeof initializeVaultDrafts>[0], 'storage' | 'vault' | 'hasher'> {
     const adapter = app.vault.adapter;
     if (!('getBasePath' in adapter) || typeof adapter.getBasePath !== 'function') throw new Error('Draft storage requires a filesystem vault');

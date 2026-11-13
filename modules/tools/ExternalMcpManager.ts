@@ -878,10 +878,13 @@ export class ExternalMcpManager {
     }
 
     /**
-     * Utwórz klienta SDK + transport. DI (`clientFactory`) wygrywa — testy wstrzykują fake.
+     * Utwórz klienta SDK + transport. Po kontroli platformy DI zastępuje SDK w testach.
      * @private
      */
     async _createClient(serverConfig: ExternalMcpServerConfig): Promise<{ client: McpClientLike; transport: unknown }> {
+        if (this._isMobile && (serverConfig.transport || 'stdio') === 'stdio') {
+            throw new Error(t('settings.mcp_stdio_mobile'));
+        }
         if (this._clientFactory) {
             const created = await this._clientFactory(serverConfig);
             if (!created || !created.client) {
@@ -916,7 +919,7 @@ export class ExternalMcpManager {
         if (transportType === 'stdio') {
             // stdio = lokalny proces → TYLKO desktop (gate options.isMobile z DI).
             if (this._isMobile) {
-                throw new Error('Serwery stdio (lokalny proces) działają tylko na desktopie');
+                throw new Error(t('settings.mcp_stdio_mobile'));
             }
             if (!serverConfig.command) {
                 throw new Error('Serwer stdio wymaga pola "command"');

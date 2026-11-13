@@ -290,6 +290,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
 /** DI dla testów: podmiana fabryki runnera (`__test__` + `DelegateTool.test.ts`). */
 interface DelegateToolDeps {
     drafts?: SubRunDrafts | { kind: 'unavailable' };
+    isMobile?: boolean;
     makeRunner?: (plugin: DelegatePlugin) => SubAgentRunnerLike;
 }
 
@@ -655,7 +656,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
         toolRegistry: plugin.toolRegistry!,
         app,
         plugin,
-        drafts: deps.drafts
+        drafts: deps.drafts,
+        isMobile: deps.isMobile
     }) as SubAgentRunnerLike);
     const inputSchema = {
         type: 'object',

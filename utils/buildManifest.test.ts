@@ -22,7 +22,7 @@ test('stampManifestVersion: serializacja bajt w bajt jak w gicie, bez konczacego
         description: 'opis',
         minAppVersion: '1.11.0',
         authorUrl: 'https://github.com/JDHole',
-        isDesktopOnly: true,
+        isDesktopOnly: false,
         version: '2.1.9',
     };
     // Zamierzone: bez koncowej nowej linii, dokladnie jak plik w gicie.

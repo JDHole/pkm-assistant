@@ -958,3 +958,21 @@ origin przez parser schematu memory (`unknown`, maskowanie, zamrożona kopia).
 Niepoprawne dane są pomijane; przy potwierdzonej epoce diagnostyka nie jest przenoszona.
 
 `obsidian_app` is an opt-in built-in tool registered only when the plugin setting is enabled; its `app` manifest is filtered by the same flag. The setting defaults off and changes take effect after plugin reload. The workspace port and serialization live in `modules/obsidian-app`; `app.state` has no vault target and `app.open` is checked against the requested vault path. Fresh agents have the group disabled.
+
+## Mobile M1 P1 - granice desktopu
+
+Composition root nie inicjalizuje `desktopDraftPorts` na mobile i przekazuje obu
+narzędziom (`delegate`, `sub_agent`) `{ kind: 'unavailable' }` oraz `isMobile`.
+Nie ma fallbacku zapisu do żywego vaulta. Czytający subagent nadal działa.
+`SettingsContent` na mobile od razu wybiera import JSON z pliku, bez czytania
+`process` ani `fs`. `ExternalMcpManager` odmawia stdio czytelnym komunikatem i18n
+przed importem SDK lub fabryką klienta, także dla preview i autostartu. HTTP pozostaje
+na istniejącej ścieżce. `ObsidianAppTool` dostaje null zamiast portu Electron na mobile;
+state/open pozostają dostępne. Odmowa screenshot ma tekst PL/EN tylko na mobile,
+a desktop zachowuje kod i treść `screenshot_disabled`. Kolejność kontroli wykonawcy
+pozostaje bez zmian, MCP odmawia przed zgodą i dostępem do hosta.
+Testy: `SettingsContent.mobile.test.ts` (przycisk i import pliku kontra automatyczny
+odczyt desktopowy), `ExternalMcpManager.test.ts` (stdio connect/preview/autostart,
+HTTP, oba języki), `ObsidianAppTool.test.ts` (MCP i bezpośrednia odmowa, brak zgody
+oraz portu), `runnerDrafts.test.ts` (delegate i kontynuacja sub_agent, odmowa PL/EN,
+odczyt bez kopii i niezmieniony plik), `src/main.mobile.test.ts` (podłączenie produkcyjne).

@@ -20,7 +20,7 @@ async function loadPublicEntries() {
         } }],
     });
     type BundleExports = {
-        Plugin: { prototype: { sendInlineComment: (file: string, selection: string, comment: string) => void } };
+        Plugin: { prototype: { sendInlineComment: (file: string, selection: string, comment: string) => Promise<void> } };
         PromptBuilder: new () => { build(agent: { name: string }, context: object): { getPrompt(): string } };
         setLocale(locale: string): void;
     };
@@ -50,7 +50,7 @@ for (const [locale, marker] of [['en', 'INLINE COMMENT'], ['pl', 'KOMENTARZ INLI
         const originalSetTimeout = window.setTimeout;
         window.setTimeout = ((callback: () => void) => { callback(); return 0; }) as typeof window.setTimeout;
         try {
-            Plugin.prototype.sendInlineComment.call(plugin, 'Notes/example.md', 'selected', 'change it');
+            await Plugin.prototype.sendInlineComment.call(plugin, 'Notes/example.md', 'selected', 'change it');
         } finally {
             window.setTimeout = originalSetTimeout;
         }
