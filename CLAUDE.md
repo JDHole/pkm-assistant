@@ -209,3 +209,7 @@ Na obu platformach memory scala pełne strony konfliktu `.state.json` po kopii o
 ## Mobile M2 D2 - aktywna rozmowa należy do urządzenia
 
 Lokalny identyfikator z API Obsidiana wyznacza własność `device` aktywnej sesji na obu platformach, z jawnym przejęciem w czacie i dawnym zachowaniem przy braku id; kontrakty adopcji, odmów, P3 i zgodności I/O opisują `modules/memory/CLAUDE.md`, `modules/chat/CLAUDE.md` i `modules/agents/CLAUDE.md`.
+
+## Mobile M4 F1 - załączniki na telefonie
+
+Spinacz na `Platform.isPhone` udostępnia aparat, galerię i pliki, odrzuca HEIC/HEIF, a PDF na obu platformach ładuje bibliotekę przez API Obsidiana; kontrakt, testy i ograniczenia prób opisuje `modules/ui-components/CLAUDE.md`.

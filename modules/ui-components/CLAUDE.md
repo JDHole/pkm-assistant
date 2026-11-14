@@ -360,3 +360,49 @@ te reguły do `body.is-phone`: przyciski 48 px na pełną szerokość, 16 px prz
 wiersz checkboxa 44 px, zawijanie ścieżek i przewijanie długiego diffa/obrazu.
 Wynik i pamięć sesyjna nie zmieniają kontraktu. Testy platform i obu decyzji:
 `modules/shell/decisionModals.mobile.test.ts`; geometria wymaga Chrome/Obsidiana.
+
+### Mobile M4 F1 - załączniki z telefonu i PDF
+
+`AttachmentManager` czyta `Platform.isPhone` przy kliknięciu spinacza: natywne
+`Menu` Obsidiana oferuje Zrób zdjęcie / Zdjęcie z galerii / Plik (PL i EN).
+Aparat ustawia `accept="image/*"`, `capture="environment"`, bez `multiple`;
+galeria `accept="image/*"` z `multiple`; Plik zachowuje dotychczasową listę
+rozszerzeń. Desktop i tablet od razu otwierają dotychczasowy picker.
+Wszystkie wejścia trafiają do `_processFileList`. Pole nie jest dołączane do DOM;
+`change`, `cancel`, następny picker i `destroy()` usuwają jego nasłuchy i referencję.
+Nie ma nasłuchów okna ani zgadywania anulowania timerem. Wymaga to zdarzenia
+`cancel` z WebView; starszy host bez tego zdarzenia zwolni referencję przy następnym
+wyborze lub zamknięciu widoku (pole nadal nie wisi w DOM).
+
+Rozpoznawanie obrazów nadal używa rozszerzenia lub MIME, więc JPEG/PNG/WebP/GIF
+bez znanego rozszerzenia są przyjmowane. Tylko telefon odrzuca HEIC/HEIF istniejącym
+`attach.unsupported_type` przez `onReject`: nie wysyła niedekodowalnego pliku
+po cichym fallbacku optymalizacji. MIME obsługiwanego zdjęcia ma pierwszeństwo przed
+rozszerzeniem HEIC/HEIF, np. gdy aparat faktycznie zwróci JPEG. Nie ma konwersji HEIC.
+Desktop/tablet zachowują wcześniejszą akceptację `image/*`.
+
+Na obu platformach `_loadPdfJs()` najpierw używa `window.pdfjsLib`, a przy jego
+braku publicznego `loadPdfJs()` z `obsidian`, odczytywanego leniwie z namespace.
+Opcja konstruktora `loadPdfJs?: () => Promise<PdfJsLib | null>` pozwala testować
+bez prawdziwego hosta. Brak API, null lub wyjątek ładowarki daje dotychczasowy
+`attach.pdf_attached`; wyjątek ma log. Błędy samej ekstrakcji nadal dają
+`attach.pdf_extract_failed`. Limit 50 stron i składanie treści nie zmieniły się.
+Atrapa Obsidiana w harnessie nie eksportuje `loadPdfJs`; F1 nie wymaga jej zmiany,
+bo testuje sukces przez wstrzyknięcie, a brak API przez rzeczywistą atrapę.
+
+Limity pozostają: obraz do 10 MB, optymalizacja dopiero powyżej 1 MB, dłuższy bok
+1568 px, JPEG 0,85. Z kodu: 4000x3000 px przejdzie do 1568x1176, ale najpierw
+powstaje pełny bitmap (~48 MB RGBA), potem canvas (~7,4 MB), plus kodowane dane
+i bufory dekodera. Powodzenie na telefonie zależy od wolnej pamięci; błąd
+optymalizacji zachowuje dotychczasowy fallback do oryginału. `createImageBitmap`
+używa domyślnego `imageOrientation: from-image` ([standard HTML](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#dom-createimagebitmap)),
+więc dekoder powinien uwzględnić EXIF w pikselach; zapis canvas nie kopiuje metadanych.
+Nie jest to pomiar RAM ani orientacji na Androidzie. Do próby na urządzeniu:
+uprawnienia aparatu, galeria, systemowy Back/anulowanie, zdjęcie 12 Mpx z EXIF,
+pamięć WebView i tekst PDF przed pierwszym otwarciem przeglądarki PDF Obsidiana.
+
+`AttachmentManager.mobile.test.ts` testuje kliknięcie spinacza i menu PL/EN,
+parametry trzech pól, wspólne przetwarzanie, sprzątanie i ponowny wybór, ścieżki
+desktop/tablet, tekst PDF i fallbacki, pierwszeństwo globalu, limit stron oraz MIME
+zdjęć i odmowę HEIC/HEIF. Testy używają rzeczywistego EventTarget i kontrolowanego
+FileReader na granicy środowiska, nie zastępują metod AttachmentManager.

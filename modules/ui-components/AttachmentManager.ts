@@ -1,3 +1,4 @@
+import { Menu, Platform } from 'obsidian';
 import { log } from '../../core/utils/Logger.js';
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
@@ -47,6 +48,7 @@ interface AttachmentManagerOptions {
     onReject?: (message: string) => void;
     dropZone?: HTMLElement;
     pasteTarget?: HTMLElement | null;
+    loadPdfJs?: () => Promise<PdfJsLib | null>;
 }
 
 type FileIntake = { kind: 'added' } | { kind: 'rejected'; message: string };
@@ -80,8 +82,7 @@ interface BuiltMessageContent {
     displayText: string;
 }
 
-// TS-boundary: pdf.js jest ładowany dynamicznie z globalnego `window.pdfjsLib` (bundlowany
-// przez Obsidiana przy otwartym viewerze PDF, albo w ogóle nieobecny) — brak stabilnych
+// TS-boundary: pdf.js pochodzi z globalnego `window.pdfjsLib` lub API Obsidiana — brak stabilnych
 // deklaracji typów dla tej biblioteki. Modelujemy tylko kształt, który ten plik realnie czyta.
 interface PdfJsTextItem {
     str: string;
@@ -133,6 +134,8 @@ export class AttachmentManager {
     declare _onDragLeave: (e: DragEvent) => void;
     declare _onDrop: (e: DragEvent) => void;
     declare _onPaste: ((e: ClipboardEvent) => void) | undefined;
+    private readonly pdfJsLoader: () => Promise<PdfJsLib | null>;
+    private disposeFilePicker: (() => void) | null = null;
 
     /**
      * @param {HTMLElement} container - Where to render chip bar + attach button
@@ -149,6 +152,16 @@ export class AttachmentManager {
         this.onReject = options.onReject || (() => {});
         this.dropZone = options.dropZone || container;
         this.pasteTarget = options.pasteTarget || null;
+        this.pdfJsLoader = options.loadPdfJs ?? (async () => {
+            // Namespace lookup also works with older hosts/test stubs lacking this API.
+            const obsidian = await import('obsidian');
+            if (typeof obsidian.loadPdfJs !== 'function') return null;
+            // Obsidian declares Promise<any>; validate the library entry point here.
+            const library: unknown = await obsidian.loadPdfJs();
+            if (library && typeof library === 'object' && 'getDocument' in library
+                && typeof library.getDocument === 'function') return library as PdfJsLib;
+            return null;
+        });
 
         /** @type {Array<{type: string, name: string, content: string, mimeType: string, size: number}>} */
         this.attachments = [];
@@ -179,7 +192,20 @@ export class AttachmentManager {
         this.attachButton.className = 'pkm-attach-button';
         setSvg(this.attachButton, UiIcons.paperclip(16));
         this.attachButton.title = t('attach.add_attachment');
-        this.attachButton.addEventListener('click', () => this._openFilePicker());
+        this.attachButton.addEventListener('click', event => {
+            if (!Platform.isPhone) {
+                this._openFilePicker();
+                return;
+            }
+            const menu = new Menu();
+            menu.addItem(item => item.setTitle(t('attach.take_photo')).setIcon('camera')
+                .onClick(() => this._openFilePicker('camera')));
+            menu.addItem(item => item.setTitle(t('attach.from_gallery')).setIcon('image')
+                .onClick(() => this._openFilePicker('gallery')));
+            menu.addItem(item => item.setTitle(t('attach.file')).setIcon('file')
+                .onClick(() => this._openFilePicker()));
+            menu.showAtMouseEvent(event);
+        });
     }
 
     /**
@@ -301,24 +327,34 @@ export class AttachmentManager {
     // FILE PICKER
     // ═══════════════════════════════════════════
 
-    _openFilePicker(): void {
+    _openFilePicker(source: 'file' | 'camera' | 'gallery' = 'file'): void {
+        this.disposeFilePicker?.();
         const input = createEl('input');
         input.type = 'file';
-        input.multiple = true;
-        input.accept = [
+        input.multiple = source !== 'camera';
+        input.accept = source === 'file' ? [
             ...IMAGE_EXTENSIONS.map(e => `.${e}`),
             ...TEXT_EXTENSIONS.map(e => `.${e}`),
             ...PDF_EXTENSIONS.map(e => `.${e}`),
-        ].join(',');
+        ].join(',') : 'image/*';
+        if (source === 'camera') input.setAttribute('capture', 'environment');
 
-        input.addEventListener('change', () => {
-            void (async () => {
-                if (input.files) {
-                    await this._processFileList(input.files);
-                }
-            })();
-        });
+        const cleanup = () => {
+            input.removeEventListener('change', onChange);
+            input.removeEventListener('cancel', cleanup);
+            input.remove();
+            if (this.disposeFilePicker === cleanup) this.disposeFilePicker = null;
+        };
+        const onChange = () => {
+            const files = input.files ? Array.from(input.files) : null;
+            cleanup();
+            if (files) void this._processFileList(files);
+        };
+        this.disposeFilePicker = cleanup;
+        input.addEventListener('change', onChange);
+        input.addEventListener('cancel', cleanup);
 
+        // Detached input: cancellation never leaves a hidden field in the document.
         input.click();
     }
 
@@ -444,6 +480,16 @@ export class AttachmentManager {
         const name = file.name;
         const mime = (file.type || '').toLowerCase();
 
+        // Android's picker can return HEIC/HEIF, which this WebView path cannot decode.
+        // Keep the existing desktop/tablet intake contract unchanged.
+        const supportedPhotoMime = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mime);
+        if (Platform.isPhone && (['image/heic', 'image/heif'].includes(mime)
+            || (!supportedPhotoMime && ['heic', 'heif'].includes(ext)))) {
+            const message = t('attach.unsupported_type', { name, ext, mime });
+            log.warn('Attachments', message);
+            return { kind: 'rejected', message };
+        }
+
         // Detect type: extension first, MIME fallback (clipboard pastes may lack extension)
         const isImage = IMAGE_EXTENSIONS.includes(ext) || mime.startsWith('image/');
         const isPdf = PDF_EXTENSIONS.includes(ext) || mime === 'application/pdf';
@@ -563,7 +609,7 @@ export class AttachmentManager {
             const arrayBuffer = await file.arrayBuffer();
 
             // Attempt to load pdf.js from Obsidian's bundled copy
-            const pdfjsLib = (window as WindowWithPdfJs).pdfjsLib || await this._loadPdfJs();
+            const pdfjsLib = await this._loadPdfJs();
 
             if (!pdfjsLib) {
                 return t('attach.pdf_attached', { name: file.name, size: this._formatSize(file.size) });
@@ -596,15 +642,12 @@ export class AttachmentManager {
     }
 
     async _loadPdfJs(): Promise<PdfJsLib | null> {
-        // Obsidian bundles pdf.js internally — try to access it
-        if ((window as WindowWithPdfJs).pdfjsLib) return (window as WindowWithPdfJs).pdfjsLib as PdfJsLib;
-
-        // Try dynamic import (may not work in all environments)
+        const existing = (window as WindowWithPdfJs).pdfjsLib;
+        if (existing) return existing;
         try {
-            // Obsidian exposes pdf.js as a global when PDF viewer is used
-            // Trigger a dummy operation to load it
-            return (window as WindowWithPdfJs).pdfjsLib || null;
-        } catch {
+            return await this.pdfJsLoader();
+        } catch (err) {
+            log.warn('Attachments', 'PDF library loading failed:', err);
             return null;
         }
     }
@@ -741,6 +784,7 @@ export class AttachmentManager {
      * Cleanup listeners and DOM.
      */
     destroy(): void {
+        this.disposeFilePicker?.();
         // Drag & drop — registered on document with capture: true
         document.removeEventListener('dragenter', this._onDragEnter, true);
         document.removeEventListener('dragover', this._onDragOver, true);

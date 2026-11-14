@@ -2500,6 +2500,9 @@ export const pl: Record<string, string> = {
 
   // ── AttachmentManager ──
   'attach.add_attachment': 'Dodaj załącznik',
+  'attach.take_photo': 'Zrób zdjęcie',
+  'attach.from_gallery': 'Zdjęcie z galerii',
+  'attach.file': 'Plik',
   'attach.attachment_label': 'Załącznik',
   'attach.remove': 'Usuń',
   'attach.limit_reached': 'Limit {{max}} załączników osiągnięty',

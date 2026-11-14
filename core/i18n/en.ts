@@ -2495,6 +2495,9 @@ export const en: Record<string, string> = {
 
   // ── AttachmentManager ──
   'attach.add_attachment': 'Add attachment',
+  'attach.take_photo': 'Take a photo',
+  'attach.from_gallery': 'Photo from gallery',
+  'attach.file': 'File',
   'attach.attachment_label': 'Attachment',
   'attach.remove': 'Remove',
   'attach.limit_reached': 'Limit of {{max}} attachments reached',
