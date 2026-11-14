@@ -188,3 +188,7 @@ klawiaturą; mechanizm, ograniczenia testów i lista prób na urządzeniu są w 
 ## Mobile M3 U14 - profil i karta agenta
 
 `modules/shell/sidebar/SidebarViews.css` pod `body.is-phone` powiększa tekst i cele dotyku profilu/karty, zawija zakładki, pamięć i model bez poziomego przewijania; lista agentów oraz desktop/tablet pozostają poza zakresem (decyzje i pomiary: `modules/shell/CLAUDE.md`).
+
+## Mobile M3 U15 - okienka paska czatu
+
+`modules/chat/chat_view.css` pod `body.is-phone` powiększa tekst i cele dotyku okienek autonomii, uprawnień i narzędzi, a przewijaną wysokość ogranicza geometrią panelu z U7; mechanizm i ograniczenia pomiaru opisuje `modules/chat/CLAUDE.md`.

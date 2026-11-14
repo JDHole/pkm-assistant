@@ -2150,6 +2150,42 @@ Okna sesji dziedziczą tę regułę z `src/styles.css`. `pre` zachowuje formatow
 a `pre` i tabele mają własne przewijanie i `max-width: 100%`; tabela jest blokowym
 obszarem przewijania. Lista wiadomości nie udostępnia poziomego paska przewijania.
 
+## M3 U15 - okienka paska pod polem pisania
+
+`chat_view.css` zmienia wyłącznie `body.is-phone`: okienka autonomii, uprawnień
+i narzędzi zajmują szerokość panelu (na ekranie 360 px krawędzie 5 i 355 px).
+Tekst główny i opisy autonomii mają 15 px, nagłówek uprawnień i identyfikatory
+narzędzi 12 px. Wiersze autonomii, przyciski i przełączniki mają cele co najmniej
+44 px. Kryształowy przełącznik uprawnień zachowuje mały rysunek na elemencie
+44x44 px, który już obsługuje kliknięcie. Presety zawijają się, a identyfikator
+narzędzia leży pod nazwą i może łamać długie ciągi.
+
+Okienka pozostają dziećmi przycisków, kotwiczonymi na panelu jak w U1. Limit
+`min(400px, var(--pkm-chat-prequestion-space, 260px))` korzysta z istniejącego
+`phoneKeyboard.ts` z U7: liczy miejsce nad panelem, także gdy chipy przesuwają
+pole pisania w dół. `--pkm-chat-popup-space` mierzy miejsce nad samym polem,
+więc nie jest właściwym limitem dla tych trzech okienek. Cała treść okienka
+przewija się pionowo, z zatrzymaniem przekazywania gestu do rozmowy.
+
+Brak zmian DOM, handlerów i i18n. Lista MCP nadal **wstawia nazwę narzędzia**
+do pola, nie włącza narzędzia. Tarcza zmienia uprawnienia przez dotychczasowe
+`updateAgent`, autonomia pozostaje per zakładka. Licznik `~n%` ma natywny
+`title` z `chat.token_viewer.approx_tooltip` w `updateTokenCounter`, bez
+handlera kliknięcia; U15 nie dodaje mu okna. Desktop i tablet zachowują style.
+
+Pomiar U15: Chromium 153, statyczny DOM odtworzony z `chat_popovers.ts`,
+produkcyjne arkusze (w tym app.css hosta) i kontroler `phoneKeyboard.ts`.
+288 wariantów przed/po: PL/EN, jasny/ciemny, klawiatura 0/300 px, telefon
+300/360 px, desktop 360/1024 px i tablet 360/768 px. Wszystkie 48 wariantów
+telefonu po zmianie mieszczą okienka nad klawiaturą, bez poziomego przewijania,
+z tekstem głównym >=15 px, pomocniczym >=12 px i celami >=44x44 px osiągalnymi
+przez przewijanie. 96 par desktop/tablet ma identyczną geometrię przed/po.
+Surowe zdarzenia touchStart/Move/End w Chromium docierają do ostatniego z 22
+narzędzi przy 360x804, z klawiaturą 0 i 300 px. Nie dodano testów AVA na tekst
+CSS; DOM i logika produkcyjna pozostają bez zmian. To pomiar komponentów,
+nie pełnego Obsidiana ani Androida: rzeczywisty gest, animacja klawiatury
+i wybór pozycji w WebView nadal wymagają telefonu.
+
 ## M3 U7 - klawiatura ekranowa
 
 Tylko `Platform.isPhone` instaluje `chat/phoneKeyboard.ts`; CSS jest za `body.is-phone`.
