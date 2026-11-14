@@ -240,3 +240,39 @@ Kontener modala ogranicza wysokość do viewportu, a długa treść przewija si�
 decyzjami. Weryfikacja geometrii wymaga przeglądarki, atrapa DOM AVA jej nie mierzy.
 `decisionModals.mobile.test.ts` sprawdza kolejność oraz wyniki wszystkich decyzji
 na telefonie, tablecie i desktopie, także sesyjną zgodę oraz modal diffa.
+
+## Mobile M3 U14 - profil i karta agenta
+
+`sidebar/SidebarViews.css` ogranicza nowe reguły do `body.is-phone` oraz dwóch
+powierzchni: `.sidebar-view-content:has(> .cs-profile__header)` i
+`.cs-agent-presentation-modal`. Lista agentów, komunikator i zaplecze nie są
+objęte tym zakresem, mimo wspólnych klas shardów. Desktop/tablet zachowują CSS
+bazowy. Nie zmienia się DOM, kolejność fokusu, obsługa akcji ani API modułów.
+
+Profil zachowuje siatkę zakładek, z dwiema kolumnami i zawijaniem etykiet.
+Tekst główny ma 15 px, pomocniczy 12 px, pola i select 16 px; nagłówki i liczby
+zachowują większy rozmiar. Kontrolki, także klikalne spany/divy, mają minimum
+44x44 px. Natywny `.checkbox-container` Obsidiana zachowuje własną geometrię;
+customowy `.cs-toggle` ma większy obszar trafienia z niepowiększonym torem.
+Akcje skilli i pamięci są widoczne bez hovera. Kafelki skilli rezerwują osobny
+pas na przyciski, aby powiększone cele nie zasłaniały nazwy ani siebie nawzajem.
+Druga prawa akcja kafelka Ekipy jest odsunięta o 48 px od pierwszej.
+Nazwa wpisu pamięci zawija się nad metadanymi i akcjami w istniejącej kolejności
+DOM; otwarte karty pamięci nie mają desktopowego limitu 600 px, który po
+powiększeniu tekstu obcinałby ostatnie wpisy. W karcie agenta model zajmuje pełny wiersz i zawija identyfikator w dowolnym
+miejscu. Dzieci mobilnego flex-kontenera modala nie kurczą się: cała karta jest
+przewijana pionowo, bez obcinania opisu w hero.
+
+Weryfikacja U14: tymczasowe podanie CSS do działającego Obsidiana 360x804
+(bez buildu) i pomiary dziewięciu zakładek, palety, nadpisania skilla,
+rozwiniętych uprawnień, sesji/streszczeń, podglądu/edytora promptu oraz karty.
+Brak poziomego overflow/scrolla i obciętych etykiet; badane cele co najmniej
+44x44, tekst co najmniej 12 px. Prawa krawędź usuwania pamięci 313 px,
+model `scrollWidth = clientWidth = 276 px`. Geometria listy agentów przed/po
+identyczna po zatrzymaniu animacji kryształów. Statyczne snapshoty tego DOM
+z produkcyjnym CSS w Chromium: 34 próby telefonu (360/412 px), 34 porównania
+bez zmian desktop/tablet (960/768 px), dodatkowo polskie etykiety i długa nazwa
+brain bez spacji, trafienie w trzy rozłączne akcje Ekipy i 20 wpisów pamięci
+bez pionowego obcięcia. To pomiary geometrii, nie test Androida/iOS ani zapisu danych.
+Nie dodano AVA dla samego CSS ani asercji na tekst arkusza. Na urządzeniu
+pozostają do sprawdzenia klawiatura ekranowa, dotyk i przewijanie długiej karty.

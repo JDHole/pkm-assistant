@@ -184,3 +184,7 @@ Tylko telefon kompensuje zasłoniętą część czatu przez CSS `--keyboard-heig
 Obsidiana i geometrię widoku, z zapasem `visualViewport`; główna karta nie odejmuje
 klawiatury drugi raz. Popupy i wskazane okna z polami tekstowymi mieszczą się nad
 klawiaturą; mechanizm, ograniczenia testów i lista prób na urządzeniu są w `modules/chat/CLAUDE.md`.
+
+## Mobile M3 U14 - profil i karta agenta
+
+`modules/shell/sidebar/SidebarViews.css` pod `body.is-phone` powiększa tekst i cele dotyku profilu/karty, zawija zakładki, pamięć i model bez poziomego przewijania; lista agentów oraz desktop/tablet pozostają poza zakresem (decyzje i pomiary: `modules/shell/CLAUDE.md`).

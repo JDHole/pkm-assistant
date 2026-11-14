@@ -3042,3 +3042,172 @@
 
 /* Zwijanie rozwijanych list bez inline-style (lint obsidianmd/no-static-styles-assignment). */
 .cs-collapsed { display: none; }
+
+/* Mobile M3 U14: profile editor and presentation only. The home agent grid
+   shares shard primitives, so keep every override inside these two surfaces. */
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) :is(div, span, p, label, a, button, pre, strong, em, h5, h6) {
+  min-width: 0;
+  font-size: 15px;
+}
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) :is(.cs-profile__name, .cs-profile-hero__name) {
+  font-size: 20px;
+}
+/* Secondary information keeps its existing color/weight hierarchy. */
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) :is(.cs-shard__sub-label, .cs-profile-hero__date, .cs-profile-hero__color-hex, .cs-perm-row__desc, .cs-mem-item__size, .cs-mem-pagination__info, .cs-mem-card__subtitle, .cs-badge, .cs-prompt-badge, .cs-dt-badge, .cs-dt-group__count, .cs-prompt-row__tokens, .cs-section-head, .cs-section-head > span, .cs-prompt-category__header, .cs-prompt-category__header > span, .cs-prompt-ref__label) {
+  font-size: 12px;
+}
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) :is(input, textarea, select) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  font-size: 16px;
+}
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) :is(button, input:not([type=hidden]), textarea, select, a, .cs-toggle, .cs-profile-hero__edit, .cs-picker__add-btn, .cs-picker__option, .cs-mem-entry__btn, .cs-mem-item, .cs-mem-card__head, .cs-focus-chip__access, .cs-focus-chip__remove, .cs-focus-chip--group > .cs-focus-chip__name, .cs-focus-suggestion, .cs-section-head--clickable, .cs-prompt-row__arrow, .cs-prompt-row__label, .cs-prompt-expand__hint, .cs-prompt-override__header, .cs-dt-group__header, .cs-palette-popup__swatch) {
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) :is(button, a) {
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* The native Obsidian switch retains its own 52x30 geometry. The custom
+   crystal switch gets a larger hit box while its track remains 38x18. */
+body.is-phone .cs-profile-content .cs-toggle {
+  width: 44px;
+  height: 44px;
+}
+body.is-phone .cs-profile-content .cs-toggle__track {
+  inset: 13px 3px;
+}
+body.is-phone .cs-profile-content .cs-toggle__thumb { left: 6px; }
+body.is-phone .cs-profile-content .cs-toggle--on .cs-toggle__thumb { left: 26px; }
+body.is-phone .cs-profile-content input[type=range] {
+  height: 44px;
+  flex: 1;
+}
+body.is-phone .cs-profile-content :is(.cs-profile-hero__edit, .cs-mem-entry__btn, .cs-focus-chip__access, .cs-focus-chip__remove, .cs-prompt-row__arrow, .cs-prompt-row__label) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+body.is-phone .cs-profile-content .cs-prompt-row__label {
+  flex: 1;
+  justify-content: flex-start;
+}
+body.is-phone .cs-profile-content :is(.cs-shard__action, .cs-shard__remove, .cs-mem-item__actions, .cs-mem-entry__actions, .cs-profile-hero__edit) {
+  opacity: 1;
+}
+/* Keep the grid navigation; two columns leave room for PL and EN labels. */
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab {
+  white-space: normal;
+  height: auto;
+  overflow-wrap: anywhere;
+  padding: 8px 6px;
+}
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab > span:first-child {
+  flex-shrink: 0;
+}
+body.is-phone .cs-profile-content { padding-inline: 12px; }
+body.is-phone .cs-profile-content .cs-profile-content { padding-inline: 0; }
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) .cs-shards {
+  grid-template-columns: minmax(0, 1fr);
+}
+body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) .cs-shards--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* Reserve a separate row for the two absolute actions; neither covers the
+   skill name or the other action. Connector toggles use that same space. */
+body.is-phone .cs-profile-content .cs-shards--compact .cs-shard:has(:is(.cs-shard__action, .cs-shard__remove, .cs-shard__corner-toggle)) {
+  padding-top: 52px;
+}
+body.is-phone .cs-profile-content :is(.cs-shard__action, .cs-shard__remove) {
+  top: 4px;
+  padding: 8px;
+  justify-content: center;
+}
+body.is-phone .cs-profile-content .cs-shard__remove { left: 4px; }
+body.is-phone .cs-profile-content .cs-shard__corner-toggle { top: 4px; right: 4px; }
+/* Long names take a whole row; metadata and actions wrap below, in DOM order. */
+body.is-phone .cs-profile-content :is(.cs-mem-item, .cs-mem-entry, .cs-mem-card__head, .cs-mem-pagination, .cs-focus-chip, .cs-focus-group-row, .cs-preset-row, .cs-prompt-row, .cs-prompt-override__header, .cs-prompt-override__actions, .cs-prompt-category__header, .cs-prompt-footer, .cs-dt-group__header, .cs-skill-override__buttons, .cs-artifact-manage-row, .cs-artifact-btn-row) {
+  flex-wrap: wrap;
+}
+body.is-phone .cs-profile-content .cs-mem-item__date {
+  flex: 1 1 calc(100% - 24px);
+  overflow-wrap: anywhere;
+}
+body.is-phone .cs-profile-content :is(.cs-mem-item__actions, .cs-mem-entry__actions) {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+body.is-phone .cs-profile-content .cs-mem-item__size { margin-left: 0; }
+body.is-phone .cs-profile-content .cs-mem-card__subtitle { flex-shrink: 1; }
+body.is-phone .cs-profile-content :is(.cs-mem-input, .cs-focus-input, .cs-picker__search, .cs-mem-filter__input, .cs-mem-entry__edit-input, .cs-dt-input) {
+  width: 0;
+  flex: 1 1 44px;
+}
+body.is-phone .cs-profile-content :is(.cs-focus-chip__name, .cs-artifact-manage-row__title, .cs-prompt-override__instr-label, .cs-picker__option-desc) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+body.is-phone .cs-profile-content .cs-focus-chip__name { flex: 1 1 100%; }
+body.is-phone .cs-profile-content .cs-prompt-expand { margin-left: 0; }
+body.is-phone .cs-profile-content .cs-prompt-preview { overflow-wrap: anywhere; }
+body.is-phone .cs-profile-content .cs-profile-hero {
+  flex-direction: column;
+  align-items: stretch;
+}
+body.is-phone .cs-profile-content .cs-profile__crystal {
+  align-self: center;
+  margin-right: 0;
+}
+body.is-phone .cs-profile-content :is(.cs-profile-hero__meta, .cs-profile-hero__color-row, .cs-palette-popup__row) {
+  flex-wrap: wrap;
+}
+body.is-phone .sidebar-view-content .cs-profile-content :is(.cs-profile-hero__color-dot, .cs-profile-hero__color-hex) {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+body.is-phone .cs-profile-content .cs-palette-popup__swatch:hover { transform: none; }
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-buttons { flex-wrap: wrap; }
+/* Presentation model identifiers need more than a quarter-width tile. */
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-shards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-shards + .cs-shards > .cs-shard:first-child {
+  grid-column: 1 / -1;
+}
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-shard__value {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-shards + .cs-shards > .cs-shard:first-child .cs-shard__value { font-size: 15px; }
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile-hero { flex-wrap: wrap; }
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile-hero__info { flex-basis: 180px; }
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile__crystal { margin: 0 auto; }
+body.is-phone .modal-content.cs-agent-presentation-modal :is(.cs-presentation-footer, .cs-profile-hero__meta) { flex-wrap: wrap; }
+body.is-phone .modal:has(> .cs-agent-presentation-modal) > .modal-close-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Obsidian's mobile modal-content is a flex column. Do not shrink the hero
+   against the stats/footer: scroll the complete card vertically instead. */
+body.is-phone .modal-content.cs-agent-presentation-modal > * { flex-shrink: 0; }
+/* A team tile has two right-side actions (default and active). */
+body.is-phone .cs-profile-content .cs-shard__action ~ .cs-shard__action { right: 52px; }
+/* Wrapped memory entries can exceed the desktop animation's 600px cap. */
+body.is-phone .cs-profile-content .cs-mem-card.open .cs-mem-card__body { max-height: none; }
