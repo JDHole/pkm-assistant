@@ -486,6 +486,8 @@ export const pl: Record<string, string> = {
   'chat.streaming.stall_aborted': '⏱️ Model milczy od {{seconds}} s - przerwałem odpowiedź. Sprawdź, czy serwer modelu działa (np. LM Studio / Ollama), i spróbuj ponownie.',
   'chat.streaming.error_prefix': 'Błąd: {{message}}',
   'chat.trigger_popup.no_matches': 'Brak dopasowań',
+  'chat.trigger_popup.phone_hint': 'Wpisuj aby filtrować',
+  'chat.trigger_popup.phone_filter': 'Filtr: {{filter}}',
   // Sufit łańcucha auto-tur po subach osiągnięty - wynik czeka w kolejce.
   'chat.streaming.auto_turn_chain_limit': 'Wynik pomocnika czeka na Twoją wiadomość - limit auto-tur z rzędu osiągnięty.',
   // Pokwitowanie delegacji w TLE (blok sub-agenta w czacie - user, nie model).

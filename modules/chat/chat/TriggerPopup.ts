@@ -409,6 +409,11 @@ export class TriggerPopup {
     }
 
     _headerText(): string {
+        if (Platform.isPhone) {
+            return this.filter
+                ? t('chat.trigger_popup.phone_filter', { filter: this.filter })
+                : t('chat.trigger_popup.phone_hint');
+        }
         return this.filter
             ? `Filtr: ${this.filter}`
             : 'Wpisuj aby filtrować • ↑↓ Enter Esc';

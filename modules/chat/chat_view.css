@@ -3984,6 +3984,44 @@ body.is-phone .pkm-chat-view .pkm-trigger-popup {
 body.is-phone .pkm-chat-view .pkm-mention-dropdown {
   max-height: min(260px, var(--pkm-chat-popup-space, 260px));
   box-sizing: border-box;
+  overscroll-behavior-y: contain;
+}
+/* M3 U19: keep the shared mention DOM, lay out its text on two rows in chat only. */
+body.is-phone .pkm-chat-view .pkm-mention-dropdown .mention-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 2px 8px;
+  min-height: 44px;
+  box-sizing: border-box;
+  font-size: 15px;
+  line-height: 1.4;
+}
+body.is-phone .pkm-chat-view .pkm-mention-dropdown .mention-icon {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+body.is-phone .pkm-chat-view .pkm-mention-dropdown .mention-name {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 15px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+body.is-phone .pkm-chat-view .pkm-mention-dropdown .mention-path {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12px;
+}
+body.is-phone .pkm-chat-view .pkm-mention-dropdown .mention-category {
+  font-size: 12px;
+}
+body.is-phone .pkm-chat-view .pkm-mention-dropdown .mention-empty {
+  display: flex;
 }
 body.is-phone .pkm-chat-view .pkm-skill-pq-overlay {
   bottom: var(--pkm-chat-panel-offset, 120px);

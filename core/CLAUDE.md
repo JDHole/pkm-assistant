@@ -505,3 +505,7 @@ na obu platformach. Test rzeczywistego renderu: `modules/chat/chat/chat_ui.mobil
 M3 U2 dodaje `chat.session_menu` w PL/EN jako dostępną nazwę przycisku menu telefonu.
 Pozostałe pozycje korzystają z istniejących etykiet. Test renderu obu języków:
 `modules/chat/chat/phoneSessionMenu.test.ts`.
+
+M3 U19 dodaje `chat.trigger_popup.phone_hint` i `phone_filter` w PL/EN dla
+nagłówka popupu `/` bez podpowiedzi klawiszy. Czat wybiera je tylko na telefonie;
+desktop/tablet zachowują stare napisy. Test renderu: `modules/chat/chat/TriggerPopup.phone.test.ts`.

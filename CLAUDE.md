@@ -196,3 +196,7 @@ klawiaturą; mechanizm, ograniczenia testów i lista prób na urządzeniu są w 
 ## Mobile M3 U18 - popup z klawiatury ekranowej
 
 Na `Platform.isMobile` popup `/` otwiera się także z tekstowego `input` (w tym kompozycji IME), ponieważ klawiatura ekranowa może nie podać `e.key`; reguły, deduplikację z `keydown` i testy opisuje `modules/chat/CLAUDE.md`.
+
+## Mobile M3 U19 - lista podpowiedzi pola czatu
+
+Tylko na telefonie lista `@` w czacie ma zawijane nazwy i wiersze minimum 44 px, a nagłówek `/` pomija klawisze; zakres CSS, zachowany limit U7 i testy opisuje `modules/chat/CLAUDE.md`.

@@ -2203,6 +2203,41 @@ CSS; DOM i logika produkcyjna pozostają bez zmian. To pomiar komponentów,
 nie pełnego Obsidiana ani Androida: rzeczywisty gest, animacja klawiatury
 i wybór pozycji w WebView nadal wymagają telefonu.
 
+## M3 U19 - podpowiedzi `@` i nagłówek `/`
+
+`chat_view.css` ogranicza nowe reguły do `body.is-phone .pkm-chat-view
+.pkm-mention-dropdown`. Współdzielony `MentionAutocomplete` jest obecnie tworzony
+tylko w `chat_ui.ts`, ale selektory nie obejmą jego użyć poza czatem. Bez zmiany DOM
+grid zachowuje ikonę, daje nazwie pozostałą szerokość wiersza i ścieżkę pod nazwą.
+Nazwa ma 15 px, łamanie w dowolnym miejscu i limit trzech linii; ścieżka 12 px
+z dotychczasowym wielokropkiem na końcu. Nie używamy sztucznego RTL do obcinania
+początku ścieżki, żeby nie zmieniać kolejności znaków. Nagłówek kategorii ma 12 px,
+wiersz minimum 44 px. Komponent nie renderuje stopki ani podpowiedzi klawiszy.
+Limit `min(260px, var(--pkm-chat-popup-space, 260px))` z U7 i pionowe przewijanie
+pozostają; `overscroll-behavior-y: contain` zatrzymuje gest na liście.
+Filtrowanie, wybór i wstawianie `@[Nazwa]` pozostają w niezmienionym komponencie.
+
+`TriggerPopup._headerText()` tylko dla `Platform.isPhone` używa nowych kluczy i18n
+`chat.trigger_popup.phone_hint` / `phone_filter` PL/EN. Telefon nie pokazuje
+strzałek ani Enter/Esc. Desktop i tablet zachowują dokładnie dotychczasowe teksty,
+również polski nagłówek w języku EN (jego tłumaczenie jest poza zakresem U19).
+`TriggerPopup.phone.test.ts`: sześć testów renderu nagłówka (telefon/tablet/desktop,
+PL/EN), aktualizacji po filtrowaniu, wyniku filtra i powrotu do podpowiedzi.
+AVA uzupełnia lokalnie brak wyszukiwania dzieci w atrapie DOM; harness bez zmian.
+Nie ma testów porównujących tekst CSS.
+
+Pomiar U19 w Chromium 153: rzeczywisty `MentionAutocomplete`, kontroler U7,
+produkcyjne CSS z app.css hosta, uproszczona obudowa czatu i atrapa vaulta.
+28 par przed/po: PL/EN, klawiatura 0/300 px, telefon 300/360 px,
+desktop 360/1024 px, tablet 360/768 px i lista poza czatem na telefonie 360 px.
+Osiem wariantów listy czatu na telefonie spełnia minima 44/15/12 px, nie obcina
+nazw poziomo (także 160 znaków bez spacji), mieści się nad polem i pozwala
+przewinąć do końca. Dotknięcie ostatniego wiersza przez Chromium wstawia
+`@[Krótka] ` i właściwą ścieżkę w chipie; kolejne `input` filtruje do wskazanej
+notatki. Pozostałe 20 par ma identyczną geometrię przed/po. Przy 360 px lista
+ma krawędzie x=13 i x=347, wysokość 260 px. To pomiar komponentu, nie pełnego
+Obsidiana ani WebView Androida; natywna klawiatura, animacja i gest wymagają telefonu.
+
 ## M3 U7 - klawiatura ekranowa
 
 Tylko `Platform.isPhone` instaluje `chat/phoneKeyboard.ts`; CSS jest za `body.is-phone`.

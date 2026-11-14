@@ -487,6 +487,8 @@ export const en: Record<string, string> = {
   'chat.streaming.stall_aborted': '⏱️ The model has been silent for {{seconds}} s - reply aborted. Check that your model server is running (e.g. LM Studio / Ollama) and try again.',
   'chat.streaming.error_prefix': 'Error: {{message}}',
   'chat.trigger_popup.no_matches': 'No matches',
+  'chat.trigger_popup.phone_hint': 'Type to filter',
+  'chat.trigger_popup.phone_filter': 'Filter: {{filter}}',
   // Auto-turn chain limit reached - the result is waiting in the queue.
   'chat.streaming.auto_turn_chain_limit': 'A helper\'s result is waiting for your message - the auto-turn chain limit was reached.',
   // Background delegation receipt (sub-agent block in chat - for the user, not the model).
