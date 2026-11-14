@@ -16,6 +16,7 @@ import test from 'ava';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { scheduleTriggerPopupOpen } from './triggerPopupLifecycle.js';
+import { Platform } from 'obsidian';
 
 const uiSource = readFileSync(fileURLToPath(new URL('./chat_ui.ts', import.meta.url)), 'utf8');
 
@@ -116,11 +117,11 @@ test('_handleTriggerKeyDown: `/` na początku pola planuje otwarcie popupu, `@` 
 
 // ── _handleTriggerInput: `@` na pozycji wyzwalacza zamyka otwarty popup ─────
 
-const inputBody = extractBody(uiSource, 'export function _handleTriggerInput(this: ChatViewLike) {');
+const inputBody = extractBody(uiSource, 'export function _handleTriggerInput(this: ChatViewLike, e?: Event) {');
 
 function makeHandleTriggerInput() {
-    const factory = new Function('return function() {' + inputBody + '};');
-    return factory() as (this: unknown) => void;
+    const factory = new Function('Platform', 'return function(e) {' + inputBody + '};');
+    return factory(Platform) as (this: unknown) => void;
 }
 
 function makeFakeThisForInput(value: string, selectionStart: number, triggerPos: number) {

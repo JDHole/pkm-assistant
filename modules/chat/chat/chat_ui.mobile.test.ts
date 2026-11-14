@@ -58,6 +58,102 @@ async function fixture(t: import('ava').ExecutionContext, mobile: boolean, phone
     return { view, sent };
 }
 
+// Model the browser's edit before dispatching input, including Android's IME metadata.
+function input(view: ChatViewLike, value: string, inputType: string, data: string | null, cursor = value.length) {
+    view.input_area.value = value;
+    view.input_area.selectionStart = cursor;
+    view.input_area.selectionEnd = cursor;
+    view.input_area.dispatchEvent(Object.assign(new Event('input'), { inputType, data }));
+}
+
+for (const phone of [true, false]) for (const inputType of ['insertText', 'insertCompositionText']) {
+    test.serial(`U18 Android input opens and filters real popup: phone=${phone}, ${inputType}`, async t => {
+        const { view } = await fixture(t, true, phone);
+        view.input_area.value = 'Hi ';
+        view.input_area.selectionStart = view.input_area.selectionEnd = 3;
+        view.input_area.dispatchEvent(Object.assign(key('Unidentified'), { keyCode: 229 }));
+        input(view, 'Hi /', inputType, '/');
+        t.is(view._triggerPos, 3);
+        t.is(view._triggerPopup?.isOpen(), true);
+        t.is(view._triggerPopup?.filter, '');
+        const popup = view._triggerPopup;
+        input(view, 'Hi /sa', inputType, 'sa');
+        t.is(view._triggerPopup, popup);
+        t.is(view._triggerPopup?.filter, 'sa');
+        t.deepEqual(view._triggerPopup?.filteredItems.map(item => item.name), ['/save', '/save session']);
+        input(view, 'Hi /sa ', 'insertText', ' ');
+        t.is(view._triggerPopup, null);
+        t.is(popup?.isOpen(), false);
+        t.is(view._triggerPos, -1);
+        t.is(view.input_area.value, 'Hi /sa ');
+    });
+}
+
+for (const ending of ['mention', 'delete']) {
+    test.serial(`U18 mobile popup closes after ${ending}`, async t => {
+        const { view } = await fixture(t, true, true);
+        input(view, '/', 'insertText', '/');
+        t.is(view._triggerPopup?.isOpen(), true);
+        t.is(view._triggerPos, 0);
+        const popup = view._triggerPopup;
+        if (ending === 'mention') input(view, '/@', 'insertText', '@');
+        else input(view, '', 'deleteContentBackward', null);
+        t.is(view._triggerPopup, null);
+        t.is(popup?.isOpen(), false);
+        t.is(view.input_area.value, ending === 'mention' ? '/@' : '');
+        t.is(view._triggerPos, -1);
+    });
+}
+
+for (const platform of ['phone', 'tablet', 'desktop']) for (const timerFirst of [false, true]) {
+    test.serial(`U18 physical slash opens once: ${platform}, timer before input=${timerFirst}`, async t => {
+        const { view } = await fixture(t, platform !== 'desktop', platform === 'phone');
+        let opens = 0;
+        const open = view._openTriggerPopup.bind(view);
+        view._openTriggerPopup = position => { opens++; open(position); };
+        view.input_area.value = 'Hi ';
+        view.input_area.selectionStart = view.input_area.selectionEnd = 3;
+        view.input_area.dispatchEvent(key('/'));
+        t.is(view._triggerPopup, null);
+        // Keydown schedules opening; the browser commits the slash before the timer.
+        view.input_area.value = 'Hi /';
+        view.input_area.selectionStart = view.input_area.selectionEnd = 4;
+        if (timerFirst) await new Promise(resolve => setTimeout(resolve, 10));
+        input(view, 'Hi /', 'insertText', '/');
+        const earlyPopup = view._triggerPopup;
+        await new Promise(resolve => setTimeout(resolve, 10));
+        t.is(opens, 1);
+        t.is(view._triggerPos, 3);
+        t.is(view._triggerPopup?.isOpen(), true);
+        t.is(view._triggerPopup?.filter, '');
+        if (timerFirst) t.is(view._triggerPopup, earlyPopup);
+        const popup = view._triggerPopup;
+        input(view, 'Hi /sa', 'insertText', 'sa');
+        t.is(view._triggerPopup, popup);
+        t.is(view._triggerPopup?.filter, 'sa');
+        t.deepEqual(view._triggerPopup?.filteredItems.map(item => item.name), ['/save', '/save session']);
+        t.is(opens, 1);
+    });
+}
+
+test.serial('U18 desktop input alone does not open; recognized slash keydown still does', async t => {
+    const { view } = await fixture(t, false);
+    view.input_area.dispatchEvent(key('Unidentified'));
+    input(view, '/', 'insertText', '/');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    t.is(view._triggerPopup, null);
+    t.is(view._triggerPos, -1);
+    view.input_area.value = '';
+    view.input_area.selectionStart = view.input_area.selectionEnd = 0;
+    view.input_area.dispatchEvent(key('/'));
+    input(view, '/', 'insertText', '/');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    t.is(view._triggerPopup?.isOpen(), true);
+    t.is(view._triggerPos, 0);
+    input(view, '/cl', 'insertText', 'cl');
+    t.deepEqual(view._triggerPopup?.filteredItems.map(item => item.name), ['/clear']);
+});
+
 for (const mobile of [true, false]) for (const shift of [false, true]) {
     test.serial(`Enter through rendered input: mobile=${mobile}, shift=${shift}`, async t => {
         const { view, sent } = await fixture(t, mobile);

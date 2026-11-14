@@ -29,7 +29,7 @@ import { installSelectionMenu } from './selectionMenu.js';
 // martwe, niewołane przez nikogo `this.metoda(...)` (naprawa recenzji niezależnej); instalacja
 // woła je przez ZWYKŁY import niżej, w `renderView`.
 import { installMessagesContainerActivity } from './connectorActivity.js';
-import { scheduleTriggerPopupOpen, closeTriggerPopup } from './triggerPopupLifecycle.js';
+import { scheduleTriggerPopupOpen, closeTriggerPopup, mobileTriggerPosition } from './triggerPopupLifecycle.js';
 import { replaceMentionAutocomplete } from './inputLifecycle.js';
 import { installPhoneKeyboard } from './phoneKeyboard.js';
 import { followsChatBottom } from './scrollGeometry.js';
@@ -184,7 +184,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
     closeTriggerPopup(this);
     this._triggerPos = -1;
     this.input_area.addEventListener('keydown', (e: KeyboardEvent) => this._handleTriggerKeyDown(e));
-    this.input_area.addEventListener('input', () => this._handleTriggerInput());
+    this.input_area.addEventListener('input', (e) => this._handleTriggerInput(e));
     this.input_area.addEventListener('blur', () => {
         // Defer close so click on popup item lands first
         window.setTimeout(() => this._closeTriggerPopup(), 150);
@@ -1348,7 +1348,24 @@ export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {
     scheduleTriggerPopupOpen(this, () => this._openTriggerPopup(triggerPos));
 }
 
-export function _handleTriggerInput(this: ChatViewLike) {
+export function _handleTriggerInput(this: ChatViewLike, e?: Event) {
+    if (Platform.isMobile && e) {
+        const triggerPos = mobileTriggerPosition({
+            isMobile: Platform.isMobile,
+            popupOpen: this._triggerPopup?.isOpen() ?? false,
+            openScheduled: this._triggerOpenTimer !== null,
+            inputType: 'inputType' in e ? e.inputType : undefined,
+            data: 'data' in e ? e.data : undefined,
+            value: this.input_area.value,
+            selectionStart: this.input_area.selectionStart,
+            selectionEnd: this.input_area.selectionEnd,
+        });
+        if (triggerPos !== null) {
+            // Input is already committed; keep the initial empty filter from open().
+            this._openTriggerPopup(triggerPos);
+            return;
+        }
+    }
     if (!this._triggerPopup?.isOpen()) return;
     const value = this.input_area.value || '';
     const cursor = this.input_area.selectionStart ?? value.length;

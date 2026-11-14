@@ -192,3 +192,7 @@ klawiaturą; mechanizm, ograniczenia testów i lista prób na urządzeniu są w 
 ## Mobile M3 U15 - okienka paska czatu
 
 `modules/chat/chat_view.css` pod `body.is-phone` powiększa tekst i cele dotyku okienek autonomii, uprawnień i narzędzi, a przewijaną wysokość ogranicza geometrią panelu z U7; mechanizm i ograniczenia pomiaru opisuje `modules/chat/CLAUDE.md`.
+
+## Mobile M3 U18 - popup z klawiatury ekranowej
+
+Na `Platform.isMobile` popup `/` otwiera się także z tekstowego `input` (w tym kompozycji IME), ponieważ klawiatura ekranowa może nie podać `e.key`; reguły, deduplikację z `keydown` i testy opisuje `modules/chat/CLAUDE.md`.

@@ -139,11 +139,28 @@ Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`Trigg
   notatki i foldery vaulta, własny nasłuch `input`, tag `@[Nazwa]` wstawiany w tekst pola plus chip
   w pasku CHIPÓW POD polem (`_chipBar`, `chat_ui.ts` ok. 212 - powstaje po wierszu textarea, nie
   jest to popup nad polem). `TriggerPopup` w ogóle nie reaguje na `@` jako WYZWALACZ:
-  `_handleTriggerKeyDown` otwiera się tylko dla `e.key === '/'`, a `_handleTriggerInput` zamyka
+  `_handleTriggerKeyDown` planuje otwarcie tylko dla `e.key === '/'`, a `_handleTriggerInput` zamyka
   popup, jeśli znak na pozycji wyzwalacza przestał być `/`. **`/@`** (user otworzył popup `/`,
   potem wpisał `@` jako pierwszy znak FILTRA - trigger sam zostaje `/`): `_handleTriggerInput`
   zamyka TriggerPopup, gdy filtr zawiera `@`, zamiast filtrować pustką - bez tej bramki oba popupy
   stały otwarte naraz (naprawa 2.3.0, niżej opisana razem z resztą).
+
+- **M3 U18, klawiatura ekranowa:** na `Platform.isMobile` (telefon i tablet)
+  `_handleTriggerInput(event)` dodatkowo otwiera `/`, bo Android/Gboard może wysłać
+  `keydown` z `key: 'Unidentified'`. Czysty `mobileTriggerPosition` w
+  `chat/triggerPopupLifecycle.ts` dopuszcza tylko `insertText` i `insertCompositionText`
+  z `data` kończącym się `/`, zwiniętym kursorem tuż za tym znakiem i początkiem pola
+  albo białym znakiem przed nim. Wg [Input Events Level 2](https://www.w3.org/TR/input-events-2/#interface-InputEvent)
+  oba typy niosą tekst w `data`; kompozycja może zastępować cały ciąg, dlatego nie
+  wymagamy `data === '/'` ani `isComposing === false`. Brak metadanych, paste/drop,
+  usuwanie, undo/redo i autokorekta nie otwierają popupu. Otwarty popup lub oczekujący
+  `_triggerOpenTimer` blokuje drugie otwarcie. Po `input` tekst już istnieje, więc
+  otwarcie jest synchroniczne i kończy handler z początkowym pustym filtrem;
+  kolejne zdarzenia filtrują/zamykają dotychczasową ścieżką. Desktopowy `keydown`
+  i jego timer pozostają bez zmian. Testy: `triggerPopupLifecycle.test.ts`
+  (literalne decyzje), `chat_ui.mobile.test.ts` (rzeczywiste nasłuchy renderowanego
+  ChatView, popup, filtr, zamknięcie i deduplikacja na trzech platformach).
+  To symulowane zdarzenia w AVA, nie pomiar Gboard ani wyboru dotykiem na Androidzie.
 
 - **Składnia markerów wstawianych przez `onSelect`**: `@@skill:nazwa`, `@@tool:nazwa`,
   `@sub-agent:nazwa` (`InlineChipPlugin.ts`'s `makeInlineTriggerMarker`) - `@` w tych markerach
