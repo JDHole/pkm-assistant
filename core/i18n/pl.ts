@@ -4,6 +4,7 @@
  * {{param}} for interpolation.
  */
 export const pl: Record<string, string> = {
+  "chat.state_corrupt": "Plik stanu agenta {{agent}} jest uszkodzony po synchronizacji i nie udało się go naprawić. Rozmowa nie została zapisana.",
   "diagnostics.custom_identifier": "niestandardowy identyfikator",
   "diagnostics.local_error": "Klasa: {{name}}; kod: {{code}}",
   "diagnostics.connection_kind": "Rodzaj: {{kind}}",

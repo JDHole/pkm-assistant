@@ -52,6 +52,9 @@ modules/memory/
 ├── ConsolidationSnapshot.ts   # prune() - sprząta kopie snapshotu po starszej wersji pluginu
 ├── MigrationV3.ts            # backup-first migracja brain.md v2 -> v3
 ├── StateManager.ts           # .state.json: aktywne sesje + liczniki, kolejka RMW
+├── gitConflict.ts            # splitGitConflict: tekst -> dwie pełne strony, dla D1 i kolejnych paczek M2
+├── stateConflict.ts          # czyste mergeStateConflict, opcjonalny spis istniejących sesji
+├── StateCorruptionError.ts   # publiczny typ błędu nienaprawialnego JSON-a, bez treści pliku
 ├── IdleScheduler.ts          # pure decyzja "czy zapisać po bezczynności" (wpinany w modules/chat)
 ├── RetrievalEngine.ts        # silnik narzędzia `search`: runSearch() z RRF keyword+semantic
 ├── EmbeddingHelper.ts         # helper wektoryzacji dla retrieval semantycznego
@@ -85,6 +88,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `parseBrainLog(text, limit=50)` | Czysty parser `brain.log` (TSV -> `{ts, op, target, detail}`, od najnowszego). Pisze go `AgentMemory.appendBrainLog`; czyta karta "Log wpisów" w profilu agenta. |
 | `MemoryAccessGuard`, `MEMORY_V3_ERROR_CODES`, `isValidNoteType`, `makeMemoryNoteFilename()` | Waliduje ścieżki Memory v3 (brak traversal / absolutnych / cross-agent) + kanoniczne nazwy notatek `type_slug.md`. |
 | `listUncoveredArchiveSessions(agentMemory)` | Sesje z `sessions/archive` BEZ stempla `covered_by_l1`, sortowane rosnąco po nazwie - jedyny poprawny materiał na nową paczkę L1. |
+| `StateCorruptionError` | Błąd nienaprawialnego JSON-a; niesie `agentName` z nazwy katalogu agenta, bez ścieżki i treści. Czat rozpoznaje go w `safeErrorText`. |
 | `IdleScheduler` | Pure decyzja "czy zapisać po bezczynności" (wpinany w `modules/chat`). |
 | `SaveSessionWorkflow` | `/save session`: user-review, tworzenie notatek, archiwizacja sesji. |
 | `ArchiveWorkflow` | Automatyczna konsolidacja po progach: brain/ dedup, L1, L2, L3. Jeden tor: `runWithRun(consolidationRun)` (generuje propozycje wszystkich paczek, nic nie zapisuje) + `applyStepDecision()` (zapisuje po decyzji usera) + `generateGatedSteps()` (zdejmuje kłódkę z L2/L3 dopiero gdy L1 są rozstrzygnięte) - generacja oddzielona od zapisu. |
@@ -732,7 +736,8 @@ Flow:
   niedostępności, `ensureMemoryStructure` tylko warnuje), `rebuildBrainIndex` robi `.bak` także
   przy `'unknown'`, a w `StateManager` `read()` może zdegradować się do defaultów w pamięci (z
   logiem), ale mutatory (`update`/`addActiveSession`/`markArchived`) rzucają - utrwalenie
-  defaultów kasowałoby liczniki i limity. Nie "naprawiaj" tego z powrotem na gołe `exists()` i
+  defaultów kasowałoby liczniki i limity. M2 D1 dopuszcza tylko scalenie obu pełnych stron
+  konfliktu gita po kopii oryginału (kontrakt poniżej). Nie "naprawiaj" tego na gołe `exists()` i
   nie potwierdzaj `false` odczytem w pętlach listujących (migracje, `listBrainNotes`) - tam to
   tylko koszt.
 - ⚠️ **Nieostemplowana sesja jest WYNIKIEM kroku, nie szumem w logu.** `_cleanupAfterL1` zwraca
@@ -1157,7 +1162,7 @@ Kolejność kluczy obiektów, wcięcia i końcowy newline nie stanowią zmiany;
 kolejność tablic i pola spoza schematu są istotne. Równy stan oznacza zero zapisów i
 zachowanie oryginalnych bajtów. Faktyczny zapis zawsze kończy się `\n`. Błąd odczytu
 porównawczego lub uszkodzony JSON powoduje zwykły zapis dostarczonego stanu, jak przed R2.
-Pierwszy odczyt mutacji (`_readRaw`) nadal odrzuca nieczytelny/uszkodzony stan przed zmianą;
+Pierwszy odczyt mutacji (`_readRaw`) odrzuca nieczytelny stan przed zmianą, poza wąską naprawą M2 D1;
 nie wolno pomylić tej ochrony z opcjonalnym drugim odczytem do porównania.
 Kolejka jest nadal lokalna dla instancji, nie zapewnia blokady między urządzeniami.
 Testy: `StateManager.test.ts` (pruning pustej sesji, zmiana, równość, zewnętrzny zapis,
@@ -1170,3 +1175,41 @@ Migracja `weekly/` do `summaries/L1/` sprawdza teraz cel przez `probeFile` pod k
 Zajęty lub niepewny cel pozostawia oba pliki bez zmiany, jak migracja płaskich sesji.
 Nie wybiera nowej nazwy, bo istniejące L2 mogą odwoływać się do starej.
 Testy startu w `AgentMemory.test.ts` sprawdzają kolizję, kłamiące exists i wolny cel.
+
+
+### Mobile M2 D1 - samonaprawa stanu po konflikcie gita
+
+`splitGitConflict` zachowuje bajty wspólnych wierszy i obu stron (także CRLF), pomija
+bazę diff3 i obsługuje wiele bloków. Znaczniki otwarcia/zamknięcia/bazy mają dokładnie
+siedem znaków oraz spację z dowolną etykietą albo koniec wiersza. `=======` jest
+separatorem wyłącznie jako cały wiersz otwartego bloku; poza nim pozostaje treścią.
+Zagnieżdżenia, niepełne lub błędnie uporządkowane bloki oraz brak znaczników dają `null`.
+Helper jest eksportowany z własnego pliku wewnątrz memory, gotowy dla D3/D7.
+
+`mergeStateConflict` wymaga dwóch obiektów JSON. `active_sessions` to unia stringów
+w kolejności nasze/potem nowe ich, ograniczona do bezpośrednich plików `sessions/active`.
+Opcjonalne `adapter.list`/`mkdir` są już dostarczane przez vault AgentMemory; brak lub
+błąd listingu zostawia unię bez filtrowania. Licznik i `brain_notes_limit` biorą większą
+skończoną liczbę, bez konwersji stringów; brak obu liczb daje licznik 0, a obecny lecz
+niepoprawny limit null (nie wprowadzamy limitu, jeśli klucza nie było). Data to późniejsza
+parsowalna data, obie złe dają null. `last_used` wybiera nasze wskazanie obecne w wynikowej
+liście, potem ich, potem ostatnią sesję lub null. Pozostałe klucze zachowują nasze wartości,
+także null; klucze tylko po ich stronie też przeżywają. Nie zmieniamy schematu ani ścieżki stanu.
+
+Mutacja naprawia we własnej kolejce StateManager: najpierw oryginalny tekst 1:1 do
+`.pkm-assistant/backups/state-<agent>-<timestamp>[-<sufiks>].json.bak`, potem weryfikacja
+kopii i niezmienności źródła, następnie dotychczasowy format JSON (2 spacje i newline),
+jeden warning ze ścieżkami i właściwa mutacja. Nazwa nie nadpisuje wcześniejszej kopii.
+Końcówka `.json.bak` chroni przed istniejącą rotacją ustawień, która wybiera wszystkie
+`*.json` w backups. Wzorzec kopii pochodzi z `core/runtime/settingsArmor`; tutaj bez rotacji.
+Błąd kopii lub niepewny wolny cel blokuje naprawę. Kolejna mutacja po sukcesie czyta już
+czysty stan i nie tworzy drugiej kopii. Nie ma blokady między urządzeniami/instancjami:
+sprawdzenie źródła ogranicza wyścig z pullem, ale nie stanowi atomowego compare-and-swap.
+
+`read()` istniejącego konfliktu zwraca scalony stan tylko w RAM, bez kopii i zapisów.
+Nienaprawialne uszkodzenie nadal daje defaulty tylko w RAM, zgodnie z kontraktem
+`consolidationRunner`; mutacja rzuca `StateCorruptionError`. Historyczny bootstrap
+potwierdzonego braku pliku przez `read()` nadal zapisuje defaulty. Jawne `write(state)`
+i odczyt porównawczy R2 pozostają bez zmian. Zdrowy plik nie uruchamia listingu ani
+dodatkowego I/O. Testy: `gitConflict.test.ts`, `stateConflict.test.ts`,
+`StateManager.conflict.test.ts` oraz D1 w `../chat/chat/chat_streaming.sendTab.test.ts`.

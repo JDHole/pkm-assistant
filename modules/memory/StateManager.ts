@@ -1,11 +1,17 @@
 import { probeFile } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
+import { splitGitConflict } from './gitConflict.js';
+import { mergeStateConflict } from './stateConflict.js';
+import { StateCorruptionError } from './StateCorruptionError.js';
 
 /** Adapter FS vaulta w zakresie potrzebnym `.state.json` (typowany strukturalnie). */
 export interface StateVaultAdapterLike {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
     write(path: string, data: string): Promise<void>;
+    // Already supplied by AgentMemory's vault. Only recovery needs these operations.
+    list?(path: string): Promise<{ files?: string[]; folders?: string[] } | null>;
+    mkdir?(path: string): Promise<void>;
 }
 
 export interface StateVaultLike {
@@ -63,13 +69,13 @@ export class StateManager {
      * Każdy mutator (`update` / `addActiveSession` / `markArchived`) czyta przez tę metodę
      * i NATYCHMIAST zapisuje to, co dostał - więc ciche defaulty kasowały licznik konsolidacji,
      * listę `active_sessions` i klucze spoza schematu (`brain_notes_limit` = decyzja usera),
-     * bez jednej linii w logu. Teraz mutacja się po prostu nie odbywa, a plik zostaje nietknięty
-     * (do przeczytania przy następnym podejściu albo do ratunku ręcznie).
+     * bez jednej linii w logu. Wyjątek: pełne strony konfliktu gita można scalić po kopii
+     * oryginału. Inne uszkodzenia nadal blokują mutację, bez zapisu defaultów.
      *
      * Bootstrap (pierwszy start agenta) robimy WYŁĄCZNIE na POTWIERDZONYM „nie ma"
      * (`probeFile`), nie na gołym `exists() === false` - to ono kłamie na dyskach sieciowych.
      */
-    private async _readRaw(): Promise<MemoryState> {
+    private async _readRaw(repairOnDisk = true): Promise<MemoryState> {
         if (await probeFile(this.vault.adapter, this.statePath) === 'missing') {
             const state = this.defaultState();
             await this._writeRaw(state);
@@ -85,9 +91,56 @@ export class StateManager {
         try {
             return { ...this.defaultState(), ...(JSON.parse(raw || '{}') as Partial<MemoryState>) };
         } catch (e) {
+            const recovered = await this._recoverConflict(raw, repairOnDisk);
+            if (recovered) return recovered;
             log.warn('StateManager', `Uszkodzony JSON w ${this.statePath} — nie nadpisuję defaultami:`, e);
-            throw e;
+            throw new StateCorruptionError(this._agentName());
         }
+    }
+
+    private _agentName(): string {
+        return this.statePath.split('/').at(-3) || 'agent';
+    }
+
+    /** Called under the mutation queue, or read-only by read(). Never caches recovery. */
+    private async _recoverConflict(raw: string, repairOnDisk: boolean): Promise<MemoryState | null> {
+        const sides = splitGitConflict(raw);
+        if (!sides || !mergeStateConflict(sides.ours, sides.theirs)) return null;
+        const adapter = this.vault.adapter;
+        const activeDir = this.statePath.slice(0, this.statePath.lastIndexOf('/')) + '/sessions/active';
+        let existing: string[] | undefined;
+        try {
+            const listing = await adapter.list?.(activeDir);
+            if (listing?.files) existing = listing.files
+                .filter(path => path.startsWith(activeDir + '/') && !path.slice(activeDir.length + 1).includes('/'))
+                .map(path => path.slice(activeDir.length + 1));
+        } catch { /* Unknown listing means union only, never an empty directory. */ }
+        const state = mergeStateConflict(sides.ours, sides.theirs, existing)!;
+        if (!repairOnDisk) return { ...this.defaultState(), ...state };
+        try {
+            // Same backup-first, verbatim-copy pattern as core/runtime/settingsArmor.
+            // Unlike daily settings snapshots, conflict copies are never rotated here.
+            const dir = '.pkm-assistant/backups';
+            if (!await adapter.exists(dir)) {
+                if (!adapter.mkdir) return null;
+                await adapter.mkdir(dir);
+            }
+            const agent = this._agentName().replace(/[^a-zA-Z0-9_-]/g, '_');
+            const stamp = Date.now();
+            let backupPath: string | null = null;
+            for (let suffix = 0; suffix < 50; suffix++) {
+                const candidate = `${dir}/state-${agent}-${stamp}${suffix ? `-${suffix}` : ''}.json.bak`;
+                if (await probeFile(adapter, candidate) === 'missing') { backupPath = candidate; break; }
+            }
+            if (!backupPath) return null;
+            await adapter.write(backupPath, raw);
+            if (await adapter.read(backupPath) !== raw) return null;
+            // A pull during the backup must not be overwritten by our stale reconstruction.
+            if (await adapter.read(this.statePath) !== raw) return null;
+            await this._writeRaw(state);
+            log.warn('StateManager', `Naprawiono konflikt: ${this.statePath}; kopia: ${backupPath}`);
+            return { ...this.defaultState(), ...state };
+        } catch { return null; }
     }
 
     /** Raw write (no queue). Compare disk values, preserving formatting on a no-op. */
@@ -109,14 +162,15 @@ export class StateManager {
     }
 
     /**
-     * Publiczny odczyt: NIC nie zapisuje, więc awaria może zdegradować się do defaultów
-     * W PAMIĘCI - z logiem, nigdy na dysk. Ten kontrakt trzyma `consolidationRunner`:
+     * Publiczny odczyt istniejącego pliku NIC nie zapisuje. Konflikt scala tylko W PAMIĘCI;
+     * inne uszkodzenia degradują się do defaultów z logiem. Bootstrap brakującego pliku
+     * zachowuje historyczny zapis defaultów. Ten kontrakt trzyma `consolidationRunner`:
      * uszkodzony `.state.json` ma spaść na próg z ustawień, a nie wywrócić konsolidacji.
      * Groźna była nie sama degradacja, tylko jej UTRWALENIE przez mutator (patrz `_readRaw`).
      */
     async read(): Promise<MemoryState> {
         try {
-            return await this._readRaw();
+            return await this._readRaw(false);
         } catch (e) {
             log.warn('StateManager', `Defaulty TYLKO w pamięci (nic nie idzie na dysk): ${this.statePath}`, e);
             return this.defaultState();

@@ -1,0 +1,20 @@
+{
+  "active_sessions": [
+<<<<<<< HEAD
+    "jaskier_2026-11-14_14-25.md",
+    "jaskier_2026-11-14_15-01.md"
+=======
+    "jaskier_2026-11-14_14-25.md"
+>>>>>>> ff2c0433fdc05e5a7be0cfee1dae54f4b98a5c69
+  ],
+<<<<<<< HEAD
+  "archived_since_last_consolidation": 7,
+  "last_archive_at": "2026-11-14T15:00:00.000Z",
+=======
+  "archived_since_last_consolidation": 8,
+  "last_archive_at": "2026-11-14T15:02:00.000Z",
+>>>>>>> ff2c0433fdc05e5a7be0cfee1dae54f4b98a5c69
+  "notes_count_at_last_check": 13,
+  "last_used": "jaskier_2026-11-14_14-25.md",
+  "brain_notes_limit": 15
+}

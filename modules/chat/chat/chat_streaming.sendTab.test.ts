@@ -28,6 +28,52 @@ function deferred() {
     return { promise, resolve };
 }
 
+for (const locale of ['pl', 'en'] as const) for (const backupFails of [false, true]) {
+    test.serial(`D1: first send, ${locale}, backup fails=${backupFails}, renders state error and returns draft`, async t => {
+        const f = await fixture(true);
+        setLocale(locale);
+        t.teardown(() => { setLocale('pl'); f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+        const raw = backupFails ? '<<<<<<< HEAD\n{"private":"secret"}\n=======\n{}\n>>>>>>> branch\n' : '{"private":"secret", broken';
+        f.files.set(f.memory.paths.state, raw);
+        const write = f.adapter.write;
+        f.adapter.write = async (path, text) => {
+            if (backupFails && path.startsWith('.pkm-assistant/backups/')) throw new Error('EACCES /system/private');
+            await write(path, text);
+        };
+        f.view.input_area.value = 'Pierwsze pytanie';
+        await f.clickSend();
+        const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
+        const expected = locale === 'pl'
+            ? 'Błąd: Plik stanu agenta mira jest uszkodzony po synchronizacji i nie udało się go naprawić. Rozmowa nie została zapisana.'
+            : 'Error: The state file for agent mira is corrupted after synchronization and could not be repaired. The conversation was not saved.';
+        const visible = texts(f.view.messages_container);
+        t.true(visible.includes(expected), visible.join('\n'));
+        t.false(visible.join('\n').includes('secret'));
+        t.false(visible.join('\n').includes('Unexpected token'));
+        t.false(visible.join('\n').includes('/system/private'));
+        t.is(f.files.get(f.memory.paths.state), raw);
+        t.is(f.view.input_area.value, 'Pierwsze pytanie');
+        t.deepEqual(f.modelInputs, []);
+        t.deepEqual(f.windows[0].messages, []);
+    });
+}
+
+test.serial('D1: first send repairs git state through AgentMemory and persists question and answer', async t => {
+    const f = await fixture(true);
+    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    const raw = '<<<<<<< HEAD\n{"archived_since_last_consolidation":7,"brain_notes_limit":15}\n=======\n{"archived_since_last_consolidation":8,"brain_notes_limit":20}\n>>>>>>> branch\n';
+    f.files.set(f.memory.paths.state, raw);
+    f.view.input_area.value = 'Pierwsze pytanie';
+    await f.clickSend();
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira');
+    t.deepEqual((await fresh.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Pierwsze pytanie', 'Odpowiedź na poprawkę A']);
+    t.deepEqual(await fresh.stateManager.read(), {
+        active_sessions: [f.tabs[0].sessionPath.split('/').at(-1)], archived_since_last_consolidation: 8,
+        last_archive_at: null, last_used: f.tabs[0].sessionPath.split('/').at(-1), brain_notes_limit: 20,
+    });
+    t.deepEqual([...f.files.entries()].filter(([path]) => path.startsWith('.pkm-assistant/backups/')).map(([, bytes]) => bytes), [raw]);
+});
+
 for (const stage of ['mentions', 'note', 'slash', 'session-probe', 'session-read', 'edit-save', 'journal', 'append-message'] as const) for (const action of ['Stop', 'Escape', 'new-cancel', 'close-tab', 'close-view'] as const) {
     test.serial(`F6: ${stage} → ${action} zachowuje pełną rozmowę na granicy przyjęcia`, async t => {
         const f = await fixture();

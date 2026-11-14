@@ -22,6 +22,7 @@
 // Helpery list* wyciete (konsumenci wolaja METODY agentMemory);
 // parseBrainLog zostaje - importuje go karta „Log wpisow" (agents/profile/profile_memory.js).
 export { AgentMemory, parseBrainLog } from './AgentMemory.js';
+export { StateCorruptionError } from './StateCorruptionError.js';
 export { SessionEpochPersistenceError, parseSessionEpochFailure, sessionEpochFailureReason } from './sessionEpochFailure.js';
 export type { SessionEpochFailure } from './sessionEpochFailure.js';
 import type { ArchiveSessionInfo } from './AgentMemory.js';

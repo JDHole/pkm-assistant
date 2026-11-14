@@ -646,6 +646,14 @@ jako obiekt (nie sama metoda) - `checkPermission` jest wołane NA NIM.
 
 ### Bezpieczny tekst błędu w oknie czatu
 
+M2 D1: `safeErrorText` rozpoznaje publiczny `StateCorruptionError` z memory i wybiera
+stały komunikat PL/EN z nazwą katalogu agenta, bez JSON-a, przyczyny adaptera ani ścieżek.
+Istniejące `send_message` i `handle_error` używają tego samego mappera; reszta błędów,
+maskowanie i limit pozostają bez zmian. Nie pomijamy zapisu `.state.json`: nieudane
+przyjęcie nadal oddaje szkic i zatrzymuje model. Testy D1 w `chat/chat_streaming.sendTab.test.ts`
+uruchamiają produkcyjny klik Wyślij przez AgentMemory/StateManager do kafelka (PL/EN,
+brak naprawy i awaria kopii) oraz udaną turę po naprawie, ze świeżym odczytem sesji.
+
 `handle_error` NIE wstawia `error.message` wprost do DOM-u ani nie loguje surowego obiektu -
 ścieżka sieciowego padu strumienia bywa `JSON.stringify` całego zdarzenia streamera, co
 potrafi nieść nagłówki żądania (w tym klucz API). `chat/safeErrorText.ts` (pure):

@@ -14,12 +14,15 @@
  * (`safeErrorText.test.ts`), a `chat_streaming.ts` tylko go wywołuje.
  */
 import { maskSensitiveData } from '../../../core/index.js';
+import { t } from '../../../core/i18n/index.js';
+import { StateCorruptionError } from '../../memory/index.js';
 
 /** Sufit długości tekstu błędu w dymku. Zrzut zdarzenia streamera potrafi mieć kilobajty. */
 export const CHAT_ERROR_TEXT_LIMIT = 800;
 
 /** Wyłuskaj czytelny opis z czegokolwiek, co przyszło jako „błąd". */
 function normalizeError(error: unknown): string {
+    if (error instanceof StateCorruptionError) return t('chat.state_corrupt', { agent: error.agentName });
     if (error === null || error === undefined) return '';
     if (typeof error === 'string') return error;
     if (typeof error !== 'object') return _rawToString(error);
