@@ -3129,8 +3129,8 @@ body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab >
 body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab > span:first-child {
   flex-shrink: 0;
 }
-body.is-phone .cs-profile-content { padding-inline: 12px; }
-body.is-phone .cs-profile-content .cs-profile-content { padding-inline: 0; }
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-content { padding-inline: 12px; }
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-content .cs-profile-content { padding-inline: 0; }
 body.is-phone :is(.sidebar-view-content:has(> .cs-profile__header), .cs-agent-presentation-modal) .cs-shards {
   grid-template-columns: minmax(0, 1fr);
 }

@@ -241,13 +241,20 @@ decyzjami. Weryfikacja geometrii wymaga przeglądarki, atrapa DOM AVA jej nie mi
 `decisionModals.mobile.test.ts` sprawdza kolejność oraz wyniki wszystkich decyzji
 na telefonie, tablecie i desktopie, także sesyjną zgodę oraz modal diffa.
 
-## Mobile M3 U14/U16 - profil i karta agenta
+## Mobile M3 U14/U16/U17 - profil i karta agenta
 
-`sidebar/SidebarViews.css` ogranicza nowe reguły do `body.is-phone` oraz dwóch
+`sidebar/SidebarViews.css` ogranicza dostosowanie do `body.is-phone` oraz dwóch
 powierzchni: `.sidebar-view-content:has(> .cs-profile__header)` i
 `.cs-agent-presentation-modal`. Lista agentów, komunikator i zaplecze nie są
 objęte tym zakresem, mimo wspólnych klas shardów. Desktop/tablet zachowują CSS
 bazowy. Nie zmienia się DOM, kolejność fokusu, obsługa akcji ani API modułów.
+
+U17 zawęża oba odstępy `.cs-profile-content` do przodka edytora z bezpośrednim
+`.cs-profile__header`: profil zachowuje 12 px po bokach i 0 px w zagnieżdżonej
+treści, a trzy zakładki Zaplecza zachowują bazowe 16 px. Pozostałe reguły U14/U16
+zaczynające się od `body.is-phone .cs-profile-content` wymagają potomków,
+których renderery Zaplecza i ich helpery nie tworzą, więc pozostają bez zmian.
+Przy współdzieleniu kolejnych klas z Zapleczem trzeba ponownie sprawdzić ich zasięg.
 
 Profil ma trzy kolumny i trzy wiersze zakładek, z ikoną nad etykietą 13 px.
 Podzakładki pamięci zajmują jeden wiersz trzech kolumn; Inspektor/Edytor zachowuje
