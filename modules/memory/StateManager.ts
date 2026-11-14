@@ -112,8 +112,8 @@ export class StateManager {
         try {
             const listing = await adapter.list?.(activeDir);
             if (listing?.files) existing = listing.files
-                .filter(path => path.startsWith(activeDir + '/') && !path.slice(activeDir.length + 1).includes('/'))
-                .map(path => path.slice(activeDir.length + 1));
+                .map(path => path.startsWith(activeDir + '/') ? path.slice(activeDir.length + 1) : path)
+                .filter(name => !name.includes('/'));
         } catch { /* Unknown listing means union only, never an empty directory. */ }
         const state = mergeStateConflict(sides.ours, sides.theirs, existing)!;
         if (!repairOnDisk) return { ...this.defaultState(), ...state };
@@ -136,29 +136,39 @@ export class StateManager {
             await adapter.write(backupPath, raw);
             if (await adapter.read(backupPath) !== raw) return null;
             // A pull during the backup must not be overwritten by our stale reconstruction.
-            if (await adapter.read(this.statePath) !== raw) return null;
-            await this._writeRaw(state);
+            if (await adapter.read(this.statePath) !== raw || !await this._writeRaw(state, raw)) {
+                // One fresh mutation read only: no bootstrap or recursive conflict repair.
+                const latest = await adapter.read(this.statePath);
+                return { ...this.defaultState(), ...(JSON.parse(latest) as Partial<MemoryState>) };
+            }
             log.warn('StateManager', `Naprawiono konflikt: ${this.statePath}; kopia: ${backupPath}`);
             return { ...this.defaultState(), ...state };
         } catch { return null; }
     }
 
-    /** Raw write (no queue). Compare disk values, preserving formatting on a no-op. */
-    private async _writeRaw(state: Partial<MemoryState> | null | undefined): Promise<void> {
+    /** Raw write (no queue). Recovery additionally requires the exact backed-up source. */
+    private async _writeRaw(state: Partial<MemoryState> | null | undefined, expectedRaw?: string): Promise<boolean> {
         const content = JSON.stringify({
             ...this.defaultState(),
             ...(state || {})
         }, null, 2) + '\n';
-        // This read only avoids redundant writes. The caller already supplied the state;
-        // uncertainty here must not turn a successful mutation into a failed operation.
-        try {
-            const previous: unknown = JSON.parse(await this.vault.adapter.read(this.statePath));
-            if (equalJson(previous, JSON.parse(content))) return;
-        } catch {
-            // Missing/unreadable/corrupt comparison input: retain the original write contract.
-            // Mutation reads remain fail-closed in _readRaw, before any state is changed.
+        if (expectedRaw !== undefined) {
+            // Fail closed on a changed source or read error. No further read before write.
+            // The adapter has no compare-and-swap; the remaining read/write gap is unavoidable.
+            if (await this.vault.adapter.read(this.statePath) !== expectedRaw) return false;
+        } else {
+            // This read only avoids redundant writes. The caller already supplied the state;
+            // uncertainty here must not turn a successful mutation into a failed operation.
+            try {
+                const previous: unknown = JSON.parse(await this.vault.adapter.read(this.statePath));
+                if (equalJson(previous, JSON.parse(content))) return true;
+            } catch {
+                // Missing/unreadable/corrupt comparison input: retain the original write contract.
+                // Mutation reads remain fail-closed in _readRaw, before any state is changed.
+            }
         }
         await this.vault.adapter.write(this.statePath, content);
+        return true;
     }
 
     /**
@@ -178,7 +188,7 @@ export class StateManager {
     }
 
     async write(state: Partial<MemoryState> | null | undefined): Promise<void> {
-        return this._enqueue(() => this._writeRaw(state));
+        await this._enqueue(() => this._writeRaw(state));
     }
 
     /**

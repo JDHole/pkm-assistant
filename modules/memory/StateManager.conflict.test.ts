@@ -125,17 +125,120 @@ test('D1: failed or unavailable listing keeps union; nested files do not count a
     });
 });
 
-test('D1: a pull during backup is not overwritten', async t => {
+test('D1b: a valid pull during backup is used by the mutation', async t => {
     const f = fixture();
     const write = f.adapter.write;
     f.adapter.write = async (path, text) => {
         await write(path, text);
         if (path.startsWith(BACKUPS)) f.files.set(PATH, '{"active_sessions":["external.md"]}');
     };
-    await t.throwsAsync(f.manager.addActiveSession('x.md'), { instanceOf: StateCorruptionError });
-    t.is(f.files.get(PATH), '{"active_sessions":["external.md"]}');
+    t.deepEqual(await f.manager.addActiveSession('x.md'), {
+        active_sessions: ['external.md', 'x.md'], archived_since_last_consolidation: 0,
+        last_archive_at: null, last_used: 'x.md',
+    });
+    t.is(f.files.get(PATH), '{\n  "active_sessions": [\n    "external.md",\n    "x.md"\n  ],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null,\n  "last_used": "x.md"\n}\n');
     t.is(f.backups()[0][1], RAW);
+    t.deepEqual(f.writes, [f.backups()[0][0], PATH]);
 });
+
+for (const readNumber of [2, 3]) {
+    for (const outcome of ['valid', 'conflict', 'read-error'] as const) {
+        test(`D1b: source read ${readNumber}, ${outcome}, preserves external data and the backup`, async t => {
+            const f = fixture();
+            const read = f.adapter.read;
+            const external = outcome === 'valid'
+                ? '{"active_sessions":["external.md"],"external_only":true}'
+                : RAW + '\n'; // Another repairable conflict must not trigger recursive repair.
+            let sourceReads = 0;
+            f.adapter.read = async path => {
+                if (path === PATH && ++sourceReads === readNumber) {
+                    if (outcome === 'read-error') throw new Error('EACCES');
+                    f.files.set(PATH, external);
+                }
+                return read(path);
+            };
+            if (outcome === 'valid') {
+                t.deepEqual(await f.manager.addActiveSession('x.md'), {
+                    active_sessions: ['external.md', 'x.md'], archived_since_last_consolidation: 0,
+                    last_archive_at: null, external_only: true, last_used: 'x.md',
+                });
+                t.is(f.files.get(PATH), '{\n  "active_sessions": [\n    "external.md",\n    "x.md"\n  ],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null,\n  "external_only": true,\n  "last_used": "x.md"\n}\n');
+                // Changed-source check, exactly one retry, then the ordinary R2 comparison.
+                t.is(sourceReads, readNumber + 2);
+                t.deepEqual(f.writes, [f.backups()[0][0], PATH]);
+            } else {
+                const error = await t.throwsAsync(f.manager.addActiveSession('x.md'), { instanceOf: StateCorruptionError });
+                t.is(error?.agentName, 'jaskier');
+                t.is(f.files.get(PATH), outcome === 'read-error' ? RAW : external);
+                t.is(sourceReads, readNumber + (outcome === 'conflict' ? 1 : 0));
+                t.deepEqual(f.writes, [f.backups()[0][0]]);
+            }
+            t.deepEqual(f.backups(), [[f.backups()[0][0], RAW]]);
+        });
+    }
+}
+
+for (const outcome of ['latest-valid', 'conflict', 'missing', 'read-error'] as const) {
+    test(`D1b: the single mutation retry sees ${outcome}`, async t => {
+        const f = fixture();
+        const read = f.adapter.read;
+        let sourceReads = 0;
+        f.adapter.read = async path => {
+            if (path === PATH) {
+                sourceReads++;
+                if (sourceReads === 3) f.files.set(PATH, '{"active_sessions":["external.md"],"external_only":true}');
+                if (sourceReads === 4) {
+                    if (outcome === 'latest-valid') f.files.set(PATH, '{"active_sessions":["newest.md"],"newest_only":42}');
+                    if (outcome === 'conflict') f.files.set(PATH, RAW + '\n');
+                    if (outcome === 'missing') f.files.delete(PATH);
+                    if (outcome === 'read-error') throw new Error('EACCES');
+                }
+            }
+            return read(path);
+        };
+        if (outcome === 'latest-valid') {
+            t.deepEqual(await f.manager.addActiveSession('x.md'), {
+                active_sessions: ['newest.md', 'x.md'], archived_since_last_consolidation: 0,
+                last_archive_at: null, newest_only: 42, last_used: 'x.md',
+            });
+            t.is(f.files.get(PATH), '{\n  "active_sessions": [\n    "newest.md",\n    "x.md"\n  ],\n  "archived_since_last_consolidation": 0,\n  "last_archive_at": null,\n  "newest_only": 42,\n  "last_used": "x.md"\n}\n');
+            t.is(sourceReads, 5);
+            t.deepEqual(f.writes, [f.backups()[0][0], PATH]);
+        } else {
+            await t.throwsAsync(f.manager.addActiveSession('x.md'), { instanceOf: StateCorruptionError });
+            t.is(f.files.get(PATH), outcome === 'missing' ? undefined : outcome === 'conflict'
+                ? RAW + '\n' : '{"active_sessions":["external.md"],"external_only":true}');
+            t.is(sourceReads, 4);
+            t.deepEqual(f.writes, [f.backups()[0][0]]);
+        }
+        t.deepEqual(f.backups(), [[f.backups()[0][0], RAW]]);
+    });
+}
+
+for (const [shape, files] of [
+    ['full paths', [
+        '.pkm-assistant/agents/jaskier/memory/sessions/active/jaskier_2026-11-14_14-25.md',
+        '.pkm-assistant/agents/jaskier/memory/sessions/active/.discarded/jaskier_2026-11-14_15-01.md',
+        '.pkm-assistant/agents/other/memory/sessions/active/jaskier_2026-11-14_15-01.md',
+    ]],
+    ['bare names', [
+        'jaskier_2026-11-14_14-25.md',
+        '.discarded/jaskier_2026-11-14_15-01.md',
+        'other/jaskier_2026-11-14_15-01.md',
+    ]],
+] as const) {
+    test(`D1b: listing ${shape} retains direct children only`, async t => {
+        const f = fixture();
+        f.adapter.list = async () => ({ files: [...files] });
+        t.deepEqual(await f.manager.addActiveSession('x.md'), {
+            active_sessions: ['jaskier_2026-11-14_14-25.md', 'x.md'], archived_since_last_consolidation: 8,
+            last_archive_at: '2026-11-14T15:02:00.000Z', notes_count_at_last_check: 13,
+            last_used: 'x.md', brain_notes_limit: 15,
+        });
+        t.is(f.files.get(PATH), CLEAN);
+        t.deepEqual(f.backups(), [[f.backups()[0][0], RAW]]);
+    });
+}
 
 test('D1: backup collision keeps earlier copy and uses a free name', async t => {
     const f = fixture();

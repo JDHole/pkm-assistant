@@ -1185,6 +1185,8 @@ siedem znaków oraz spację z dowolną etykietą albo koniec wiersza. `=======` 
 separatorem wyłącznie jako cały wiersz otwartego bloku; poza nim pozostaje treścią.
 Zagnieżdżenia, niepełne lub błędnie uporządkowane bloki oraz brak znaczników dają `null`.
 Helper jest eksportowany z własnego pliku wewnątrz memory, gotowy dla D3/D7.
+`splitGitConflict` jest parserem składni znaczników i rozcina także przykład konfliktu
+w bloku kodu Markdown; D3/D7 muszą osobno zdecydować, co robią z tekstem podejrzanym.
 
 `mergeStateConflict` wymaga dwóch obiektów JSON. `active_sessions` to unia stringów
 w kolejności nasze/potem nowe ich, ograniczona do bezpośrednich plików `sessions/active`.
@@ -1195,6 +1197,8 @@ niepoprawny limit null (nie wprowadzamy limitu, jeśli klucza nie było). Data t
 parsowalna data, obie złe dają null. `last_used` wybiera nasze wskazanie obecne w wynikowej
 liście, potem ich, potem ostatnią sesję lub null. Pozostałe klucze zachowują nasze wartości,
 także null; klucze tylko po ich stronie też przeżywają. Nie zmieniamy schematu ani ścieżki stanu.
+Filtr listingu przyjmuje zarówno pełne ścieżki bezpośrednich dzieci katalogu aktywnego,
+jak i same nazwy bez `/`; wpisy z podfolderów lub innego katalogu pomija (D1b).
 
 Mutacja naprawia we własnej kolejce StateManager: najpierw oryginalny tekst 1:1 do
 `.pkm-assistant/backups/state-<agent>-<timestamp>[-<sufiks>].json.bak`, potem weryfikacja
@@ -1206,10 +1210,23 @@ Błąd kopii lub niepewny wolny cel blokuje naprawę. Kolejna mutacja po sukcesi
 czysty stan i nie tworzy drugiej kopii. Nie ma blokady między urządzeniami/instancjami:
 sprawdzenie źródła ogranicza wyścig z pullem, ale nie stanowi atomowego compare-and-swap.
 
+D1b: naprawa przekazuje do `_writeRaw` oczekiwany oryginalny tekst. OSTATNI odczyt przed
+zapisem musi zwrócić dokładnie ten tekst; w tej ścieżce porównanie R2 zastępuje ścisła
+kontrola bajtów, a błąd odczytu blokuje zapis. Zmiana wykryta w którymkolwiek z dwóch
+odczytów źródła po kopii powoduje dokładnie jeden ponowny odczyt mutacyjny, bez pętli,
+bootstrapu ani kolejnej naprawy konfliktu. Poprawny JSON z tego odczytu staje się podstawą
+mutacji; uszkodzenie, brak lub błąd odczytu kończy się `StateCorruptionError`, bez zapisu
+źródła. Kopia oryginalnego konfliktu zostaje także po odmowie. Między ostatnim odczytem
+a `adapter.write` nadal istnieje pojedyncze okno wyścigu, bez dodatkowego odczytu pośrodku:
+adapter nie udostępnia compare-and-swap. Zewnętrznej zmiany w tym oknie nie da się wykluczyć.
+
 `read()` istniejącego konfliktu zwraca scalony stan tylko w RAM, bez kopii i zapisów.
 Nienaprawialne uszkodzenie nadal daje defaulty tylko w RAM, zgodnie z kontraktem
 `consolidationRunner`; mutacja rzuca `StateCorruptionError`. Historyczny bootstrap
 potwierdzonego braku pliku przez `read()` nadal zapisuje defaulty. Jawne `write(state)`
-i odczyt porównawczy R2 pozostają bez zmian. Zdrowy plik nie uruchamia listingu ani
+i odczyt porównawczy R2 poza naprawą pozostają bez zmian. Zdrowy plik nie uruchamia listingu ani
 dodatkowego I/O. Testy: `gitConflict.test.ts`, `stateConflict.test.ts`,
 `StateManager.conflict.test.ts` oraz D1 w `../chat/chat/chat_streaming.sendTab.test.ts`.
+Testy D1b w `StateManager.conflict.test.ts` obejmują zewnętrzny poprawny/zepsuty zapis
+i błąd obu odczytów kontrolnych, pojedyncze ponowienie z najnowszym JSON-em lub awarią,
+zachowanie kopii oraz oba kształty listingu z wykluczeniem obcych katalogów i podfolderów.
