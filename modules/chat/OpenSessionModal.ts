@@ -12,10 +12,11 @@ import { SkinManager, UiIcons, setSvgLabel } from '../crystal-soul/index.js';
 import { SvgHelper } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
 
-type OpenSessionChoice = 'continue' | 'compress' | 'fresh' | 'cancel';
-type OpenSessionOptions = { agentName?: string; agentColor?: string; sessionTitle?: string; sessionDate?: string };
+type OpenSessionChoice = 'continue' | 'compress' | 'fresh' | 'takeover' | 'cancel';
+type OpenSessionOptions = { foreign?: boolean; agentName?: string; agentColor?: string; sessionTitle?: string; sessionDate?: string };
 
 export class OpenSessionModal extends Modal {
+    readonly foreign: boolean;
     declare agentName: string;
     declare agentColor: string;
     declare sessionTitle: string;
@@ -27,6 +28,7 @@ export class OpenSessionModal extends Modal {
      */
     constructor(app: App, opts: OpenSessionOptions = {}) {
         super(app);
+        this.foreign = opts.foreign === true;
         this.agentName = opts.agentName || '';
         this.agentColor = opts.agentColor || '';
         this.sessionTitle = opts.sessionTitle || '';
@@ -73,7 +75,7 @@ export class OpenSessionModal extends Modal {
             if (el) header.appendChild(el);
         }
         header.createSpan({
-            text: t('modal.open_session.title'),
+            text: t(this.foreign ? 'modal.takeover_session.title' : 'modal.open_session.title'),
             cls: 'cs-open-session__title'
         });
 
@@ -82,6 +84,19 @@ export class OpenSessionModal extends Modal {
             title: this.sessionTitle,
             date: this.sessionDate
         });
+
+        if (this.foreign) {
+            contentEl.createEl('p', { cls: 'cs-open-session__info', text: t('modal.takeover_session.description') });
+            const actions = contentEl.createDiv({ cls: 'cs-open-session__actions' });
+            const takeover = actions.createEl('button', { cls: 'cs-open-session__btn cs-open-session__btn--primary',
+                text: t('modal.takeover_session.confirm') });
+            takeover.addEventListener('click', () => this._resolveWith('takeover'));
+            const cancelRow = contentEl.createDiv({ cls: 'cs-open-session__cancel-row' });
+            const cancel = cancelRow.createEl('button', { cls: 'cs-open-session__btn cs-open-session__btn--cancel', text: t('generic.cancel') });
+            cancel.addEventListener('click', () => this._resolveWith('cancel'));
+            cancel.focus();
+            return;
+        }
 
         const actions = contentEl.createDiv({ cls: 'cs-open-session__actions' });
 

@@ -1,0 +1,59 @@
+{
+  "source": "558d888",
+  "stages": [
+    {
+      "read": 4,
+      "write": 3,
+      "exists": 3,
+      "mkdir": 0,
+      "list": 0,
+      "append": 0,
+      "stat": 0,
+      "remove": 0
+    },
+    {
+      "read": 5,
+      "write": 3,
+      "exists": 4,
+      "mkdir": 0,
+      "list": 0,
+      "append": 2,
+      "stat": 0,
+      "remove": 0
+    },
+    {
+      "read": 5,
+      "write": 3,
+      "exists": 4,
+      "mkdir": 0,
+      "list": 0,
+      "append": 4,
+      "stat": 0,
+      "remove": 0
+    },
+    {
+      "read": 5,
+      "write": 3,
+      "exists": 4,
+      "mkdir": 0,
+      "list": 0,
+      "append": 6,
+      "stat": 0,
+      "remove": 0
+    },
+    {
+      "read": 6,
+      "write": 4,
+      "exists": 4,
+      "mkdir": 0,
+      "list": 0,
+      "append": 6,
+      "stat": 0,
+      "remove": 0
+    }
+  ],
+  "path": ".pkm-assistant/agents/mira/memory/sessions/active/mira_2026-11-14_10-00.md",
+  "content": "---\ntype: active_session\nagent: Mira\ncreated: 2026-11-14T10:00:00.000Z\nepoch: 0123456789abcdef0123456789abcdef\nupdated: 2026-11-14T10:00:00.000Z\nmessageCount: 6\n---\n\n# Mira session 2026-11-14T10:00:00.000Z\n\n## 2026-11-14T10:00:00.000Z — user message\n\n**content:**\n\nPytanie 1\n\n**seq:**\n\n1\n\n## 2026-11-14T10:00:00.000Z — agent message\n\n**content:**\n\nOdpowiedź 1\n\n**seq:**\n\n2\n\n## 2026-11-14T10:00:00.000Z — user message\n\n**content:**\n\nPytanie 2\n\n**seq:**\n\n3\n\n## 2026-11-14T10:00:00.000Z — agent message\n\n**content:**\n\nOdpowiedź 2\n\n**seq:**\n\n4\n\n## 2026-11-14T10:00:00.000Z — user message\n\n**content:**\n\nPytanie 3\n\n**seq:**\n\n5\n\n## 2026-11-14T10:00:00.000Z — agent message\n\n**content:**\n\nOdpowiedź 3\n\n**seq:**\n\n6\n\n",
+  "state": "{\n  \"active_sessions\": [\n    \"mira_2026-11-14_10-00.md\"\n  ],\n  \"archived_since_last_consolidation\": 0,\n  \"last_archive_at\": null,\n  \"last_used\": \"mira_2026-11-14_10-00.md\"\n}\n",
+  "pointer": "{\"path\":\".pkm-assistant/agents/mira/memory/sessions/active/mira_2026-11-14_10-00.md\",\"updated\":1794650400000}"
+}

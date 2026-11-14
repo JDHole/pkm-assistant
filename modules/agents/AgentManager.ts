@@ -9,6 +9,7 @@ import type { AgentVault } from './AgentLoader.js';
 import { Agent } from './Agent.js';
 import type { AgentPromptContext } from './Agent.js';
 import { defaultDisabledTools } from './toolAxis.js';
+import type { DeviceId } from '../../modules/memory/index.js';
 import { AgentMemory, MigrationV3 } from '../../modules/memory/index.js';
 import { MigrationModal } from './MigrationModal.js';
 import { runMigrationReview } from './migrationReviewFlow.js';
@@ -83,7 +84,7 @@ export class AgentManager {
      * @param {Object} vault - Obsidian Vault object
      * @param {Object} settings - Plugin settings
      */
-    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null) {
+    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null, readonly deviceId: DeviceId | null = null) {
         this.vault = vault;
         this.settings = settings;
         this.plugin = plugin;
@@ -350,7 +351,7 @@ export class AgentManager {
     }
 
     async _initializeMemoryForAgent(agent: Agent) {
-        const memory = new AgentMemory(this.vault, agent.name, this.settings);
+        const memory = new AgentMemory(this.vault, agent.name, this.settings, this.deviceId);
         const migration = new MigrationV3(memory, {
             // TS-boundary: this.plugin.app is AppLike (minimal node-safe contract), MigrationModal
             // wants the real obsidian App - AppLike doesn't structurally match App in either

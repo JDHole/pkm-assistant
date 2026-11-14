@@ -4,6 +4,11 @@
  * {{param}} for interpolation.
  */
 export const pl: Record<string, string> = {
+  "session.on_other_device": "na innym urządzeniu",
+  "chat.session.foreign_error": "Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę świadomie albo otwórz ją z archiwum.",
+  "modal.takeover_session.title": "Rozmowa na innym urządzeniu",
+  "modal.takeover_session.description": "Ta rozmowa toczy się na innym urządzeniu. Przejmij ją tylko wtedy, gdy tamto urządzenie już jej nie używa i jest zsynchronizowane. Bezpieczniejsza droga: zarchiwizuj ją tam i otwórz tutaj z archiwum.",
+  "modal.takeover_session.confirm": "Przejmij rozmowę",
   "chat.state_corrupt": "Plik stanu agenta {{agent}} jest uszkodzony po synchronizacji i nie udało się go naprawić. Rozmowa nie została zapisana.",
   "diagnostics.custom_identifier": "niestandardowy identyfikator",
   "diagnostics.local_error": "Klasa: {{name}}; kod: {{code}}",

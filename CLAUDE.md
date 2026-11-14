@@ -204,3 +204,8 @@ Tylko na telefonie lista `@` w czacie ma zawijane nazwy i wiersze minimum 44 px,
 ## Mobile M2 D1 - samonaprawa stanu po konflikcie gita
 
 Na obu platformach memory scala pełne strony konfliktu `.state.json` po kopii oryginału, a czat tłumaczy nierozwiązywalny błąd; kontrakt odczytu, reguły scalania, zachowane I/O poprawnych plików i testy opisuje `modules/memory/CLAUDE.md`.
+
+
+## Mobile M2 D2 - aktywna rozmowa należy do urządzenia
+
+Lokalny identyfikator z API Obsidiana wyznacza własność `device` aktywnej sesji na obu platformach, z jawnym przejęciem w czacie i dawnym zachowaniem przy braku id; kontrakty adopcji, odmów, P3 i zgodności I/O opisują `modules/memory/CLAUDE.md`, `modules/chat/CLAUDE.md` i `modules/agents/CLAUDE.md`.

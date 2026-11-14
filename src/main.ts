@@ -1,3 +1,5 @@
+import { parseDeviceId } from '../modules/memory/index.js';
+import type { DeviceId } from '../modules/memory/index.js';
 import Obsidian from "obsidian";
 import type { App, EventRef, PluginManifest, PluginSettingTab } from "obsidian";
 // Silnik YAML wbudowany w Obsidiana, zamiast paczki `js-yaml` - katalog społeczności wytyka
@@ -214,6 +216,24 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare subTaskNotifier: SubTaskNotifier | null;
   declare traceLog: TraceLog | undefined;
   declare skinManager: typeof SkinManager | undefined;
+
+  /** Public host storage is scoped to this vault and device, outside the synced vault. */
+  _loadDeviceId(): DeviceId | null {
+    try {
+      if (typeof this.app.loadLocalStorage !== 'function' || typeof this.app.saveLocalStorage !== 'function') return null;
+      const key = 'pkm-assistant.device-id';
+      const existing = parseDeviceId(this.app.loadLocalStorage(key));
+      if (existing) return existing;
+      const bytes = new Uint8Array(8);
+      crypto.getRandomValues(bytes);
+      const id = parseDeviceId([...bytes].map(byte => byte.toString(16).padStart(2, '0')).join(''));
+      this.app.saveLocalStorage(key, id);
+      return id;
+    } catch {
+      log.warn('Plugin', 'Device identity unavailable; using shared sessions');
+      return null;
+    }
+  }
 
   /**
    * Konfiguracja runtime'u powstaje w KONSTRUKTORZE (tanio, bez I/O), a `onload()` podaje TĘ
@@ -652,7 +672,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // node-safe `AppLike` z core - a `this.app` to prawdziwy `App` Obsidiana, którego
       // `vault.adapter` (`DataAdapter`) nie ma otwartego indeksu `VaultAdapterLike`.
       // Ta sama luka core co przy `PluginRuntime`/`PkmSettingsTab` wyżej.
-      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin);
+      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin, this._loadDeviceId());
       await this.agentManager.initialize();
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';

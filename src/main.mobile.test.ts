@@ -107,6 +107,12 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         const { shutdownHarnessRuntime } = await import(new URL('obsidian.ts', supportUrl).href);
         const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
         const app: Obsidian.App = createMockApp(root);
+        let localReads = 0, localWrites = 0;
+        if (failure === 'none') {
+            app.loadLocalStorage = key => { localReads++; return key === 'pkm-assistant.device-id' ? '0123456789abcdef' : null; };
+            app.saveLocalStorage = () => { localWrites++; };
+        }
+
         const plugin = new Plugin(app, {
             id: 'pkm-assistant', name: 'PKM Assistant', version: '2.4.1',
             minAppVersion: '1.11.0', author: 'Test', description: 'Startup test',
@@ -163,6 +169,11 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         now = 1100;
         await Promise.all(layouts.map(callback => callback()));
         t.true(plugin._ready);
+        if (failure === 'none') {
+            t.deepEqual([localReads, localWrites], [1, 0]);
+            t.is<string | null | undefined, string>(plugin.agentManager?.getActiveMemory()?.deviceId, '0123456789abcdef');
+        }
+
         await plugin.runDeviceDiagnostics();
         const reports = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
         t.is(reports.length, 1);
@@ -356,4 +367,38 @@ for (const locale of ['en', 'pl']) test.serial(`U1 embedding startup notice: mob
     host.env.settings.pkmAssistant.embedding.provider = 'openai';
     Plugin.prototype._checkEmbeddingProviderConfigured.call(host as never);
     t.is(notices.length, 1);
+});
+
+test.serial('D2 composition root: local cryptographic id survives restart; invalid storage is replaced, never written to vault', t => {
+    let generated = 0;
+    mock.method(crypto, 'getRandomValues', (bytes: Uint8Array) => {
+        generated++; bytes.set([0, 1, 2, 3, 250, 251, 252, 253]); return bytes;
+    });
+    const storage = new Map<string, unknown>();
+    const writes: unknown[] = [];
+    let reads = 0;
+    const app = {
+        loadLocalStorage(key: string) { reads++; return storage.get(key); },
+        saveLocalStorage(key: string, value: unknown) { storage.set(key, value); writes.push([key, value]); },
+        get vault(): never { throw new Error('Device id must never use vault files'); },
+    };
+    const start = () => Plugin.prototype._loadDeviceId.call({ app } as never);
+    t.is<string | null, string>(start(), '00010203fafbfcfd');
+    t.is<string | null, string>(start(), '00010203fafbfcfd');
+    t.deepEqual([reads, generated], [2, 1]);
+    t.deepEqual(writes, [['pkm-assistant.device-id', '00010203fafbfcfd']]);
+    for (const invalid of ['ABCDEF0123456789', 'aaaaaaaaaaaaaaaa\n', {}, 17]) {
+        storage.set('pkm-assistant.device-id', invalid);
+        t.is<string | null, string>(start(), '00010203fafbfcfd');
+        t.is(storage.get('pkm-assistant.device-id'), '00010203fafbfcfd');
+    }
+    t.is(generated, 5);
+});
+
+test.serial('D2 composition root: absent or failed host storage falls back to null without throwing', t => {
+    for (const app of [
+        {}, { loadLocalStorage: () => '0123456789abcdef' }, { saveLocalStorage() {} },
+        { loadLocalStorage() { throw new Error('read failed'); }, saveLocalStorage() {} },
+        { loadLocalStorage: () => null, saveLocalStorage() { throw new Error('write failed'); } },
+    ]) t.is(Plugin.prototype._loadDeviceId.call({ app } as never), null);
 });

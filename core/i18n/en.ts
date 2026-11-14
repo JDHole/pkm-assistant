@@ -4,6 +4,11 @@
  * {{param}} for interpolation.
  */
 export const en: Record<string, string> = {
+  "session.on_other_device": "on another device",
+  "chat.session.foreign_error": "This conversation now belongs to another device. Your draft was not sent. Sync your devices and explicitly take over the conversation, or open it from the archive.",
+  "modal.takeover_session.title": "Conversation on another device",
+  "modal.takeover_session.description": "This conversation is active on another device. Take it over only when that device is no longer using it and has synced. The safer option is to archive it there and open it here from the archive.",
+  "modal.takeover_session.confirm": "Take over conversation",
   "chat.state_corrupt": "The state file for agent {{agent}} is corrupted after synchronization and could not be repaired. The conversation was not saved.",
   "diagnostics.custom_identifier": "Custom identifier",
   "diagnostics.local_error": "Class: {{name}}; code: {{code}}",

@@ -54,6 +54,7 @@ modules/memory/
 ├── StateManager.ts           # .state.json: aktywne sesje + liczniki, kolejka RMW
 ├── gitConflict.ts            # splitGitConflict: tekst -> dwie pełne strony, dla D1 i kolejnych paczek M2
 ├── stateConflict.ts          # czyste mergeStateConflict, opcjonalny spis istniejących sesji
+├── sessionOwnership.ts      # DeviceId, parseDeviceId, sessionOwnership, ForeignSessionError (publiczny barrel)
 ├── StateCorruptionError.ts   # publiczny typ błędu nienaprawialnego JSON-a, bez treści pliku
 ├── IdleScheduler.ts          # pure decyzja "czy zapisać po bezczynności" (wpinany w modules/chat)
 ├── RetrievalEngine.ts        # silnik narzędzia `search`: runSearch() z RRF keyword+semantic
@@ -871,7 +872,8 @@ Flow:
   narzędzia - maska zmienia ZAPIS rozmowy, nie jej przebieg. Zakres jest świadomie wąski:
   `brain*`, `summaries/L1..L3` i `.state.json` mają własnych pisarzy i przez ten writer nie
   przechodzą. `maskSensitiveData` jest idempotentna, więc wielokrotne przepisywanie tego samego
-  pliku niczego nie psuje.
+  pliku niczego nie psuje. Wyjątek D2: jawne przejęcie zmienia tylko zwalidowany `device`
+  w nagłówku, bez ponownego maskowania zastanej treści (kontrakt zachowania bajtów zdarzeń).
 
 ---
 
@@ -1238,3 +1240,57 @@ Testy D1c w tym samym pliku podstawiają przy obu odczytach kontrolnych literaln
 `42`, `[]`, `["external.md"]`, `"tekst"`, pusty plik, `true` i błędny JSON; sprawdzają typ
 błędu, jeden świeży odczyt, nietknięte bajty źródła, zero zapisów źródła i jedną wierną kopię.
 Istniejące testy D1b nadal sprawdzają sukces mutacji na świeżym poprawnym obiekcie.
+
+
+## Mobile M2 D2 - własność aktywnej rozmowy
+
+`src/main.ts` przed budową `AgentManager` odczytuje raz identyfikator z publicznego
+`app.loadLocalStorage('pkm-assistant.device-id')`; brak/zła wartość oznacza wygenerowanie
+8 losowych bajtów przez Web Crypto i `app.saveLocalStorage`. Branded `DeviceId` powstaje
+na granicy przez `parseDeviceId` (dokładnie 16 małych znaków hex). Brak API lub wyjątek
+odczytu/zapisu daje `null`. Manager przekazuje ten sam identyfikator każdej pamięci,
+także po reload/rename, a `createSessionWriter` swoim prywatnym pisarzom. Nie ma wpisu
+w ustawieniach ani pliku identyfikatora w vaulcie.
+
+Nowe nagłówki `startActiveSession`, `saveSession` i samonaprawy zawierają `device`
+wyłącznie z identyfikatorem. Jedna czysta `sessionOwnership(device, ownId)` rozróżnia
+`mine`, `foreign`, `unowned`; brak pola lub lokalnego id to `unowned`. Pole obecne,
+lecz niepoprawne (w tym pusty string/lista/null) jest konserwatywnie `foreign`.
+Stary parser i edytor frontmatter zachowują nieznany klucz. Archiwizacja pomija go,
+także dla sesji bez wiadomości z zachowywanym surowym body: archiwum jest wspólne.
+
+Odczyt/restore nie adoptuje pliku. Po dopisaniu wiadomości pisarz zaznacza adopcję
+w RAM; dopiero istniejący zapis `saveSession`, który aktualizuje `updated` i
+`messageCount`, dodaje `device` do sesji `unowned`. Ogon wiadomości zapisany samym
+`saveSession` również adoptuje. Nie ma dodatkowego zapisu. Migracja P3 pozostaje
+append-only: dopisuje `session_epoch`, zachowuje stare bajty i NIE adoptuje.
+
+`listActiveSessions` dodaje opcjonalne `ownership` tylko dla lokalnego id. Restore
+z id sprawdza najpierw lokalny `.active_session.json`, potem wspólne `last_used`,
+potem `active_sessions`, pomijając cudze kandydatury bez usuwania ich ze stanu.
+Przy `null` kolejność, kształt listy, format i operacje adaptera pozostają dawne.
+
+`ForeignSessionError` (barrel, bez treści pliku) odmawia dopisania, zapisu, migracji
+epoki, archiwizacji i odrzucenia przed mutacją dysku. Odczyty, które już wykonywały
+te operacje, odświeżają własność; ciepły pisarz eventów używa cache współdzielonego
+przez adapter bez dodatkowego I/O. Kolejna wysyłka czatu czyta plik świeżo w ramach
+istniejącego przyjęcia tury, więc wykrywa zsynchronizowane przejęcie.
+
+`takeOverActiveSession(path)` jest jawną operacją: wymaga id i istniejącego pliku
+bezpośrednio w `sessions/active/` tego agenta, działa pod kolejką ścieżki, przepisuje
+nagłówek przez `_setFrontmatterField` i odświeża cache. Zdarzenia są zachowane bajt
+w bajt (także CRLF i nieznane bloki), bez ponownej redakcji. Błędny/niezamknięty
+nagłówek, konflikt nagłówka lub niejednoznaczny `device` oznacza odmowę, nie naprawę
+bez kopii. D7 jest właścicielem naprawy splecionych danych.
+
+To nie jest blokada między urządzeniami: starszy plugin i skrypty bez tego kontraktu
+nadal mogą pisać, a natywny ciepły append nie wykrywa zewnętrznej zmiany w połowie
+przyjętej tury bez kolejnego odczytu. Wspólne pola stanu nie zmieniają semantyki.
+
+`sessionOwnership.test.ts` sprawdza dwa urządzenia, odmowy bez mutacji, przejęcie,
+restore, adopcję/P3, starego czytnika, samonaprawę i archiwum. Fixture
+`fixtures/device-session-baseline.json` pochodzi z 558d888: kumulatywnie
+read/write/exists/append po starcie = 4/3/3/0, po turach = 5/3/4/2,
+5/3/4/4, 5/3/4/6, po metadanych = 6/4/4/6 (pozostałe operacje = 0).
+Test wymaga tych samych liczników dla id i null, pełnych dawnych bajtów dla null,
+a dla id dokładnie jednej dodatkowej linii `device` w sesji.

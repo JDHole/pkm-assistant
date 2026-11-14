@@ -4,7 +4,7 @@ import { mock } from 'node:test';
 import { ConfirmModal } from '../../ui-components/index.js';
 import { Platform, Modal } from 'obsidian';
 import { setLocale } from '../../../core/i18n/index.js';
-import { AgentMemory } from '../../memory/index.js';
+import { AgentMemory, parseDeviceId, type DeviceId } from '../../memory/index.js';
 import { SessionWriteConsent } from '../../../core/index.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
 import { createTodoTool } from '../../tools/index.js';
@@ -97,7 +97,7 @@ async function until<T>(read: () => T | undefined): Promise<T> {
     }
     throw new Error('UI did not settle');
 }
-async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
+async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en', deviceId: DeviceId | null = null) {
     Platform.isPhone = platform === 'phone'; Platform.isMobile = platform !== 'desktop'; setLocale(locale);
     host.notices.length = 0; host.menus.length = 0;
     for (const menu of host.getOpenMenus()) menu.close();
@@ -115,7 +115,7 @@ async function fixture(t: ExecutionContext, platform = 'phone', locale = 'en') {
         remove: async (path: string) => { files.delete(path); }, mkdir: async (path: string) => { dirs.add(path); },
         list: async (path: string) => ({ files: [...files.keys()].filter(p => p.startsWith(path + '/') && !p.slice(path.length + 1).includes('/')), folders: [] }),
     };
-    const memory = new AgentMemory({ adapter }, 'Mira');
+    const memory = new AgentMemory({ adapter }, 'Mira', {}, deviceId);
     await memory.ensureMemoryStructure();
     const agent = { name: 'Mira', color: '#123456' };
     const app = { workspace: { getActiveFile: () => null }, vault: { adapter, getMarkdownFiles: () => [], getAllLoadedFiles: () => [] } };
@@ -777,3 +777,79 @@ for (const entry of ['menu', 'sidebar'] as const) {
         });
     }
 }
+
+for (const locale of ['pl', 'en']) for (const choice of ['cancel', 'takeover'] as const)
+test.serial(`D2: real phone takeover dialog ${choice}/${locale}`, async t => {
+    const f = await fixture(t, 'phone', locale, parseDeviceId('bbbbbbbbbbbbbbbb'));
+    const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await remote.saveSession([{ role: 'user', content: 'Rozmowa z laptopa' }, { role: 'assistant', content: 'Wspólny kontekst' }]);
+    const before = [...f.files];
+    const opening = f.view.handleLoadSession(path);
+    const modal = await until(() => f.opened.find((m): m is InstanceType<typeof OpenSessionModal> => m instanceof OpenSessionModal));
+    const buttons = descendants(modal.contentEl).filter(el => el.tagName.toLowerCase() === 'button');
+    t.deepEqual(buttons.map(el => el.textContent), locale === 'pl' ? ['Przejmij rozmowę', 'Anuluj'] : ['Take over conversation', 'Cancel']);
+    const text = descendants(modal.contentEl).map(el => el.textContent).join('\n');
+    t.true(text.includes(locale === 'pl' ? 'Bezpieczniejsza droga: zarchiwizuj ją tam i otwórz tutaj z archiwum.' : 'The safer option is to archive it there and open it here from the archive.'));
+    t.deepEqual([...f.files], before, 'opening confirmation is read-only');
+    buttons[choice === 'takeover' ? 0 : 1].dispatchEvent(new Event('click'));
+    await opening;
+    if (choice === 'cancel') {
+        t.deepEqual([...f.files], before);
+        t.deepEqual(f.view.rollingWindow.messages, []);
+    } else {
+        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Rozmowa z laptopa', 'Wspólny kontekst']);
+        t.is(f.view.chatTabs.find(tab => tab.isActive)?.sessionPath, path);
+        t.is(f.memory.activeSessionPath, path);
+        await f.view.rollingWindow.addMessage('user', 'Kontynuacja na telefonie');
+        await f.view.handleSaveSession();
+        t.deepEqual((await f.memory.loadActiveSession(path)).messages.map(m => m.content),
+            ['Rozmowa z laptopa', 'Wspólny kontekst', 'Kontynuacja na telefonie']);
+    }
+});
+
+test.serial('D2: production restore creates only own tab; foreign empty and nonempty entries and sub histories remain untouched', async t => {
+    const f = await fixture(t, 'phone', 'pl', parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await f.memory.saveSession([{ role: 'user', content: 'Rozmowa telefonu' }]);
+    const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('bbbbbbbbbbbbbbbb'));
+    const foreign = await remote.saveSession([{ role: 'user', content: 'Rozmowa laptopa' }]);
+    remote.setActiveSessionIdentity(null, null);
+    const empty = await remote.startActiveSession();
+    const stateBefore = f.files.get(f.memory.paths.state);
+    const imports: string[] = [];
+    const registry = new SubTaskRegistry();
+    const importHistory = registry.importHistory.bind(registry);
+    mock.method(registry, 'importHistory', (...args: Parameters<typeof importHistory>) => { imports.push(args[1].sessionPath); return importHistory(...args); });
+    t.teardown(() => mock.restoreAll());
+    f.view.plugin.subTaskRegistry = registry;
+    // The real list requires stat; memory adapter supports this host port.
+    Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
+    const reads: string[] = [];
+    const read = f.adapter.read;
+    f.adapter.read = async p => { reads.push(p); return read(p); };
+    await f.view._restoreActiveSession();
+    t.deepEqual(f.view.chatTabs.map(tab => tab.sessionPath), [path]);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Rozmowa telefonu']);
+    t.deepEqual(imports, [path]);
+    t.is(reads.filter(p => p === foreign).length, 1, 'foreign is inspected by list only');
+    t.is(reads.filter(p => p === empty).length, 1);
+    t.is(f.files.get(f.memory.paths.state), stateBefore);
+});
+
+test.serial('D2: taking back an already open foreign tab discards its stale RAM snapshot without appending it', async t => {
+    const f = await fixture(t, 'phone', 'en', parseDeviceId('bbbbbbbbbbbbbbbb'));
+    const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await remote.saveSession([{ role: 'user', content: 'Aktualna rozmowa laptopa' }]);
+    const before = f.files.get(path)!;
+    Object.assign(f.view.chatTabs[0], { sessionPath: path, sessionEpoch: remote.sessionEpoch });
+    f.memory.setActiveSessionIdentity(path, remote.sessionEpoch);
+    await f.view.rollingWindow.addMessage('user', 'Stare pytanie');
+    await f.view.rollingWindow.addMessage('assistant', 'Stara odpowiedź spoza synchronizacji');
+    const opening = f.view.handleLoadSession(path);
+    const modal = await until(() => f.opened.find((m): m is InstanceType<typeof OpenSessionModal> => m instanceof OpenSessionModal));
+    descendants(modal.contentEl).find(el => el.tagName.toLowerCase() === 'button' && el.textContent === 'Take over conversation')!.dispatchEvent(new Event('click'));
+    await opening;
+    t.is(f.files.get(path), before.replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Aktualna rozmowa laptopa']);
+    t.is(f.view.chatTabs[0].sessionPath, path);
+});

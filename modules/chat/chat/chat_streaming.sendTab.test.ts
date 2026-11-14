@@ -8,7 +8,7 @@ import * as streaming from './chat_streaming.js';
 import { handleSaveSession, appendToActiveSession, handleNewSession, initSessionManager, handleLoadSession, _restoreActiveSession, consolidateSession } from './chat_session.js';
 import { _switchTab, _renderTabBar, _closeActiveTab } from './chat_tabs.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
-import { AgentMemory } from '../../memory/index.js';
+import { AgentMemory, parseDeviceId, type DeviceId } from '../../memory/index.js';
 import { SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
@@ -156,7 +156,7 @@ function installTypingIndicator(view: unknown) {
     new Function('SkinManager', 'setSvg', 't', code).call(view, SkinManager, setSvg, translate);
 }
 
-async function fixture(newSession = false, tabNames = ['A', 'B']) {
+async function fixture(newSession = false, tabNames = ['A', 'B'], deviceId: DeviceId | null = null) {
     document.hasFocus = () => true;
     setLocale('pl');
     const files = new Map<string, string>();
@@ -167,7 +167,7 @@ async function fixture(newSession = false, tabNames = ['A', 'B']) {
         append: async (path: string, text: string) => { files.set(path, (files.get(path) ?? '') + text); },
         remove: async (path: string) => { files.delete(path); }, mkdir: async () => {}, list: async (): Promise<{ files: string[] }> => ({ files: [] }),
     };
-    const memory = new AgentMemory({ adapter }, 'Mira');
+    const memory = new AgentMemory({ adapter }, 'Mira', {}, deviceId);
     const seed = new AgentMemory({ adapter: { ...adapter } }, 'Mira');
     const agent = { name: 'Mira' };
     const tabs = tabNames.map((id, index) => ({ agentName: 'Mira', sessionId: id,
@@ -1827,4 +1827,31 @@ test.serial(`F7: tworzenie sesji nie uprawnia lifecycle do przejęcia obcej ${re
     await Promise.all([run, ...buttons.requests]);
     t.deepEqual([f.tabs[0].sessionPath, f.tabs[0].sessionEpoch], replacement === 'path' ? [replacementPath, null] : ['', 'd'.repeat(32)]);
     t.deepEqual((await f.memory.loadActiveSession(f.memory.paths.sessionsActive + '/B.md')).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
+});
+
+for (const locale of ['pl', 'en'] as const) test.serial(`D2: synced takeover rejects next send, restores draft and explains ownership (${locale})`, async t => {
+    const f = await fixture(false, ['A', 'B'], parseDeviceId('aaaaaaaaaaaaaaaa'));
+    disposeFixture(t, f); setLocale(locale);
+    const path = f.tabs[0].sessionPath;
+    await f.memory.takeOverActiveSession(path);
+    await f.memory.appendSessionEvent(path, { type: 'tool_call', content: 'Warm local writer' }, f.tabs[0].sessionEpoch);
+    const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('bbbbbbbbbbbbbbbb'));
+    await remote.takeOverActiveSession(path);
+    const before = [...f.files];
+    f.view.input_area.value = 'Mój szkic';
+    await f.clickSend();
+    const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
+    const expected = locale === 'pl'
+        ? 'Błąd: Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę świadomie albo otwórz ją z archiwum.'
+        : 'Error: This conversation now belongs to another device. Your draft was not sent. Sync your devices and explicitly take over the conversation, or open it from the archive.';
+    t.true(texts(f.view.messages_container).includes(expected));
+    t.is(f.view.input_area.value, 'Mój szkic');
+    t.deepEqual(f.modelInputs, []);
+    t.deepEqual([...f.files], before);
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    await f.memory.takeOverActiveSession(path);
+    await f.clickSend();
+    t.is(f.modelInputs.length, 1);
+    t.deepEqual((await f.memory.loadActiveSession(path)).messages.map(m => m.content),
+        ['Pytanie A', 'Odpowiedź A', 'Mój szkic', 'Odpowiedź na poprawkę A']);
 });

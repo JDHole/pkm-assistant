@@ -245,3 +245,16 @@ M1 R2: `AgentManager.initialize()` przekazuje do `ensureBuiltinTypes` surowe pol
 brakujących typów, bez przepisywania istniejących. `AgentManager.startup.test.ts`
 sprawdza start, zapis klucza API i restart z rzeczywistym pancerzem/defaultami oraz
 jawny wybór EN. Pozostałe seedy i migracje zachowują własne markery w plikach vaulta.
+
+
+## Mobile M2 D2 - identyfikator i lista sesji
+
+`AgentManager` przyjmuje opcjonalny branded `DeviceId | null` z composition root
+jako czwarty argument i przekazuje go przez `_initializeMemoryForAgent` do każdej
+pamięci (także przy reload/rename). Manager nie odczytuje hostowego storage.
+`profile_persona.ts` oznacza aktywne sesje `foreign` etykietą PL/EN "na innym
+urządzeniu"; klik pozostaje podglądem `openHiddenFile(readOnly: true)`. Zakładka
+Pamięć/Sesje listuje wyłącznie wspólne archiwum i nie wymaga przejęcia. Jawne
+przejęcie aktywnej sesji jest własnością czatu (`OpenSessionModal`). Test
+`profile/profile_persona.ownership.test.ts` sprawdza literalne etykiety trzech
+stanów w obu językach, a test startu `src/main.mobile.test.ts` wstrzyknięcie id.

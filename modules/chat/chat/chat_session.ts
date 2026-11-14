@@ -10,7 +10,7 @@ import { cancelMessageEdit } from './messageEdit.js';
 import { Notice, Platform } from 'obsidian';
 import { renderPhoneHistory } from './phoneHistoryScroll.js';
 import { RollingWindow } from './RollingWindow.js';
-import { IdleScheduler, sessionMessageId } from '../../memory/index.js';
+import { IdleScheduler, sessionMessageId, sessionOwnership, ForeignSessionError } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
@@ -121,6 +121,7 @@ export async function _idleTick(this: ChatViewLike) {
  */
 async function _pruneEmptyActiveSessionFromState(agentMemory: AgentMemory, session: ActiveSessionInfo) {
     try {
+        if (session.ownership === 'foreign') return;
         const path = session?.path;
         const name = session?.name || (path ? path.split('/').pop() : null);
         if (!name) return;
@@ -153,6 +154,7 @@ async function _retireActiveSession(agentMemory: AgentMemory | null | undefined,
         const moved = await agentMemory.discardActiveSession(path);
         if (moved) log.info('Chat', `Old session retired to .discarded/ (${reason}): ${moved}`);
     } catch (e) {
+        if (e instanceof ForeignSessionError) throw e;
         log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || String(e)}`);
     }
 }
@@ -247,6 +249,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             const sessions = await agentMemory.listActiveSessions();
             if (!current()) return;
             for (const session of sessions) {
+                if (session.ownership === 'foreign') continue;
                 let parsed = null;
                 try {
                     parsed = await agentMemory.loadActiveSession(session);
@@ -255,6 +258,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
                     log.warn('Chat', `Could not load active session ${session?.name}: ${(e as Error).message}`);
                 }
                 if (!current()) return;
+                if (parsed && sessionOwnership(parsed.metadata.device, agentMemory.deviceId ?? null) === 'foreign') continue;
                 const hasHistory = parsed && restoreSubTaskHistory(this, parsed, agentName, session.path);
                 if (!parsed || (!parsed.messages.length && !hasHistory)) {
                     // Memory v3: do NOT delete the underlying file. We previously called
@@ -295,6 +299,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             // `restoredPath` jest niepuste tylko wtedy, gdy `agentMemory` istnieje (linia wyżej).
             const parsed = await agentMemory!.loadActiveSession(restoredPath);
             if (!current()) return;
+            if (sessionOwnership(parsed.metadata.device, agentMemory!.deviceId ?? null) === 'foreign') return;
             const hasHistory = restoreSubTaskHistory(this, parsed, activeAgentName, restoredPath);
             if (!parsed.messages.length && !hasHistory) return;
 
@@ -648,11 +653,14 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                 if (!agentMemory) return;
                 const filename = path.split('/').pop() || path;
                 const parsed = await agentMemory.loadSession(path);
+                const foreign = path.startsWith(`${agentMemory.paths?.sessionsActive}/`)
+                    && sessionOwnership(parsed.metadata?.device, agentMemory.deviceId ?? null) === 'foreign';
                 if (!owner.current() || !parsed?.messages) return;
                 const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');
                 const modal = new OpenSessionModal(this.app, {
                     agentName: owner.agentName || 'Agent', agentColor: agent?.color || '',
                     sessionTitle: filename.replace(/\.md$/, ''),
+                    foreign,
                     sessionDate: typeof parsed.metadata?.created === 'string' ? parsed.metadata.created : filename,
                 });
                 return { agentMemory, filename, parsed, decision: promptSessionDecision(this, modal, 'cancel') };
@@ -660,15 +668,29 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
             if (!prepared || !owner.current()) return;
             const choice = await prepared.decision;
             if (!owner.current() || choice === 'cancel') return;
-            const { agentMemory, filename, parsed } = prepared;
+            const { agentMemory, filename } = prepared;
+            let parsed: typeof prepared.parsed | Awaited<ReturnType<AgentMemory['loadActiveSession']>> = prepared.parsed;
+            let takenOver: Awaited<ReturnType<AgentMemory['loadActiveSession']>> | undefined;
             await serializeSessionLifecycle(owner, async () => {
                 if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+                if (choice === 'takeover') {
+                    await agentMemory.takeOverActiveSession(path);
+                    if (!owner.current()) return;
+                    takenOver = await agentMemory.loadActiveSession(path);
+                    parsed = takenOver;
+                    if (!owner.current()) return;
+                    if (sessionOwnership(parsed.metadata.device, agentMemory.deviceId) === 'foreign') throw new ForeignSessionError();
+                }
                 cancelMessageEdit(owner.window);
-                await this.handleSaveSession(owner.agentName, owner.window,
-                    owner.path ? { path: owner.path, epoch: owner.epoch } : undefined);
+                // A tab left open before a remote takeover contains a stale snapshot of
+                // this very file. Do not append that snapshot into the newly acquired log.
+                if (choice !== 'takeover' || owner.path !== path) {
+                    await this.handleSaveSession(owner.agentName, owner.window,
+                        owner.path ? { path: owner.path, epoch: owner.epoch } : undefined);
+                }
                 if (!owner.current()) return;
                 const loadedWindow = this._createRollingWindow(owner.agentName);
-                if (choice === 'continue') {
+                if (choice === 'continue' || choice === 'takeover') {
                     // Pełen load
                     for (const msg of parsed.messages) {
                         await loadedWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
@@ -702,15 +724,25 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                 }
 
                 if (!owner.current()) return;
+                if (choice === 'takeover') {
+                    const epoch = typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null;
+                    if (!owner.adoptSavedIdentity(path, epoch)) return;
+                    if (owner.tab) Object.assign(owner.tab, {
+                        sessionName: filename, sessionLabel: filename.replace(/\.md$/, ''),
+                    });
+                    if (takenOver) restoreSubTaskHistory(this, takenOver, owner.agentName || agentMemory.agentName, path);
+                }
                 if (owner.tab && !owner.tab.isActive) {
                     const state = this._agentStates.get(_tabKey(owner.tab));
                     if (state) state.rollingWindow = loadedWindow;
                     return;
                 }
+                if (choice === 'takeover') agentMemory.setActiveSessionIdentity(path, owner.epoch);
                 this.rollingWindow = loadedWindow;
                 void this.render_messages();
                 this.updateTokenCounter();
                 this._updateTokenPanel?.();
+                if (choice === 'takeover') await agentMemory._persistActiveSession();
             });
         } catch (e) {
             log.error('Chat', 'Error loading session:', e);

@@ -73,7 +73,7 @@ async function _renderActiveSessions(ctx: PersonaContext, el: HTMLElement) {
 
     const list = el.createDiv({ cls: 'cs-mem-list' });
     for (const session of sessions) {
-        const label = _sessionLabel(session);
+        const label = _sessionLabel(session) + (session.ownership === 'foreign' ? ` · ${t('session.on_other_device')}` : '');
         const item = list.createDiv({ cls: 'cs-mem-item' });
         setSvg(item.createSpan({ cls: 'cs-mem-item__icon' }), UiIcons.file(12));
         item.createSpan({ cls: 'cs-mem-item__date', text: label });

@@ -339,8 +339,8 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   przygotowanie; tekst wraca, jeśli pole jest puste.
   Rejestr `StreamingManager` używa identyfikatora
   `leafId::tabKey`, więc równoczesne tury jednego agenta mają osobne wpisy.
-- `_restoreActiveSession` odtwarza każdą niepustą aktywną sesję, także kilka sesji tego samego
-  agenta. Przed wymianą zakładek zatrzymuje tury i przygotowania rozpoczęte podczas restore.
+- `_restoreActiveSession` odtwarza niepuste aktywne sesje `mine`/`unowned` (przy braku id
+  wszystkie jak dawniej), także kilka sesji tego samego agenta. Przed wymianą zakładek zatrzymuje tury i przygotowania rozpoczęte podczas restore.
   Każda dostaje własną zakładkę, `RollingWindow`, tracker i stan pod kluczem ścieżki.
   `chat_streaming.sameAgentTabs.test.ts` sprawdza kolejność kończenia, malowanie, Stop,
   zamknięcie zakładki oraz zmianę klucza w trakcie tury.
@@ -2383,3 +2383,29 @@ z menu i paska. Testuje produkcyjne ChatView i rzeczywisty zapis AgentMemory.
 Adaptery częściowego widoku w `chat_streaming.sendTab.test.ts`, `chatViewClose.test.ts`,
 `chat_f7.test.ts` i `chat_f8.test.ts` dołączają także produkcyjne sprzątanie menu
 oraz jego początkowy stan, ponieważ omijają konstruktor.
+
+
+## Mobile M2 D2 - cudza rozmowa i jawne przejęcie
+
+Restore pomija `foreign` przed ładowaniem okna i historii subów, a po odczycie
+ponownie sprawdza własność. Nie usuwa cudzych wpisów `.state.json`, także pustych
+sesji; fallback pamięci stosuje tę samą politykę. `safeErrorText` mapuje publiczny
+`ForeignSessionError` na komunikat PL/EN; istniejący mechanizm przyjęcia wysyłki
+zwraca szkic do pola i nie wysyła modelu ani dopisku do cudzej sesji.
+
+`handleLoadSession` przy cudzej aktywnej sesji otwiera wariant `OpenSessionModal`
+z przyciskami "Przejmij rozmowę"/"Anuluj", ostrzeżeniem o zakończeniu pracy i
+synchronizacji drugiego urządzenia oraz sugestią przeniesienia przez archiwum.
+Anuluj ma domyślny fokus, zamknięcie działa jak Anuluj. Wariant korzysta z klas
+`cs-open-session__btn` i ograniczeń modali M3 (na telefonie cele 44 px).
+Potwierdzenie woła `takeOverActiveSession`, czyta świeżą sesję i otwiera pełną
+rozmowę z jej ścieżką/epoką oraz historią subów. Publikacja należy do uchwyconej
+zakładki i okna; przy przejmowaniu ścieżki już otwartej w tym oknie pomijamy
+autozapis jego starego snapshotu do przejętego pliku; kontrole lifecycle chronią przed zmianą zakładki/zamknięciem
+w trakcie I/O. Archiwum i warianty continue/compress/fresh zachowują starą ścieżkę.
+
+Profil agenta ma wyłącznie podgląd aktywnych sesji, więc tam jest tylko etykieta
+"na innym urządzeniu". Pamięć/Sesje pokazuje archiwum, bez własności urządzenia.
+Testy `phoneSessionMenu.test.ts` wykonują rzeczywisty restore oraz przyciski
+modalu PL/EN, a `chat_streaming.sendTab.test.ts` sprawdza odmowę po przejęciu,
+komunikat i szkic w obu językach oraz udaną wysyłkę po jawnym przejęciu z powrotem.
