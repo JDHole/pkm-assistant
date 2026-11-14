@@ -3,7 +3,7 @@ import type { MemoryState } from './StateManager.js';
 
 // Unknown keys belong to other writers and must survive recovery.
 const objectSchema = new Validator({ type: 'object' });
-function parseObject(text: string): Record<string, unknown> | null {
+export function parseObject(text: string): Record<string, unknown> | null {
     try {
         const value: unknown = JSON.parse(text);
         return objectSchema.validate(value).valid ? value as Record<string, unknown> : null;

@@ -1,7 +1,7 @@
 import { probeFile } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { splitGitConflict } from './gitConflict.js';
-import { mergeStateConflict } from './stateConflict.js';
+import { mergeStateConflict, parseObject } from './stateConflict.js';
 import { StateCorruptionError } from './StateCorruptionError.js';
 
 /** Adapter FS vaulta w zakresie potrzebnym `.state.json` (typowany strukturalnie). */
@@ -139,7 +139,8 @@ export class StateManager {
             if (await adapter.read(this.statePath) !== raw || !await this._writeRaw(state, raw)) {
                 // One fresh mutation read only: no bootstrap or recursive conflict repair.
                 const latest = await adapter.read(this.statePath);
-                return { ...this.defaultState(), ...(JSON.parse(latest) as Partial<MemoryState>) };
+                const parsed = parseObject(latest);
+                return parsed ? { ...this.defaultState(), ...parsed } : null;
             }
             log.warn('StateManager', `Naprawiono konflikt: ${this.statePath}; kopia: ${backupPath}`);
             return { ...this.defaultState(), ...state };

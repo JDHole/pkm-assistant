@@ -178,6 +178,28 @@ for (const readNumber of [2, 3]) {
     }
 }
 
+for (const readNumber of [2, 3]) {
+    for (const external of ['null', '42', '[]', '["external.md"]', '"tekst"', '', 'true', '{broken']) {
+        test(`D1c: source read ${readNumber}, retry rejects ${JSON.stringify(external)} without overwriting`, async t => {
+            const f = fixture();
+            const read = f.adapter.read;
+            let sourceReads = 0;
+            f.adapter.read = async path => {
+                if (path === PATH && ++sourceReads === readNumber) f.files.set(PATH, external);
+                return read(path);
+            };
+            const error = await t.throwsAsync(f.manager.addActiveSession('x.md'), { instanceOf: StateCorruptionError });
+            t.is(error?.agentName, 'jaskier');
+            t.is(f.files.get(PATH), external);
+            t.is(sourceReads, readNumber + 1);
+            t.is(f.backups().length, 1);
+            const [backup, bytes] = f.backups()[0];
+            t.is(bytes, RAW);
+            t.deepEqual(f.writes, [backup]);
+        });
+    }
+}
+
 for (const outcome of ['latest-valid', 'conflict', 'missing', 'read-error'] as const) {
     test(`D1b: the single mutation retry sees ${outcome}`, async t => {
         const f = fixture();

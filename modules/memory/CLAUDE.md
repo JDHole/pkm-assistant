@@ -1214,11 +1214,15 @@ D1b: naprawa przekazuje do `_writeRaw` oczekiwany oryginalny tekst. OSTATNI odcz
 zapisem musi zwrócić dokładnie ten tekst; w tej ścieżce porównanie R2 zastępuje ścisła
 kontrola bajtów, a błąd odczytu blokuje zapis. Zmiana wykryta w którymkolwiek z dwóch
 odczytów źródła po kopii powoduje dokładnie jeden ponowny odczyt mutacyjny, bez pętli,
-bootstrapu ani kolejnej naprawy konfliktu. Poprawny JSON z tego odczytu staje się podstawą
-mutacji; uszkodzenie, brak lub błąd odczytu kończy się `StateCorruptionError`, bez zapisu
+bootstrapu ani kolejnej naprawy konfliktu. D1c: podstawą mutacji staje się tylko obiekt JSON
+(nie null ani tablica), sprawdzany wspólnym `parseObject` z `stateConflict.ts`, eksportowanym
+wyłącznie wewnątrz modułu. Inna wartość, pusty plik, błąd parsowania, brak lub błąd odczytu
+oznacza brak naprawy (`null`), a dla mutacji `StateCorruptionError`, bez zapisu
 źródła. Kopia oryginalnego konfliktu zostaje także po odmowie. Między ostatnim odczytem
 a `adapter.write` nadal istnieje pojedyncze okno wyścigu, bez dodatkowego odczytu pośrodku:
 adapter nie udostępnia compare-and-swap. Zewnętrznej zmiany w tym oknie nie da się wykluczyć.
+Znane ograniczenie poza D1c: pierwszy odczyt mutacyjny `_readRaw` nadal przyjmuje tablice,
+skalary i null jak przed M2, bez nowej walidacji kształtu.
 
 `read()` istniejącego konfliktu zwraca scalony stan tylko w RAM, bez kopii i zapisów.
 Nienaprawialne uszkodzenie nadal daje defaulty tylko w RAM, zgodnie z kontraktem
@@ -1230,3 +1234,7 @@ dodatkowego I/O. Testy: `gitConflict.test.ts`, `stateConflict.test.ts`,
 Testy D1b w `StateManager.conflict.test.ts` obejmują zewnętrzny poprawny/zepsuty zapis
 i błąd obu odczytów kontrolnych, pojedyncze ponowienie z najnowszym JSON-em lub awarią,
 zachowanie kopii oraz oba kształty listingu z wykluczeniem obcych katalogów i podfolderów.
+Testy D1c w tym samym pliku podstawiają przy obu odczytach kontrolnych literalne `null`,
+`42`, `[]`, `["external.md"]`, `"tekst"`, pusty plik, `true` i błędny JSON; sprawdzają typ
+błędu, jeden świeży odczyt, nietknięte bajty źródła, zero zapisów źródła i jedną wierną kopię.
+Istniejące testy D1b nadal sprawdzają sukces mutacji na świeżym poprawnym obiekcie.
