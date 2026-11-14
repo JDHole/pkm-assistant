@@ -3105,15 +3105,26 @@ body.is-phone .cs-profile-content .cs-prompt-row__label {
 body.is-phone .cs-profile-content :is(.cs-shard__action, .cs-shard__remove, .cs-mem-item__actions, .cs-mem-entry__actions, .cs-profile-hero__edit) {
   opacity: 1;
 }
-/* Keep the grid navigation; two columns leave room for PL and EN labels. */
+/* U16: icons above labels keep nine tabs in three compact rows, including PL. */
 body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tabs--2col {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
   white-space: normal;
   height: auto;
   overflow-wrap: anywhere;
-  padding: 8px 6px;
+  padding: 3px 2px;
+  line-height: 16px;
+}
+body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab > span {
+  font-size: 13px;
+  line-height: 16px;
 }
 body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-tab > span:first-child {
   flex-shrink: 0;
@@ -3138,19 +3149,50 @@ body.is-phone .cs-profile-content :is(.cs-shard__action, .cs-shard__remove) {
 }
 body.is-phone .cs-profile-content .cs-shard__remove { left: 4px; }
 body.is-phone .cs-profile-content .cs-shard__corner-toggle { top: 4px; right: 4px; }
-/* Long names take a whole row; metadata and actions wrap below, in DOM order. */
-body.is-phone .cs-profile-content :is(.cs-mem-item, .cs-mem-entry, .cs-mem-card__head, .cs-mem-pagination, .cs-focus-chip, .cs-focus-group-row, .cs-preset-row, .cs-prompt-row, .cs-prompt-override__header, .cs-prompt-override__actions, .cs-prompt-category__header, .cs-prompt-footer, .cs-dt-group__header, .cs-skill-override__buttons, .cs-artifact-manage-row, .cs-artifact-btn-row) {
+body.is-phone .cs-profile-content :is(.cs-mem-card__head, .cs-mem-pagination, .cs-focus-chip, .cs-focus-group-row, .cs-preset-row, .cs-prompt-row, .cs-prompt-override__header, .cs-prompt-override__actions, .cs-prompt-category__header, .cs-prompt-footer, .cs-dt-group__header, .cs-skill-override__buttons, .cs-artifact-manage-row, .cs-artifact-btn-row) {
   flex-wrap: wrap;
 }
+/* U16: reserve the right column for actions, metadata sits below the name.
+   Brain/summary rows without metadata use only one row. Log rows have no icon. */
+body.is-phone .cs-profile-content .cs-mem-item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 0;
+  padding: 5px 8px;
+}
+body.is-phone .cs-profile-content .cs-mem-item__icon { grid-column: 1; grid-row: 1; }
 body.is-phone .cs-profile-content .cs-mem-item__date {
-  flex: 1 1 calc(100% - 24px);
+  grid-column: 2;
+  grid-row: 1;
   overflow-wrap: anywhere;
 }
+body.is-phone .cs-profile-content .cs-mem-item__size {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: start;
+  margin-left: 0;
+  overflow-wrap: anywhere;
+}
+body.is-phone .cs-profile-content .cs-mem-item__actions {
+  grid-column: 3;
+  grid-row: 1;
+}
+body.is-phone .cs-profile-content .cs-mem-item:has(> .cs-mem-item__size) :is(.cs-mem-item__icon, .cs-mem-item__actions) {
+  grid-row: 1 / 3;
+}
+body.is-phone .cs-profile-content .cs-mem-item:not(:has(> .cs-mem-item__icon)) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+body.is-phone .cs-profile-content .cs-mem-item:not(:has(> .cs-mem-item__icon)) :is(.cs-mem-item__date, .cs-mem-item__size) {
+  grid-column: 1;
+}
+body.is-phone .cs-profile-content .cs-mem-item > .cs-badge { grid-column: 2; grid-row: 1; }
+body.is-phone .cs-profile-content .cs-mem-entry { flex-wrap: nowrap; }
 body.is-phone .cs-profile-content :is(.cs-mem-item__actions, .cs-mem-entry__actions) {
   margin-left: auto;
   flex-shrink: 0;
 }
-body.is-phone .cs-profile-content .cs-mem-item__size { margin-left: 0; }
 body.is-phone .cs-profile-content .cs-mem-card__subtitle { flex-shrink: 1; }
 body.is-phone .cs-profile-content :is(.cs-mem-input, .cs-focus-input, .cs-picker__search, .cs-mem-filter__input, .cs-mem-entry__edit-input, .cs-dt-input) {
   width: 0;
@@ -3185,7 +3227,7 @@ body.is-phone .cs-profile-content .cs-palette-popup__swatch:hover { transform: n
 body.is-phone .sidebar-view-content:has(> .cs-profile__header) .cs-profile-buttons { flex-wrap: wrap; }
 /* Presentation model identifiers need more than a quarter-width tile. */
 body.is-phone .modal-content.cs-agent-presentation-modal .cs-shards {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 body.is-phone .modal-content.cs-agent-presentation-modal .cs-shards + .cs-shards > .cs-shard:first-child {
   grid-column: 1 / -1;
@@ -3195,17 +3237,29 @@ body.is-phone .modal-content.cs-agent-presentation-modal .cs-shard__value {
   overflow-wrap: anywhere;
 }
 body.is-phone .modal-content.cs-agent-presentation-modal .cs-shards + .cs-shards > .cs-shard:first-child .cs-shard__value { font-size: 15px; }
-body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile-hero { flex-wrap: wrap; }
-body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile-hero__info { flex-basis: 180px; }
-body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile__crystal { margin: 0 auto; }
-body.is-phone .modal-content.cs-agent-presentation-modal :is(.cs-presentation-footer, .cs-profile-hero__meta) { flex-wrap: wrap; }
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile-hero { align-items: flex-start; }
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile__crystal {
+  width: 56px;
+  margin: 0;
+}
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile__crystal svg { width: 56px; height: 56px; }
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-profile-hero__meta { flex-wrap: wrap; }
+/* U16: sticky within the existing scroller, so even a 400-character description
+   leaves both actions visible at scrollTop=0 and all content remains reachable. */
+body.is-phone .modal-content.cs-agent-presentation-modal .cs-presentation-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--modal-background, var(--background-primary));
+  flex-wrap: wrap;
+}
 body.is-phone .modal:has(> .cs-agent-presentation-modal) > .modal-close-button {
   min-width: 44px;
   min-height: 44px;
 }
 
-/* Obsidian's mobile modal-content is a flex column. Do not shrink the hero
-   against the stats/footer: scroll the complete card vertically instead. */
+/* Obsidian's mobile modal-content is a flex column. Keep the full hero/stats
+   height scrollable; the sticky footer remains reachable above that content. */
 body.is-phone .modal-content.cs-agent-presentation-modal > * { flex-shrink: 0; }
 /* A team tile has two right-side actions (default and active). */
 body.is-phone .cs-profile-content .cs-shard__action ~ .cs-shard__action { right: 52px; }

@@ -241,7 +241,7 @@ decyzjami. Weryfikacja geometrii wymaga przeglądarki, atrapa DOM AVA jej nie mi
 `decisionModals.mobile.test.ts` sprawdza kolejność oraz wyniki wszystkich decyzji
 na telefonie, tablecie i desktopie, także sesyjną zgodę oraz modal diffa.
 
-## Mobile M3 U14 - profil i karta agenta
+## Mobile M3 U14/U16 - profil i karta agenta
 
 `sidebar/SidebarViews.css` ogranicza nowe reguły do `body.is-phone` oraz dwóch
 powierzchni: `.sidebar-view-content:has(> .cs-profile__header)` i
@@ -249,7 +249,10 @@ powierzchni: `.sidebar-view-content:has(> .cs-profile__header)` i
 objęte tym zakresem, mimo wspólnych klas shardów. Desktop/tablet zachowują CSS
 bazowy. Nie zmienia się DOM, kolejność fokusu, obsługa akcji ani API modułów.
 
-Profil zachowuje siatkę zakładek, z dwiema kolumnami i zawijaniem etykiet.
+Profil ma trzy kolumny i trzy wiersze zakładek, z ikoną nad etykietą 13 px.
+Podzakładki pamięci zajmują jeden wiersz trzech kolumn; Inspektor/Edytor zachowuje
+jeden wiersz dwóch kolumn przez `.cs-profile-tabs--2col`. Etykiety PL/EN mogą
+się zawijać, przyciski zachowują minimum 44 px wysokości.
 Tekst główny ma 15 px, pomocniczy 12 px, pola i select 16 px; nagłówki i liczby
 zachowują większy rozmiar. Kontrolki, także klikalne spany/divy, mają minimum
 44x44 px. Natywny `.checkbox-container` Obsidiana zachowuje własną geometrię;
@@ -257,11 +260,18 @@ customowy `.cs-toggle` ma większy obszar trafienia z niepowiększonym torem.
 Akcje skilli i pamięci są widoczne bez hovera. Kafelki skilli rezerwują osobny
 pas na przyciski, aby powiększone cele nie zasłaniały nazwy ani siebie nawzajem.
 Druga prawa akcja kafelka Ekipy jest odsunięta o 48 px od pierwszej.
-Nazwa wpisu pamięci zawija się nad metadanymi i akcjami w istniejącej kolejności
-DOM; otwarte karty pamięci nie mają desktopowego limitu 600 px, który po
-powiększeniu tekstu obcinałby ostatnie wpisy. W karcie agenta model zajmuje pełny wiersz i zawija identyfikator w dowolnym
-miejscu. Dzieci mobilnego flex-kontenera modala nie kurczą się: cała karta jest
-przewijana pionowo, bez obcinania opisu w hero.
+Wpis pamięci ma kolumny: ikona, zawijana nazwa, akcje 44x44 po prawej.
+Istniejące metadane rozmiaru są pod nazwą, a akcje obejmują oba wiersze.
+Notatki brain mają samą nazwę, bez dodawania nieistniejącej daty/rozmiaru;
+wiersze logu bez ikony używają dwóch kolumn. Wpisy „Na teraz” zachowują
+tekst i obie akcje obok siebie. DOM i kolejność fokusu pozostają bez zmian.
+Otwarte karty pamięci nie mają desktopowego limitu 600 px, który po
+powiększeniu tekstu obcinałby ostatnie wpisy. W karcie agenta kafelki liczbowe
+mają trzy kolumny, model pełny wiersz i zawijany identyfikator. Kryształ 56 px
+mieści się obok informacji, bez osobnego pustego wiersza. Dzieci mobilnego
+flex-kontenera modala nie kurczą się; stopka `sticky; bottom: 0` ma nieprzezroczyste
+tło i utrzymuje oba przyciski przy dolnej krawędzi także przy długim opisie.
+Treść można przewinąć ponad stopkę, bez dodatkowego kontenera DOM.
 
 Weryfikacja U14: tymczasowe podanie CSS do działającego Obsidiana 360x804
 (bez buildu) i pomiary dziewięciu zakładek, palety, nadpisania skilla,
@@ -276,3 +286,20 @@ brain bez spacji, trafienie w trzy rozłączne akcje Ekipy i 20 wpisów pamięci
 bez pionowego obcięcia. To pomiary geometrii, nie test Androida/iOS ani zapisu danych.
 Nie dodano AVA dla samego CSS ani asercji na tekst arkusza. Na urządzeniu
 pozostają do sprawdzenia klawiatura ekranowa, dotyk i przewijanie długiej karty.
+
+Weryfikacja U16: podmiana arkusza w działającym Obsidianie 360x804, bez buildu,
+oraz 52 próby geometrii na snapshotach produkcyjnego DOM w Chromium
+(13 powierzchni, szerokości 360/412 px, etykiety z i18n PL/EN). Pasek główny
+140-152 px, podzakładki pamięci w jednym wierszu 44-56 px, Inspektor/Edytor
+44 px. Jednowierszowa nazwa brain: wpis 56 px, akcja 44x44 w tym samym wierszu;
+sprawdzono także długą nazwę bez spacji. Brak poziomego overflow/scrolla,
+obciętych etykiet, celów poniżej 40 px i tekstu poniżej 12 px na badanych
+powierzchniach. Przy opisie 400 znaków i `scrollTop = 0` przyciski karty
+kończą się na 754,5 px, przed dolną krawędzią modala 774,5 px (360x804);
+sprawdzono trafienie w oba przyciski oraz przewinięcie ostatnich statystyk
+ponad stopkę. 26 porównań geometrii i wybranych stylów bez `is-phone`
+(768/960 px, te same snapshoty) dało identyczne wyniki przed/po.
+Są to pomiary CSS, nie nowe testy AVA ani test fizycznego Androida.
+Następne zmiany modala muszą zachować przewijanie `.modal-content`, bo ono
+wyznacza obszar działania lepkiej stopki; dotyk, większa czcionka systemowa
+i zachowanie konkretnego WebView pozostają do odbioru na urządzeniu.
