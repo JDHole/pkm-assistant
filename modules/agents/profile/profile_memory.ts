@@ -16,7 +16,7 @@ import type { App } from 'obsidian';
 import type { VaultAdapterLike } from '../../../core/index.js';
 import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { openHiddenFile } from './profile_helpers.js';
-import { memoryOpsCenter, OPS_EVENT, parseNaTerazSections, parseBrainLog } from '../../memory/index.js';
+import { memoryOpsCenter, OPS_EVENT, parseNaTerazSections, parseBrainLog, readBrainContent } from '../../memory/index.js';
 import type { AgentMemory, ArchiveSessionInfo, ConsolidationRun } from '../../memory/index.js';
 import { createModelForRole } from '../../models/index.js';
 import type { ResolverPluginLike } from '../../models/index.js';
@@ -104,7 +104,7 @@ async function _renderMemoryBrain(ctx: ProfileCtx, el: HTMLElement, adapter: Vau
     let brainContent = '';
     try {
         const brainPath = `${basePath}/brain.md`;
-        if (await adapter.exists(brainPath)) brainContent = await adapter.read(brainPath);
+        if (await adapter.exists(brainPath)) brainContent = readBrainContent(await adapter.read(brainPath));
     } catch { /* ignore */ }
     const naTeraz = parseNaTerazSections(brainContent);
     const naTerazHead = el.createDiv({ cls: 'cs-section-head' });

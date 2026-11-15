@@ -1,3 +1,5 @@
+import { readBrainContent, protectForeignBrainFences } from './brainConflict.js';
+import { writeBrainContent } from './brainConflictWrite.js';
 import { mergeSessionConflict, readConflictAwareSession, SessionConflictError } from './sessionConflict.js';
 import { rememberSessionRead, sessionRemovalContext, safeRemovalRanges } from './sessionRemovals.js';
 import type { SessionRemovalContext } from './sessionRemovals.js';
@@ -1899,6 +1901,10 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
             throw error;
         }
 
+        // A conflicted read is a RAM projection only, including during bootstrap.
+        const clean = readBrainContent(content);
+        if (clean !== content) return clean;
+
         // Gracefully add any missing index sections without overwriting existing content.
         // Język pliku ISTNIEJĄCEGO wygrywa zawsze - samonaprawa dokleja nagłówki w JĘZYKU
         // TEGO PLIKU, nigdy w bieżącym języku UI (plik PL pod EN UI zostaje PL).
@@ -2002,50 +2008,55 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                     throw e;
                 }
             }
+            const original = before;
+            before = readBrainContent(before);
+            const protectedFences = original !== before || before.includes('<<<<<<<') ? protectForeignBrainFences(before) : null;
+            const parsedText = protectedFences?.text ?? before;
             // brain.md carries „Na teraz" short-term sections at the top. Parse
             // them out of the current file and re-emit them so a rebuild NEVER drops them —
             // otherwise these plain bullets would look like manual content and get shoved into
             // brain.md.bak.
-            let naTeraz = parseNaTerazSections(before);
+            let naTeraz = parseNaTerazSections(parsedText);
             if (typeof options.mutateNaTeraz === 'function') naTeraz = options.mutateNaTeraz(naTeraz);
             // Sekcje H2 spoza katalogu zarządzanych (ręczne, np. „## AKTYWNY
             // TEST") wracają do nowego pliku verbatim, na koniec — rebuild nie może ich wycinać.
-            const foreign = parseForeignSections(before);
+            const foreign = parseForeignSections(parsedText);
             // Ręcznie dopisane linie w sekcjach ZARZĄDZANYCH (np. kilka bulletów sesji Claude
             // Code w `## Bieżące`) - bez tego rebuild je bezpowrotnie kasuje (patrz gotcha
             // w modules/memory/CLAUDE.md). Index-like linki są tu odsiane - te regeneruje
             // `buildBrainIndex` z realnych notatek.
-            const manual = parseManualIndexLines(before);
+            const manual = parseManualIndexLines(parsedText);
             const notes = await this.listBrainNotes();
             // Język PLIKU wygrywa zawsze - istniejący plik PL pod EN UI zostaje PL po
             // rebuildzie (kontrakt „rodzi się i zostaje", `brainSections.ts`). `before` puste
             // (plik brakujący) = nic do wykrycia, więc `resolveBrainLocale` oddaje `uiBrainLocale()`.
             const locale = resolveBrainLocale(before || null, uiBrainLocale());
-            const content = buildBrainIndex({
+            const built = buildBrainIndex({
                 agentName: this.agentName,
-                header: this._brainHeaderFromContent(before),
+                header: this._brainHeaderFromContent(original !== before ? before.replace(/^\uFEFF/, '') : before),
                 notes,
                 naTeraz,
                 foreign,
                 manual,
                 locale,
             });
-            if (content !== before) {
+            const content = protectedFences?.restore(built) ?? built;
+            if (content !== original) {
                 // Safety net: the rebuild still drops manual lines inside MANAGED sections
                 // (foreign sections and „Na teraz" survive). Back those up first.
                 // Przy niepewnym stanie pliku (`unknown` — `exists()` skłamało) backup idzie
                 // ZAWSZE, bo nie wiemy, czy przed chwilą widzieliśmy całą prawdę o pliku.
                 // `before` puste = nie ma czego backupować (i nie kasujemy starszego `.bak`).
-                if (before && (probe === 'unknown' || this._brainHasManualContent(before))) {
+                if (before && (probe === 'unknown' || this._brainHasManualContent(parsedText))) {
                     try {
                         await this.vault.adapter.write(`${this.paths.brain}.bak`, before);
                     } catch (e) {
                         log.warn(`AgentMemory:${this.agentName}`, `brain.md.bak backup failed:`, e);
                     }
                 }
-                await this.vault.adapter.write(this.paths.brain, content);
+                await writeBrainContent(this.vault.adapter, this.paths.brain, original, content, original !== before);
             }
-            return { changed: content !== before, content };
+            return { changed: content !== original, content };
         });
     }
 
@@ -2473,11 +2484,14 @@ ${String(note.content || '')}
      * @param content - New brain content
      */
     async updateBrain(content: string): Promise<void> {
+        const original = content;
+        content = readBrainContent(content);
+        const repaired = original !== content;
         if (this._brainOverLimit(content)) {
             const sections = this._parseBrainSections(content);
             content = await this._archiveOverflow(sections, this._brainOverLimitPredicate());
         }
-        await this.vault.adapter.write(this.paths.brain, content);
+        await writeBrainContent(this.vault.adapter, this.paths.brain, original, content, repaired);
     }
 
     /**
@@ -2799,7 +2813,7 @@ ${String(note.content || '')}
      * @returns { header: string, sections: Map<string, string[]> }
      */
     _parseBrainSections(brainContent: string): BrainSections {
-        const lines = brainContent.split('\n');
+        const lines = readBrainContent(brainContent).split('\n');
         let header = '';
         const sections = new Map<string, string[]>();
         let currentSection: string | null = null;

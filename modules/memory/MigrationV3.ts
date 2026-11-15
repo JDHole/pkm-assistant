@@ -1,3 +1,5 @@
+import { readBrainContent } from './brainConflict.js';
+import { writeBrainContent } from './brainConflictWrite.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { buildBrainIndex, indexSectionHeadings } from './BrainIndex.js';
 import { BRAIN_SECTION_HEADINGS, BRAIN_LOCALES, detectBrainLocale } from './brainSections.js';
@@ -150,7 +152,7 @@ export class MigrationV3 {
         // w formacie v3. Doczytaj i rozstrzygnij po kształcie treści.
         try {
             const content = await this.memory.vault.adapter.read(this.memory.paths.brain);
-            return !looksLikeV3Index(content);
+            return !looksLikeV3Index(readBrainContent(content));
         } catch {
             // Pad odczytu - zachowaj dotychczasowy wynik (istnienie brain.md bez brain/ = potrzebna migracja).
             return true;
@@ -169,7 +171,8 @@ export class MigrationV3 {
             return { skipped: true, reason: 'fresh_install' };
         }
 
-        const originalBrain = await this.memory.vault.adapter.read(this.memory.paths.brain);
+        const rawBrain = await this.memory.vault.adapter.read(this.memory.paths.brain);
+        const originalBrain = readBrainContent(rawBrain);
 
         // brain.md już w formacie v3 nie jest
         // migrowany, nawet jeśli folder brain/ akurat brakuje (świeży klon, desync). Sam plik
@@ -192,7 +195,7 @@ export class MigrationV3 {
             return { cancelled: true, backupPath, plan };
         }
 
-        const applied = await this.applyPlan(decision?.plan || plan, originalBrain);
+        const applied = await this.applyPlan(decision?.plan || plan, rawBrain);
         return {
             migrated: true,
             backupPath,
@@ -201,6 +204,7 @@ export class MigrationV3 {
     }
 
     buildPlan(brainContent: string): MigrationPlan {
+        brainContent = readBrainContent(brainContent);
         const sections = this.parseSections(brainContent);
         const notes: MigrationNote[] = [];
         const preambleNotes: MigrationNote[] = [];
@@ -282,7 +286,7 @@ export class MigrationV3 {
     parseSections(brainContent: string): MigrationSection[] {
         const sections: MigrationSection[] = [];
         let current: MigrationSection = { title: PREAMBLE_SENTINEL, lines: [] };
-        for (const rawLine of String(brainContent || '').split(/\r?\n/)) {
+        for (const rawLine of readBrainContent(String(brainContent || '')).split(/\r?\n/)) {
             const match = rawLine.match(/^##\s+(.+?)\s*$/);
             if (match) {
                 sections.push(current);
@@ -323,6 +327,8 @@ export class MigrationV3 {
         if ((plan.keepInBrain?.length ?? 0) > 0 && !originalBrain) {
             throw new Error('MigrationV3.applyPlan: plan has keepInBrain sections but originalBrain was not provided');
         }
+        const rawBrain = originalBrain;
+        originalBrain = readBrainContent(originalBrain);
         await this.memory.ensureMemoryStructure();
 
         const createdNotes: string[] = [];
@@ -362,7 +368,7 @@ export class MigrationV3 {
         // dla samej detekcji języka) i naprawia dokładnie tę ścieżkę.
         const locale = detectBrainLocale(originalBrain) ?? 'pl';
         const brain = formatNewBrain(this.memory.agentName, plan, createdNotes, kept, locale);
-        await this.memory.vault.adapter.write(this.memory.paths.brain, brain);
+        await writeBrainContent(this.memory.vault.adapter, this.memory.paths.brain, rawBrain, brain, rawBrain !== originalBrain);
         await this.memory.stateManager.read();
 
         return {

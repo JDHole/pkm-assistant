@@ -53,6 +53,8 @@ modules/memory/
 ├── MigrationV3.ts            # backup-first migracja brain.md v2 -> v3
 ├── StateManager.ts           # .state.json: aktywne sesje + liczniki, kolejka RMW
 ├── gitConflict.ts            # splitGitConflict: tekst -> dwie pełne strony, dla D1 i kolejnych paczek M2
+├── brainConflict.ts          # M2 D3: scalanie w RAM i ochrona przykładów w obcych ogrodzeniach kodu
+├── brainConflictWrite.ts     # M2 D3: zweryfikowana kopia oryginału przed zapisem naprawy
 ├── stateConflict.ts          # czyste mergeStateConflict, opcjonalny spis istniejących sesji
 ├── sessionOwnership.ts      # DeviceId, parseDeviceId, sessionOwnership, ForeignSessionError (publiczny barrel)
 ├── StateCorruptionError.ts   # publiczny typ błędu nienaprawialnego JSON-a, bez treści pliku
@@ -89,6 +91,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `parseBrainLog(text, limit=50)` | Czysty parser `brain.log` (TSV -> `{ts, op, target, detail}`, od najnowszego). Pisze go `AgentMemory.appendBrainLog`; czyta karta "Log wpisów" w profilu agenta. |
 | `MemoryAccessGuard`, `MEMORY_V3_ERROR_CODES`, `isValidNoteType`, `makeMemoryNoteFilename()` | Waliduje ścieżki Memory v3 (brak traversal / absolutnych / cross-agent) + kanoniczne nazwy notatek `type_slug.md`. |
 | `listUncoveredArchiveSessions(agentMemory)` | Sesje z `sessions/archive` BEZ stempla `covered_by_l1`, sortowane rosnąco po nazwie - jedyny poprawny materiał na nową paczkę L1. |
+| `readBrainContent(text)` | Projekcja indeksu po konflikcie gita w RAM; bez I/O, używana również przez profil agenta. |
 | `StateCorruptionError` | Błąd nienaprawialnego JSON-a; niesie `agentName` z nazwy katalogu agenta, bez ścieżki i treści. Czat rozpoznaje go w `safeErrorText`. |
 | `IdleScheduler` | Pure decyzja "czy zapisać po bezczynności" (wpinany w `modules/chat`). |
 | `SaveSessionWorkflow` | `/save session`: user-review, tworzenie notatek, archiwizacja sesji. |
@@ -1551,3 +1554,69 @@ Przegląd repo nie wykazał innej rotacji, przycinania, migracji ani eksportu
 nadpisującego ten dziennik. Częściowo wykonany append nie jest cofany ani ponawiany
 na istniejącym pliku. Nie obiecujemy atomowości I/O urządzenia ani naprawy gita;
 odczyt nadal ładuje całość dziennika do RAM i zachowuje dotychczasowy wstępny exists.
+
+## Mobile M2 D3 - brain.md po konflikcie gita
+
+`brainConflict.ts` rozpoznaje kompletne, niezagnieżdżone bloki merge/diff3/zdiff3.
+`mergeBrainConflict` jest czysty: wynik `merged` z tekstem albo `not-applicable`
+(z `malformed:true` dla złej struktury). Każda sekcja H1/H2 zachowuje nasze wiersze
+oraz nowe wiersze drugiej strony, porównywane po `trimEnd` z całą naszą sekcją,
+także ze wspólnymi wierszami poza hunkiem. Powtórzone nagłówki drugiej strony
+nie są emitowane ponownie; jej treść wraca pod właściwy nagłówek. Baza diff3
+jest pomijana. Nie usuwamy powtórzeń istniejących już wewnątrz naszej strony.
+Odczyt zachowuje BOM, CRLF i surowe bajty pozostawionych wierszy.
+
+Zamknięte ogrodzenie kodu backtickami lub tyldami w obcej sekcji H2 chroni
+kompletny przykład konfliktu wewnątrz. Same takie przykłady dają `not-applicable`.
+Przy przebudowie pliku ze znacznikami `protectForeignBrainFences` ukrywa obce
+ogrodzenia przed starymi parserami indeksu (które rozpoznają H2 również w kodzie),
+a potem przywraca ich bajty. To chroni również drugą przebudowę po naprawie.
+Niekompletny lub zagnieżdżony konflikt nie jest scalany; `readBrainContent`
+oddaje oryginał i loguje jeden warn na wywołanie, bez treści użytkownika.
+Bez ciągu `<<<<<<<` odczyt kończy się na szybkim sprawdzeniu stringa.
+
+Wspólna granica tekstowa `readBrainContent` jest eksportowana przez barrel dla
+profilu agenta. Korzystają z niej `getBrain`, `_parseBrainSections`, przebudowa,
+legacy `updateBrain`, migracja oraz oba odczyty RetrievalEngine (skan/podgląd
+oraz linki wychodzące). `getMemoryContext`, AgentManager, czat i SaveSessionWorkflow
+biorą indeks przez `getBrain`; narzędzia zapisu i konsolidacja przebudowują go
+przez `rebuildBrainIndex`. `read(scope:memory)` czyta notatki brain/ i podsumowania,
+nie indeks. Surowe kopiowanie folderu migracji zachowuje oryginał, nie projekcję.
+Odczyt naprawialnego konfliktu nie zapisuje nawet brakujących nagłówków przy
+bootstrapie. Zdrowy plik zachowuje dotychczasowe tworzenie/dosztukowanie nagłówków.
+
+`brainConflictWrite.ts` przy zapisie naprawionego tekstu odkłada oryginał 1:1 do
+`.pkm-assistant/backups/brain-<agent>-<czas>[-<sufiks>].md.bak` (poza rotacją ustawień).
+Wzorzec D1/D7: wolny cel przez `probeFile`, kontrolny odczyt kopii, sprawdzenie
+niezmienności źródła, zapis i readback, jeden warn ze ścieżkami. Błąd kopii lub
+zmiana źródła blokuje nadpisanie; błąd zapisu/readbacku daje jedną próbę odtworzenia
+oryginału. Nieudane odtworzenie zostawia kopię i error. `BrainWriteError` ma
+wewnętrzny kod przyczyny i istniejący komunikat i18n "Save failed".
+`brain.md.bak` zachowuje osobną rolę, otrzymuje tekst po scaleniu. Indeks nadal
+buduje `buildBrainIndex` z realnych notatek, w dotychczasowym formacie LF;
+BOM/CRLF pozostają w oryginalnej kopii i projekcji odczytu, przebudowa ma własny
+historyczny format. Zdrowe ścieżki nie dostają dodatkowych odczytów ani kopii.
+
+Świadome ograniczenie D3 (rozstrzygnięcie prowadzącego): legacy `updateBrain(content)`
+pisze treść przekazaną przez wołacza (obecnie bez wywołań produkcyjnych), a bezpośrednie
+`MigrationV3.applyPlan(plan)` bez oryginału buduje indeks z przekazanego planu i utworzonych
+notatek. Obie drogi historycznie nie czytają celu przed zapisem i zachowują to I/O;
+produkcyjne `run` przekazuje do `applyPlan` wcześniej odczytany oryginał. Konflikt
+przekazany w argumencie jest chroniony kopią, lecz zdrowy argument nie wykrywa konfliktu
+wyłącznie na dysku. Zewnętrzna zmiana lub konflikt dostarczony po wcześniejszym odczycie
+może zostać nadpisany wraz z ręcznymi wierszami obu stron, bez kopii tej nowszej wersji.
+To zastane okno utraconej aktualizacji, nie rozszerzamy I/O zdrowych ścieżek.
+
+Pozostałe ograniczenia: brak atomowego compare-and-swap i blokady synchronizatora.
+Nie zmieniamy nieoznaczonych splotów, notatek brain/, formatu danych,
+limitów "Na teraz", skryptów chmury ani starszego pluginu.
+
+Testy `brainConflict.test.ts`: literalne unie sekcji i nagłówków, wspólne wiersze,
+diff3, BOM/CRLF, ogrodzenia, błędna struktura i log bez treści oraz trzy rzeczywiste
+wywołania `git merge-file`. `brainConflict.integration.test.ts`: prompt, indeks
+zgodny z katalogiem, Na teraz, migracja, wyszukiwanie, kopie i ich kolizje, awarie
+I/O, pull podczas kopii, kolejka dwóch instancji, druga przebudowa oraz literalne
+bajty i uporządkowane I/O zdrowych ścieżek porównane z kodem sprzed D3, w tym
+`updateBrain` oraz bezpośrednie `applyPlan` bez oryginału.
+Pomiar przed zmianą na syntetycznym pliku: prompt niósł 3 bloki konfliktu;
+rebuild zostawiał 2 bloki oraz dwie kopie ręcznego wiersza "Wspólny".

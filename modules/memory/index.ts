@@ -249,3 +249,5 @@ export { sessionMessageId, bindSessionMessageId } from './sessionMessageIdentity
 export { SessionConflictError } from './sessionConflict.js';
 export { SessionRemovalConflictError, sessionRemovalContext } from './sessionRemovals.js';
 export type { SessionRemovalContext } from './sessionRemovals.js';
+
+export { readBrainContent } from './brainConflict.js';

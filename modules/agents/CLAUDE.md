@@ -268,3 +268,7 @@ podobnie jak własna sesja i sesja bez właściciela. Naprawa konfliktów należ
 stanów PL/EN oraz przycisk wyłącznie przy `foreign`. Produkcyjny przepływ kliknięcia,
 anulowania i przejęcia z otwarciem czatu sprawdza `chat/chat/phoneSessionMenu.test.ts`.
 `src/main.mobile.test.ts` nadal sprawdza wstrzyknięcie lokalnego id.
+
+M2 D3: panel Pamięć przepuszcza już odczytany `brain.md` przez `readBrainContent`
+z barrela memory przed parsowaniem "Na teraz". Odczyt nie zapisuje naprawy ani kopii;
+zdrowy plik zachowuje dotychczasowe `exists` + `read`.

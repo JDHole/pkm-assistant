@@ -227,3 +227,7 @@ Memory kolejkuje natywne dopiski do `cost_log.jsonl`, zachowuje fallback dla sta
 ## Mobile M2 D5 - kopia awaryjna brain.md poza gitem vaulta
 
 Start dopisuje do istniejącego `.gitignore` wyłącznie regułę kopii `brain.md.bak` każdego agenta, zachowując synchronizację diagnostyki i dotychczasowy zapis pamięci; pliki już śledzone musi wyłączyć ze śledzenia właściciel vaulta (kontrakt i testy: `core/CLAUDE.md`, `modules/memory/CLAUDE.md`).
+
+## Mobile M2 D3 - brain.md po konflikcie gita
+
+Memory scala odczyt indeksu w RAM, a jego przebudowa zachowuje obie strony i zapisuje naprawę po zweryfikowanej kopii oryginału; reguły, testy i ograniczenie legacy bez odczytu celu opisuje `modules/memory/CLAUDE.md`.

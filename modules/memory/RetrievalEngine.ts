@@ -1,3 +1,4 @@
+import { readBrainContent } from './brainConflict.js';
 import { isPrivateDraftPath } from '../../core/index.js';
 /**
  * RetrievalEngine - silnik jednego narzędzia `search`.
@@ -300,6 +301,7 @@ export class RetrievalEngine {
                 content = (file && this._isFile(file) && typeof this.app!.vault!.cachedRead === 'function')
                     ? await this.app!.vault!.cachedRead(file)
                     : await this.vault.adapter.read(path);
+                if (/^\.pkm-assistant\/agents\/[^/]+\/memory\/brain\.md$/.test(path)) content = readBrainContent(content);
             } catch { content = null; }
             contentCache.set(path, content);
             return content;
@@ -810,7 +812,8 @@ export class RetrievalEngine {
         const src = files.find(f => f.path === sourceRef || this._baseName(f.name) === base);
         if (!src) return targets;
         try {
-            const content = await this.vault.adapter.read(src.path);
+            const raw = await this.vault.adapter.read(src.path);
+            const content = /^\.pkm-assistant\/agents\/[^/]+\/memory\/brain\.md$/.test(src.path) ? readBrainContent(raw) : raw;
             for (const m of content.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
                 targets.add(this._baseName(m[1].trim()));
             }
