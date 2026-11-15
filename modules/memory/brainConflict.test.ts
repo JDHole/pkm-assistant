@@ -21,7 +21,7 @@ test('D3 repeated H1/H2 and multiple sections keep additions in their own sectio
 
 test('D3 dedup also sees common lines following a hunk and other hunks', t => {
     const input = '# Tester\n## User\n' + hunk('- A\n', '- B\n- C\n') + '- C\n' + hunk('- D\n', '- B\n- E\n');
-    t.deepEqual(mergeBrainConflict(input), { kind: 'merged', text: '# Tester\n## User\n- A\n- B\n- C\n- D\n- E\n' });
+    t.deepEqual(mergeBrainConflict(input), { kind: 'merged', text: '# Tester\n## User\n- A\n- C\n- D\n- B\n- E\n' });
 });
 for (const newline of ['\n', '\r\n']) for (const bom of ['', '\uFEFF']) {
     test(`D3 diff3 preserves BOM=${!!bom}, CRLF=${newline.length === 2}`, t => {
@@ -83,8 +83,8 @@ for (const style of ['merge', 'diff3', 'zdiff3']) {
     });
 }
 
-test('D3 an empty ours side keeps the addition at the conflict position', t => {
+test('D3b an empty ours side appends at the end of its section', t => {
     t.deepEqual(mergeBrainConflict('# Tester\n## User\n' + hunk('', '- B\n') + '- C\n'), {
-        kind: 'merged', text: '# Tester\n## User\n- B\n- C\n',
+        kind: 'merged', text: '# Tester\n## User\n- C\n- B\n',
     });
 });

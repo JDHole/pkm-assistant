@@ -4,6 +4,8 @@ import { log } from '../../core/utils/Logger.js';
 
 export type BrainConflict = { kind: 'not-applicable'; malformed?: true } | { kind: 'merged'; text: string };
 type Row = { raw: string; section: string; heading: boolean };
+type Section = { rows: Row[]; additions: Row[] };
+type Piece = { sections: Section[]; newSections: Section[] };
 type Context = { section: string; foreign: boolean; fence: string };
 const lineText = (raw: string) => raw.replace(/\r?\n$/, '');
 const opening = (line: string) => /^<<<<<<<(?: |$)/.test(line);
@@ -32,14 +34,16 @@ function row(raw: string, context: Context): Row {
 }
 
 /** Pure union of conflict lines, scoped to their H1/H2 section. Original lines retain
- * their bytes. Only additions from the other side are deduplicated (trimEnd). */
+ * their bytes except a missing EOL before an addition. Only additions from the
+ * other side are deduplicated (trimEnd). */
 export function mergeBrainConflict(text: string): BrainConflict {
     if (!text.includes('<<<<<<<')) return { kind: 'not-applicable' };
     const bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
     const lines = text.slice(bom.length).match(/[^\n]*\n|[^\n]+$/g) ?? [];
     const ours: Row[] = [];
-    const hunks: { start: number; end: number; section: string; theirs: Row[] }[] = [];
+    const hunks: { end: number; theirs: Row[] }[] = [];
     const context: Context = { section: '', foreign: false, fence: '' };
+    const theirContext: Context = { ...context };
     const malformed = (): BrainConflict => ({ kind: 'not-applicable', malformed: true });
     for (let i = 0; i < lines.length; i++) {
         const line = lineText(lines[i]);
@@ -49,18 +53,20 @@ export function mergeBrainConflict(text: string): BrainConflict {
             while (end < lines.length && !fenceEnd(lineText(lines[end]), context.fence)) end++;
             const example = lines.slice(i, end).join('');
             if (end === lines.length || !splitGitConflict(example)) return malformed();
-            for (; i < end; i++) ours.push(row(lines[i], context));
+            for (; i < end; i++) {
+                ours.push(row(lines[i], context));
+                row(lines[i], theirContext);
+            }
             ours.push(row(lines[i], context));
+            row(lines[i], theirContext);
             continue;
         }
         if (!opening(line)) {
             if (closing(line) || base(line)) return malformed();
             ours.push(row(lines[i], context));
+            row(lines[i], theirContext);
             continue;
         }
-        const start = ours.length;
-        const section = context.section;
-        const theirContext = { ...context };
         const theirs: Row[] = [];
         let mode: 'ours' | 'base' | 'theirs' = 'ours';
         let complete = false;
@@ -81,38 +87,82 @@ export function mergeBrainConflict(text: string): BrainConflict {
             else if (mode === 'theirs') theirs.push(row(lines[i], theirContext));
         }
         if (!complete) return malformed();
-        hunks.push({ start, end: ours.length, section, theirs });
+        hunks.push({ end: ours.length, theirs });
     }
     if (!hunks.length) return { kind: 'not-applicable' };
+    // Keep section bodies separate from whole new sections, even when both are
+    // emitted after the same hunk. A new heading must never capture an addition.
     const seen = new Map<string, Set<string>>();
-    const headings = new Set<string>();
-    const sectionEnds = new Map<string, number>();
+    const targets = new Map<string, Section>();
     const remember = (entry: Row) => {
         let bucket = seen.get(entry.section);
         if (!bucket) { bucket = new Set(); seen.set(entry.section, bucket); }
         bucket.add(entry.raw.trimEnd());
-        if (entry.heading) headings.add(entry.raw.trimEnd());
     };
-    ours.forEach((entry, index) => { remember(entry); if (entry.raw.trim()) sectionEnds.set(entry.section, index + 1); });
-    const additions = new Map<number, string[]>();
-    for (const hunk of hunks) {
-        const localEnds = new Map<string, number>([[hunk.section, hunk.start]]);
-        for (let i = hunk.start; i < hunk.end; i++) {
-            if (ours[i].raw.trim()) localEnds.set(ours[i].section, i + 1);
+    const pieces: Piece[] = [];
+    let cursor = 0;
+    for (const end of [...hunks.map(hunk => hunk.end), ours.length]) {
+        const piece: Piece = { sections: [], newSections: [] };
+        let section: Section | undefined;
+        for (; cursor < end; cursor++) {
+            const entry = ours[cursor];
+            if (!section || entry.heading) {
+                section = { rows: [], additions: [] };
+                piece.sections.push(section);
+            }
+            section.rows.push(entry);
+            remember(entry);
+            // Trailing empty runs must not move an addition past a new heading.
+            if (entry.raw.trimEnd() || !targets.has(entry.section)) targets.set(entry.section, section);
         }
+        pieces.push(piece);
+    }
+    hunks.forEach((hunk, index) => {
         for (const entry of hunk.theirs) {
             const value = entry.raw.trimEnd();
-            if (entry.heading ? headings.has(value) : seen.get(entry.section)?.has(value)) continue;
-            const anchor = localEnds.get(entry.section) ?? sectionEnds.get(entry.section) ?? hunk.end;
-            const bucket = additions.get(anchor) ?? [];
-            bucket.push(entry.raw);
-            additions.set(anchor, bucket);
+            if (seen.get(entry.section)?.has(value)) continue;
+            let target = targets.get(entry.section);
+            if (!target) {
+                target = { rows: [], additions: [] };
+                targets.set(entry.section, target);
+                pieces[index].newSections.push(target);
+            }
+            target.additions.push(entry);
             remember(entry);
         }
+    });
+
+    const newline = text.includes('\r\n') ? '\r\n' : '\n';
+    const output: string[] = [];
+    const emit = (raw: string) => {
+        // The only permitted change to an original row: terminate it before an
+        // appended row. In particular, an existing section can end at bare EOF.
+        if (output.length && !output[output.length - 1].endsWith('\n')) output.push(newline);
+        output.push(raw);
+    };
+    for (const piece of pieces) {
+        for (const section of [...piece.sections, ...piece.newSections]) {
+            let end = section.rows.length;
+            while (end && !section.rows[end - 1].raw.trimEnd()) end--;
+            for (let i = 0; i < end; i++) emit(section.rows[i].raw);
+            for (const entry of section.additions) emit(entry.raw);
+            for (let i = end; i < section.rows.length; i++) emit(section.rows[i].raw);
+        }
     }
-    const output: string[] = [bom, ...(additions.get(0) ?? [])];
-    ours.forEach((entry, index) => { output.push(entry.raw, ...(additions.get(index + 1) ?? [])); });
-    return { kind: 'merged', text: output.join('') };
+    const merged = output.join('');
+    // Linear self-check on the emitted bytes, not on the planned destinations.
+    // Check common ours rows too: inserting a new section can change their owner.
+    const actual = new Map<string, Set<string>>();
+    const resultContext: Context = { section: '', foreign: false, fence: '' };
+    for (const raw of merged.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+        const entry = row(raw, resultContext);
+        let bucket = actual.get(entry.section);
+        if (!bucket) { bucket = new Set(); actual.set(entry.section, bucket); }
+        bucket.add(raw.trimEnd());
+    }
+    const preserved = (entry: Row) => !entry.raw.trimEnd() || actual.get(entry.section)?.has(entry.raw.trimEnd());
+    if (!ours.every(preserved) || !hunks.every(hunk => hunk.theirs.every(preserved))) return malformed();
+    return { kind: 'merged', text: bom + merged };
 }
 
 /** Shared text boundary. No adapter calls, including on a malformed conflict. */
