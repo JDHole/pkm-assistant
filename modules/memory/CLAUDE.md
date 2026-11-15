@@ -760,13 +760,13 @@ Flow:
   wiadomość SYSTEMOWA. Nowy typ zdarzenia = nowe mapowanie w `roleFromEvent` + test round-tripu
   w `activeSessionFormat.test.ts`.
 - ⚠️ **Odczyt PRZED dopisaniem nowego wpisu - nie ufaj samemu `exists()`.** Kilka miejsc
-  (`saveSession`, log audytu, `brain.log`, `CostLog`) czyta stary plik przed dopisaniem nowego
+  (`saveSession`, log audytu, `brain.log`, fallback `CostLog` bez native append) czyta stary plik przed dopisaniem nowego
   wpisu; na dyskach, gdzie `exists()` potrafi kłamać `false`, naiwny wzorzec `if (await exists())
   { read() }` sprawia, że kod nigdy nie próbuje `read()` i NADPISUJE całą dotychczasową treść
   jednym nowym wpisem. `readIfExists` (`core/utils/vaultFs.ts`) czyta NAJPIERW, więc `exists()`
   nie ma szans skłamać. Polityka przy wyniku `'unreadable'` (sygnały sprzeczne) jest
   per-miejsce: ścieżki, gdzie treść jest zbyt cenna, żeby zgadywać (transkrypt, kompresja)
-  RZUCAJĄ i przerywają operację; kroniki best-effort (log audytu, `brain.log`, `CostLog.append`)
+  RZUCAJĄ i przerywają operację; kroniki best-effort (log audytu, `brain.log`, fallback `CostLog.append`)
   tylko `log.warn` + pomijają TEN wpis, kontrakt "nigdy nie rzuca" zostaje.
 - ⚠️ **`appendToActiveSession` dokleja ogon, nie przepisuje pliku.** Pisze przez
   `_appendSessionFile` (`adapter.append`), a pełny odczyt płaci się RAZ na ścieżkę
@@ -905,6 +905,8 @@ Memory v3 critical path ma testy w:
 - `modules/memory/AgentMemory_kolizja_nazw.test.ts` - `findFreeCollisionPath` przy każdym z
   wołaczy
 - `modules/memory/CostLog.test.ts`
+- `modules/memory/CostLog.append.test.ts` - D4: bajty i liczniki I/O, bootstrap,
+  kolejka równoległych dopisków, błędy, niezmieniony fallback, czytnik konfliktów i sklejonych obiektów
 - `modules/memory/activeSessionFormat.test.ts` - round-trip pisarz/czytnik, plik MIESZANY, CRLF,
   legacy bez escapów
 - `modules/memory/brainSections.test.ts` - rejestr dwujęzyczny: `sectionKeyOf`/`naTerazKeyOf` na
@@ -1450,3 +1452,42 @@ z niczyjego vaulta). Obejmują literalną rozmowę, surowe bloki, diff3/CRLF,
 metadane, przykłady, trzy strony, seq/ID/usunięcia/epoki, wszystkich pisarzy, błędy
 kopii/zapisu/readbacku/odtworzenia, pull podczas kopii, współdzieloną kolejkę i cache.
 Istniejące golden testy D2 oraz append/P3 nadal sprawdzają dokładne zdrowe bajty i I/O.
+
+## Mobile M2 D4 - dziennik kosztów dopisywany natywnie
+
+`CostLog.append` na obu platformach preferuje opcjonalny `adapter.append`:
+jeden rekord z końcowym `\n`, bez odczytu, exists ani write na udanej ścieżce.
+Ścieżka `.pkm-assistant/cost_log.jsonl`, normalizacja, kolejność pól i bajty rekordów
+pozostają bez zmian. Istniejący prefiks (także bez newline) pozostaje nietknięty.
+Wykrycie metody i rozróżnienie błędu przez `probeFile` pochodzą ze wzorca
+`AgentMemory._appendSessionFile`; `brain.log` nadal używa read-modify-write.
+Jeśli append rzuci, tylko potwierdzone `missing` pozwala utworzyć plik przez write
+z jednym rekordem, po `ensureAdapterFolder` dla rodzica. Adapter potrafiący sam
+utworzyć plik nie wymaga tej ścieżki. Istniejący lub niepewny plik nie jest
+przepisywany po błędzie; kłamiące `exists=false` potwierdza próba odczytu.
+Błędy pozostają best-effort: warn, zwrot znormalizowanego rekordu, bez rzutu.
+
+Bez native append pozostaje dokładnie `readIfExists` + `write(existing + line)`:
+nieczytelny plik pomija wpis. Zdrowy istniejący plik to 1 read + 1 write;
+brak pliku to read + exists + read + write, jak przed D4. Nie dodajemy do tego
+fallbacku nowych zapisów folderów ani kopii, nie interpretujemy starej treści.
+Kolejka obietnic według wzorca AgentMemory obejmuje obie ścieżki, współdzielona
+przez instancje dla tej samej pary adapter/ścieżka (`WeakMap`). Jest potrzebna,
+bo wołacze tworzą krótkotrwałe instancje CostLog. Błąd nie blokuje kolejnych wpisów.
+
+`readAll` jest jedynym czytnikiem pliku, także dla agregacji `CostTrackingModal`.
+Pomija znaczniki gita, puste i uszkodzone wiersze; rekordy obu stron zwraca
+w kolejności pliku, bez deduplikacji. Gdy wiersz nie parsuje się jako JSON,
+skaner granic obiektów uwzględniający stringi, escape i zagnieżdżenia próbuje
+rozdzielić bezpośrednie `}{`. Wszystkie części muszą osobno parsować się jako JSON;
+uszkodzona część, obcy separator lub niepełny obiekt oznacza pominięcie CAŁEGO
+wiersza. Poprawne pojedyncze wiersze mają dotychczasową interpretację.
+Odzysk istnieje tylko w RAM, bez zapisu ani kopii źródła.
+
+Ograniczenia: kolejka nie blokuje synchronizatora ani innych adapterów/urządzeń;
+pozostaje wyścig tworzenia brakującego pliku między probe a write. Starszy plugin
+i fallback nadal przepisują cały plik, więc mogą zgubić równoległy dopisek.
+Przegląd repo nie wykazał innej rotacji, przycinania, migracji ani eksportu
+nadpisującego ten dziennik. Częściowo wykonany append nie jest cofany ani ponawiany
+na istniejącym pliku. Nie obiecujemy atomowości I/O urządzenia ani naprawy gita;
+odczyt nadal ładuje całość dziennika do RAM i zachowuje dotychczasowy wstępny exists.

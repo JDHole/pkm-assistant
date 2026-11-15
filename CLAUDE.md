@@ -219,3 +219,7 @@ Spinacz na `Platform.isPhone` udostępnia aparat, galerię i pliki, odrzuca HEIC
 ## Mobile M2 D7 - naprawa rozmowy ze znacznikami konfliktu
 
 Memory odtwarza obie strony konfliktu sesji w RAM, naprawia plik przy pierwszym zapisie po zweryfikowanej kopii, a czat zgłasza nierozwiązywalny konflikt i zachowuje szkic; reguły oraz ograniczenia opisują `modules/memory/CLAUDE.md` i `modules/chat/CLAUDE.md`.
+
+## Mobile M2 D4 - dziennik kosztów dopisywany natywnie
+
+Memory kolejkuje natywne dopiski do `cost_log.jsonl`, zachowuje fallback dla starszych adapterów i odczytuje rekordy obu stron konfliktu oraz pełne sklejone obiekty bez zmiany pliku; kontrakt, testy i ograniczenia opisuje `modules/memory/CLAUDE.md`.

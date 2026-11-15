@@ -21,15 +21,14 @@
  */
 
 import { log } from '../../core/utils/Logger.js';
-import { readIfExists } from '../../core/index.js';
+import { ensureAdapterFolder, probeFile, readIfExists } from '../../core/index.js';
 
 const COST_LOG_PATH = '.pkm-assistant/cost_log.jsonl';
 
 /**
  * Krótki, czytelny opis `cause` z `readIfExists` - do wklejenia w komunikat
  * warn zamiast suchego „nie mogę odczytać X" bez powodu. Ta sama logika
- * co `causeText` w `AgentMemory.ts` - duplikat świadomy, plik jest celowo bez importów poza
- * `log`/`readIfExists` (patrz styl reszty modułu).
+ * co `causeText` w `AgentMemory.ts` - duplikat świadomy, bez zależności od runtime pamięci.
  */
 function causeText(cause: unknown): string {
     if (cause instanceof Error) return cause.message;
@@ -88,6 +87,8 @@ export interface CostLogVaultLike {
         exists(path: string): Promise<boolean>;
         read(path: string): Promise<string>;
         write(path: string, data: string): Promise<void>;
+        append?(path: string, data: string): Promise<void>;
+        mkdir?(path: string): Promise<void>;
     };
 }
 
@@ -122,6 +123,40 @@ export interface CostLogRecord {
     session_id?: string;
     status: string;
     error?: string;
+}
+
+// Callers create short-lived CostLog instances. Share the same adapter/path queue,
+// as AgentMemory does, without retaining adapters after their vault is closed.
+const writeQueues = new WeakMap<CostLogVaultLike['adapter'], Map<string, Promise<void>>>();
+
+/** Only recover complete adjacent JSON objects; never salvage a partial line. */
+function parseCostLine(line: string): unknown[] {
+    try { return [JSON.parse(line)]; } catch { /* try missing newlines */ }
+    if (!line.startsWith('{') || !line.endsWith('}')) return [];
+    const parts: string[] = [];
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    let start = 0;
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === '"') quoted = false;
+        } else if (char === '"') quoted = true;
+        else if (char === '{') depth++;
+        else if (char === '}') {
+            depth--;
+            if (depth === 0) {
+                parts.push(line.slice(start, i + 1));
+                start = i + 1;
+                if (start < line.length && line[start] !== '{') return [];
+            }
+        }
+    }
+    if (parts.length < 2 || start !== line.length) return [];
+    try { return parts.map((part): unknown => JSON.parse(part)); } catch { return []; }
 }
 
 export class CostLog {
@@ -162,21 +197,55 @@ export class CostLog {
         };
         const line = JSON.stringify(safe) + '\n';
         try {
-            // Self-append: jak `AgentMemory.appendBrainLog` - `readIfExists` czyta
-            // najpierw, więc kłamiący `exists()` (Dysk Google) nie może przepchnąć kodu w
-            // gałąź „pierwszy wpis" i nadpisać dotychczasowego dziennika kosztów jedną linią.
-            const probe = await readIfExists(this.vault.adapter, this.path);
-            if (probe.state === 'unreadable') {
-                // Best-effort, jak reszta klasy: pomijamy TEN wpis zamiast ryzykować nadpisanie.
-                log.warn('CostLog', `append: nie mogę odczytać ${this.path}, pomijam ten wpis (${causeText(probe.cause)})`);
-                return safe;
-            }
-            const existing = probe.state === 'content' ? probe.content : '';
-            await this.vault.adapter.write(this.path, existing + line);
+            await this._enqueueWrite(() => this._appendLine(line));
         } catch (e) {
             log.warn('CostLog', 'append failed (non-fatal):', e);
         }
         return safe;
+    }
+
+    private _enqueueWrite(fn: () => Promise<void>): Promise<void> {
+        let queues = writeQueues.get(this.vault.adapter);
+        if (!queues) {
+            queues = new Map();
+            writeQueues.set(this.vault.adapter, queues);
+        }
+        const path = this.path;
+        const prev = queues.get(path) || Promise.resolve();
+        const run = prev.then(fn, fn);
+        const tail = run.then(() => {}, () => {});
+        queues.set(path, tail);
+        void tail.then(() => {
+            if (queues.get(path) === tail) queues.delete(path);
+        });
+        return run;
+    }
+
+    private async _appendLine(line: string): Promise<void> {
+        const adapter = this.vault.adapter;
+        if (typeof adapter.append === 'function') {
+            try {
+                await adapter.append(this.path, line);
+            } catch (e) {
+                // Same missing-file distinction as AgentMemory._appendSessionFile.
+                // Never fall back to rewriting an existing/uncertain file after failure.
+                if ((await probeFile(adapter, this.path)) !== 'missing') throw e;
+                await ensureAdapterFolder(adapter, this.path.slice(0, this.path.lastIndexOf('/')));
+                await adapter.write(this.path, line);
+            }
+            return;
+        }
+        // Self-append: jak `AgentMemory.appendBrainLog` - `readIfExists` czyta
+        // najpierw, więc kłamiący `exists()` (Dysk Google) nie może przepchnąć kodu w
+        // gałąź „pierwszy wpis" i nadpisać dotychczasowego dziennika kosztów jedną linią.
+        const probe = await readIfExists(this.vault.adapter, this.path);
+        if (probe.state === 'unreadable') {
+            // Best-effort, jak reszta klasy: pomijamy TEN wpis zamiast ryzykować nadpisanie.
+            log.warn('CostLog', `append: nie mogę odczytać ${this.path}, pomijam ten wpis (${causeText(probe.cause)})`);
+            return;
+        }
+        const existing = probe.state === 'content' ? probe.content : '';
+        await this.vault.adapter.write(this.path, existing + line);
     }
 
     /**
@@ -191,7 +260,7 @@ export class CostLog {
             for (const line of content.split('\n')) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
-                try { entries.push(JSON.parse(trimmed)); } catch { /* skip corrupt */ }
+                for (const entry of parseCostLine(trimmed)) entries.push(entry);
             }
             return entries;
         } catch (e) {
