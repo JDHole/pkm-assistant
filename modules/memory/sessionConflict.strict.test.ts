@@ -103,6 +103,26 @@ test('D7c pseudo-block spanning healthy messages refuses and preserves every byt
     t.deepEqual(d.calls, ['read', 'exists', 'read']);
 });
 
+for (const crlf of [false, true]) for (const examples of [1, 2, 3]) {
+    test(`D7f abandoned structure survives ${examples} literal examples until a loose close, CRLF=${crlf}`, async t => {
+        const bytes = (text: string) => crlf ? text.replace(/\n/g, '\r\n') : text;
+        const conversation = bytes(header + event('<<<<<<< HEAD', 1)
+            + Array.from({ length: examples }, (_, i) => event(example, i + 2)).join(''));
+        t.deepEqual(mergeSessionConflict(conversation), { kind: 'not-applicable' });
+        const raw = conversation + bytes('=======\n>>>>>>> remote\n');
+        t.deepEqual(mergeSessionConflict(raw), { kind: 'unresolved' });
+        const d = disk(raw);
+        for (const write of [
+            () => d.memory.appendToActiveSession({ type: 'user_message', content: 'NEXT' }),
+            () => d.memory.saveSession([{ role: 'user', content: 'NEXT' }]),
+            () => d.memory.archiveActiveSession(d.path),
+        ]) {
+            await t.throwsAsync(write, { instanceOf: SessionConflictError });
+            t.deepEqual([...d.files], [[d.path, raw]]);
+        }
+    });
+}
+
 for (const literal of [example, '<<<<<<< loose\nunfinished', '>>>>>>> loose', '=======\n||||||| base',
     '<<<<<<< outer\n' + example + '\n>>>>>>> outer']) {
     test(`D7c healthy literal ${JSON.stringify(literal)} keeps read and append IO`, async t => {

@@ -48,6 +48,7 @@ function splitSessionConflict(text: string): SessionSplit {
     const blocks: ConflictBlock[] = [];
     let pending: ConflictBlock | undefined;
     let malformed = false, invalid = false, malformedStructural = false;
+    let abandonedStructural = false;
     let frontmatter = /^\uFEFF?---\r?\n/.test(text), beforeEvents = true;
     let events = 0;
     for (let start = 0; start < text.length;) {
@@ -55,12 +56,19 @@ function splitSessionConflict(text: string): SessionSplit {
         const end = newline < 0 ? text.length : newline + 1;
         const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
         if (isGitConflictStart(line)) {
-            if (pending) { malformed = true; malformedStructural ||= pending.structural; }
+            if (pending) {
+                malformed = true;
+                if (pending.theirsStart >= 0) malformedStructural ||= pending.structural;
+                else abandonedStructural ||= pending.structural;
+            }
             pending = { start, oursStart: end, oursEnd: -1, theirsStart: -1, end: -1,
                 closeStart: -1, opening: line.slice(7), closing: '', structural: false,
                 events: false, precedingEvents: events };
             invalid = false;
         } else if (/^>>>>>>>(?: |$)/.test(line)) {
+            // A literal example can displace a real opening before its separator.
+            // The real hunk's loose close proves the abandoned structure still matters.
+            if (!pending && abandonedStructural) malformedStructural = true;
             if (!pending || invalid || pending.theirsStart < 0) {
                 malformed = true;
                 malformedStructural ||= pending?.structural ?? false;

@@ -10,7 +10,7 @@ const open = '<<<<<<< HEAD', close = '>>>>>>> branch', separator = '=======';
 const example = `${open}\nLeft\n${separator}\nRight\n${close}`;
 const fence = (text: string) => '```diff\n' + text + '\n```';
 // Every row is synthetic: first-turn user, assistant and tool payloads. The last
-// eight rows record remaining refusals, including the rejected D7e point 2.
+// eight rows cover D7e refusals; D7f permits the three without a loose close.
 const cases: Array<{ name: string; content: [string, string, string]; refuses?: true }> = [
     { name: 'minimal opening', content: ['Co oznacza ta linia?\n' + open, 'Odpowiedź', 'Wynik'] },
     { name: 'fenced opening', content: [fence(open), 'Odpowiedź', 'Wynik'] },
@@ -34,14 +34,14 @@ const cases: Array<{ name: string; content: [string, string, string]; refuses?: 
     { name: 'inline opening', content: ['Znacznik <<<<<<< HEAD w zdaniu', 'Odpowiedź', 'Wynik'] },
     { name: 'opening then separator', content: [open, separator, 'Wynik'] },
     { name: 'opening then tool separator', content: [open, 'Odpowiedź', separator] },
-    { name: 'opening then example', content: [open, example, 'Wynik'], refuses: true },
-    { name: 'opening then tool example', content: [open, 'Odpowiedź', example], refuses: true },
+    { name: 'opening then example', content: [open, example, 'Wynik'] },
+    { name: 'opening then tool example', content: [open, 'Odpowiedź', example] },
     { name: 'opening then closing', content: [open, close, 'Wynik'], refuses: true },
     { name: 'opening then tool closing', content: [open, 'Odpowiedź', close], refuses: true },
     { name: 'three-message pseudo-block', content: [open, separator, close], refuses: true },
     { name: 'separator then new opening', content: [open + '\nLeft\n' + separator, open, 'Wynik'], refuses: true },
     { name: 'fenced pseudo-block', content: [fence(open), fence(separator), fence(close)], refuses: true },
-    { name: 'two openings', content: [open, open, 'Wynik'], refuses: true },
+    { name: 'two openings', content: [open, open, 'Wynik'] },
 ];
 
 // Equal-width control payloads preserve stat sizes and all non-marker bytes.
@@ -87,9 +87,15 @@ function compare(t: ExecutionContext, actual: Disk, control: Disk): void {
     t.deepEqual(actual.calls.map(call => call.map(value => typeof value === 'string' ? neutral(value) : value)), control.calls);
 }
 
+// Additional D7f reproductions: the assistant/tool puts the later full example in code.
+const fencedExamples: typeof cases = [
+    { name: 'opening then fenced example', content: [open, fence(example), 'Wynik'] },
+    { name: 'opening then fenced tool example', content: [open, 'Odpowiedź', fence(example)] },
+];
+
 for (const native of [true, false]) for (const identified of [false, true])
-for (const crlf of [false, true]) for (const frozen of [false, true]) for (const scenario of cases) {
-    test.serial(`D7e healthy ${scenario.name}, native=${native}, id=${identified}, CRLF=${crlf}, frozen=${frozen}`, async t => {
+for (const crlf of [false, true]) for (const frozen of [false, true]) for (const scenario of [...cases, ...fencedExamples]) {
+    test.serial(`D7f healthy ${scenario.name}, native=${native}, id=${identified}, CRLF=${crlf}, frozen=${frozen}`, async t => {
         mock.timers.enable({ apis: ['Date'], now: Date.parse(now) });
         t.teardown(() => mock.timers.reset());
         const actual = disk(native, identified, crlf, frozen), control = disk(native, identified, crlf, frozen);

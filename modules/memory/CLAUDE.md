@@ -1390,55 +1390,56 @@ remisie czasu może wyciągnąć wspólny nagłówek i końcowe seq poza blok ko
 Świadek nie jest wdrożony; 18 kontrprzykładów w `sessionConflict.strict.test.ts`
 pozostaje strażnikami `unresolved`.
 
-W skanerze zmieniono tylko porzucenie oczekującego otwarcia na końcu pliku:
-ustawia `malformed`, ale nie `malformedStructural`. Bez innego dowodu struktury
-wynik to `not-applicable`; przy innym poprawnym bloku strukturalnym nadal odmowa.
-Prawdziwy git zamyka blok wierszem zamknięcia; otwarcie z pytania użytkownika
-może natomiast czekać do EOF także po kolejnych pełnych zdarzeniach. Minimalna
-reprodukcja z samym `<<<<<<< HEAD`, odpowiedzią, dwiema dalszymi turami, save i
-archive przechodzi z zachowaniem bajtów i uporządkowanego I/O względem kontroli.
+Porzucenie oczekującego otwarcia na końcu pliku ustawia `malformed`, ale nie
+`malformedStructural` (D7e). Bez innego dowodu struktury wynik to `not-applicable`;
+przy innym poprawnym bloku strukturalnym nadal odmowa. Prawdziwy git zamyka blok
+wierszem zamknięcia; otwarcie z pytania użytkownika może czekać do EOF także po
+kolejnych pełnych zdarzeniach.
 
-**Punkt 2 propozycji D7e odrzucony na pomiarze, zgodnie z warunkiem paczki.**
-Nie ograniczamy `malformedStructural` przy nowym otwarciu do bloków, które już
-widziały separator. Pełny przykład po naszej stronie rzeczywistego scalenia
-zmieniał wtedy `unresolved` na `not-applicable`: 6/48 reprodukcji literalnych
-znaczników (merge/diff3/zdiff3, LF/CRLF, obie strony), zero zmian na `merged`.
-Układ: prawdziwe otwarcie, nagłówek zdarzenia A, content z pełnym przykładem,
-prawdziwy separator, nagłówek zdarzenia B, prawdziwe zamknięcie, wspólne seq.
-Literalne otwarcie porzuca prawdziwy blok PRZED jego separatorem, mimo że ten
-blok widział już nagłówek A. Literalny przykład jest niestrukturalny, prawdziwe
-zamknięcie zostaje luźne; bez zapamiętanej struktury skaner uznałby konflikt za
-zwykłą treść. Oryginalny warunek przy nowym otwarciu pozostaje nietknięty.
+**D7f:** nowe otwarcie porzucające oczekujący blok PRZED separatorem zapamiętuje
+jego strukturę w osobnej fladze `abandonedStructural`, zamiast natychmiast ustawiać
+`malformedStructural`. `malformed` nadal jest ustawiane. Późniejsze luźne zamknięcie
+(bez oczekującego otwarcia) ustawia `malformedStructural`, jeśli zapamiętano taką
+strukturę. Flaga pozostaje do końca skanu, także przez kolejne pełne przykłady.
+Porzucenie PO separatorze, zamknięcie bez separatora, drugi separator, kolejność
+bazy i reguła EOF pozostają bez zmian. To wyłącznie zmiana klasyfikacji skanera;
+format, pisarze, I/O oraz kopie pozostają dotychczasowe.
+
+Powód: zdrowe otwarcie w pytaniu i późniejszy pełny przykład nie pozostawiają
+luźnego zamknięcia. Prawdziwy blok porzucony przez przykład w jego treści je
+pozostawia. Odrzucony punkt 2 D7e pomijał ten dowód i przepuszczał 6/48 konfliktów:
+prawdziwe otwarcie, nagłówek A, pełny przykład w content, prawdziwy separator,
+nagłówek B, prawdziwe zamknięcie, wspólne seq. D7f nadal odmawia wszystkich sześciu.
 
 `sessionConflict.healthy.test.ts` buduje 30 syntetycznych wariantów: native/fallback,
 live/frozen, z id/bez, LF/CRLF (nagłówek i payload; pisarz dopisuje własne LF).
-Z 480 przebiegów 352 kończą trzy tury, save i archive, a 128 odmawia bez zmiany
-pliku. Każdy dopisek ma niezależny literalny wzorzec bajtów, odczyt potwierdza
-wiadomości, a kontrola z neutralnymi znakami tej samej długości porównuje wszystkie
-pliki i uporządkowane operacje, także argumenty write/append i mtime. Osobny pomiar
-z pisarzem kontrolnym z `3b0a672` potwierdza zgodność tego I/O i bajtów. Archive
-zachowuje dotychczasową konwersję do transkryptu LF. To pomiar w Node, nie na telefonie.
+Po D7f z 480 przebiegów 400 kończy trzy tury, save i archive, a 80 odmawia bez zmiany
+pliku (wcześniej 352/128). Każdy dopisek ma niezależny literalny wzorzec bajtów,
+odczyt potwierdza wiadomości, a kontrola z neutralnymi znakami tej samej długości
+porównuje wszystkie pliki i uporządkowane operacje, także argumenty write/append
+i mtime. Archive zachowuje dotychczasową konwersję do transkryptu LF.
+Dodatkowe dwa warianty D7f z późniejszym przykładem w ogrodzeniu diff (assistant/tool)
+przechodzą w 32/32 konfiguracjach z tymi samymi kontrolami. To pomiar w Node,
+nie na telefonie. Historyczny pomiar D7e z pisarzem z `3b0a672` potwierdzał
+zgodność jego I/O i bajtów z kontrolą; w D7f kontrolą jest bieżący niezmieniony pisarz.
 
-Osiem nadal odmawianych zdrowych wariantów (każdy w 16 konfiguracjach) ma poniższe
+Pięć nadal odmawianych zdrowych wariantów (każdy w 16 konfiguracjach) ma poniższe
 payloady pierwszych zdarzeń. `O` = `<<<<<<< HEAD`, `S` = `=======`, `C` =
 `>>>>>>> branch`, `E` = `O\nLeft\nS\nRight\nC`, `fence(x)` = ogrodzenie diff.
 Kolejne tury zawierają zwykłe pytania i odpowiedzi.
 
 | Wariant | User | Assistant | Tool |
 |---|---|---|---|
-| opening then example | O | E | Wynik |
-| opening then tool example | O | Odpowiedź | E |
 | opening then closing | O | C | Wynik |
 | opening then tool closing | O | Odpowiedź | C |
 | three-message pseudo-block | O | S | C |
 | separator then new opening | O\nLeft\nS | O | Wynik |
 | fenced pseudo-block | fence(O) | fence(S) | fence(C) |
-| two openings | O | O | Wynik |
 
-Legacy bez seq: pełny przykład w jednym zdarzeniu nadal daje `not-applicable`;
-samo otwarcie i następne zdarzenie teraz także daje `not-applicable` dzięki EOF;
-otwarcie i zamknięcie w różnych zdarzeniach nadal daje `unresolved`.
-Nie zmieniamy formatu, pisarzy, I/O ani zasad kopii. Nie proponujemy kolejnego świadka.
+D7f odblokowuje `O | E | Wynik`, `O | Odpowiedź | E` i `O | O | Wynik`.
+Legacy bez seq: pełny przykład w jednym zdarzeniu oraz samo otwarcie i następne
+zdarzenie dają `not-applicable`; otwarcie i zamknięcie w różnych zdarzeniach
+nadal daje `unresolved`.
 
 D7c zastępuje heurystykę pól/ID z D7b następującymi regułami:
 
@@ -1472,7 +1473,8 @@ D7c zastępuje heurystykę pól/ID z D7b następującymi regułami:
 
 **Uzasadnione odstępstwo od B z paczki:** niepoprawny blok zawierający strukturę
 również daje `unresolved`, nawet bez innego, poprawnego bloku strukturalnego,
-z wyjątkiem porzucenia oczekującego otwarcia na EOF opisanego w D7e.
+z wyjątkami EOF (D7e) i porzucenia przed separatorem bez późniejszego luźnego
+zamknięcia (D7f), opisanymi powyżej.
 Pomiar `sessionConflict.strict.test.ts`: prawdziwy `git merge-file` z dopiskiem
 `before`, literalnym otwarciem/separatorem/pełnym przykładem i `after`, dla
 merge/diff3/zdiff3 oraz LF/CRLF, daje 18 takich przypadków. Dosłowne B zwracało
@@ -1520,8 +1522,8 @@ dalszy zapis; użytkownik zaczyna nową rozmowę. Oryginalny przykład o INNYCH
 etykietach we wspólnej wiadomości, również bez ID, jest teraz zachowany przy
 prawdziwym konflikcie późniejszych dopisków. Zdrowe pseudo-bloki obejmujące kilka
 wiadomości nadal odmawiają: otwarcie/separator/zamknięcie, otwarcie/późniejsze
-zamknięcie oraz otwarcie/separator/kolejne otwarcie. Pozostawienie punktu 2 bez
-zmiany utrzymuje także odmowę otwarcie/późniejszy pełny przykład i dwóch otwarć.
+zamknięcie oraz otwarcie/separator/kolejne otwarcie. D7f dopuszcza natomiast
+otwarcie/późniejszy pełny przykład i dwa otwarcia bez luźnego zamknięcia.
 Znane przepuszczenie jak przed D7: remis czasu i literalne otwarcie po naszej
 stronie, bez innego bloku strukturalnego, może dać `not-applicable` (zmierzone
 merge i zdiff3, LF/CRLF; diff3 w tej reprodukcji nadal odmawia). Również rzeczywiście
@@ -1680,6 +1682,16 @@ osobnej mutacji jego „cofnięcia”.
 Jedyna świadoma zmiana istniejącej asercji w `sessionConflict.test.ts` dotyczy
 ręcznie uciętego bloku bez zamknięcia: `unresolved -> not-applicable`, zgodnie
 z regułą EOF; pozostałe odmowy w tym teście pozostają bez zmian.
+
+Pomiar D7f porównał pełne wyniki z kodem sprzed zmiany na tych samych 466 wynikach
+`git merge-file`: zero różnic klasyfikacji i bajtów, nadal 162 `merged`,
+188 `unresolved`, 116 `not-applicable`. Wszystkie 48 konfliktów z literalnymi
+znacznikami oraz 18 kontrprzykładów świadka nadal odmawiają. Dodatkowe 6 testów
+`sessionConflict.strict.test.ts` sprawdza pamiętanie porzuconej struktury przez
+1/2/3 pełne przykłady, LF/CRLF: bez luźnego zamknięcia `not-applicable`, z nim
+`unresolved`, odmowa append/save/archive i oryginalny plik bez zmian.
+Mutacja usuwająca warunek luźnego zamknięcia wywraca 12 testów: te 6 nowych oraz
+6 prawdziwych konfliktów, które obaliły punkt 2 D7e. Mutację cofnięto przed bramkami.
 
 
 ## Mobile M2 D4 - dziennik kosztów dopisywany natywnie
