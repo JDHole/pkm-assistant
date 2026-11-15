@@ -1379,47 +1379,75 @@ cichy częściowy zapis, błąd odczytu kontrolnego i dwie awarie odtworzenia.
 
 ## Mobile M2 D7 - naprawa rozmowy ze znacznikami konfliktu
 
-`sessionConflict.ts` jest czystą warstwą nad `splitGitConflict` i istniejącym
+`sessionConflict.ts` jest czystą warstwą rozpoznawania konfliktów nad istniejącym
 `parseActiveSession`. Wynik `mergeSessionConflict` ma `kind`: `not-applicable`,
 `unresolved` albo `merged` z tekstem. Granice surowych bloków używają tego samego
 `SESSION_BLOCK_BOUNDARY` z `activeSessionFormat.ts`, co parser (również bloki legacy
 bez poprawnego czasu). Escapowanie `## ` przez pisarza chroni treść pól.
 
-Bezpiecznik szuka granicy bloku albo wiersza frontmattera WEWNĄTRZ konfliktu.
-Frontmatter jest rozpoznawany po położeniu, nie po `key: value` w treści wiadomości.
-D7b zachowuje bajtowo przykład znaczników PRZED pierwszym konfliktem z nagłówkiem
-zdarzenia, jeżeli wspólna wiadomość ma jawne stabilne `message_id`, a cały przykład
-mieści się w jednym polu dowolnego tekstu:
-`content`, `result`, `args`, `prompt`, `parent_conversation_text`, `question`,
-`sub_task_history`, `tool_calls`. Dotyczy to też fenced code. Ostatnie trzy pola
-normalnie niosą JSON, ale pisarz dopuszcza również string. Etykiety pól są wspólne
-z parserem, także jego rozróżnienie metadanych nagłówka i starych delimiterów treści.
-Warunek ID jest świadomym zaostrzeniem pierwotnej propozycji D7b, opartym na
-kontrprzykładzie z `git merge-file`: bez ID i przy identycznym czasie nowego zdarzenia
-Git zostawia nagłówek oraz etykietę `content` wspólne, a rozbieżność w samym polu.
-Test porównuje ten prefiks bajtowo z wynikiem pisarza zapisującego zwykły przykład
-znaczników. Nie da się odróżnić tych historii z samych bajtów wejścia. Dlatego przy
-dalszym konflikcie strukturalnym taki hunk legacy/transkryptowy daje `unresolved`.
-Gdy wszystkie czasy są identyczne, plik może nie mieć ani jednego strukturalnego
-hunku. Dlatego również hunki zaczynające wartości pól w co najmniej dwóch różnych
-zdarzeniach bez stabilnego ID dają odmowę. Pojedynczy izolowany przykład bez ID
-zachowuje dotychczasowy kontrakt D7, także gdy wypełnia całe pole.
-Bez strukturalnej rozbieżności przykłady z poprzedzającym tekstem oraz nieznane
-bloki zachowują dotychczasowe zachowanie D7. Samych znaczników w dowolnym tekście
-nie da się zawsze odróżnić od śladów gita bez historii bazowej; nie wprowadzamy
-nowego formatu ani nie zgadujemy po nazwach gałęzi.
-Hunk w `message_id`, `seq`, `tokens` lub innym polu nietekstowym przed rozbieżnymi
-zdarzeniami oznacza `unresolved`, również przy wspólnym nagłówku z identycznym czasem.
-Od pierwszego konfliktu strukturalnego hunki są rozcinane; wyjątek zachowawczy:
-niestrukturalny hunk w kolejnym wspólnym zdarzeniu (jego nagłówek poza hunkiem)
-odmawia. Przykład zagnieżdżony w dopisku jednej strony również odmawia. Nie tworzymy
-dwóch zmienionych kopii takiej wiadomości. Po uprzednim pełnym scaleniu pliku nowy
-przykład we wspólnej części przed następną rozbieżnością jest znowu chroniony.
-Wiele bloków i diff3 rekonstruują dwie pełne strony; baza diff3 nie wchodzi do wyniku.
-Zagnieżdżony lub niekompletny konflikt struktury daje `unresolved`. Trzy urządzenia
-można scalić kolejno po rozwiązaniu poprzedniego konfliktu; nie rozwijamy drzewa
-zagnieżdżonych znaczników. Fixture z powieleniem uszkodzenia na 313df88 też jest
-czytelny: zachowujemy jego późniejsze zdarzenia, usuwając znaczniki przez rekonstrukcję.
+D7c zastępuje heurystykę pól/ID z D7b następującymi regułami:
+
+- Jeden przebieg wierszy zapisuje granice rozłącznych bloków. Otwarcie `<<<<<<<`,
+  baza `|||||||` i zamknięcie `>>>>>>>` mają siedem znaków, samych albo ze spacją
+  i etykietą. Separator to dokładnie `=======`. Poprawny blok ma jedno otwarcie,
+  opcjonalnie jedną bazę przed separatorem, jeden separator i jedno zamknięcie.
+  Separator i baza poza blokiem są treścią; luźne otwarcia/zamknięcia są zapamiętane.
+- Struktura to granica `SESSION_BLOCK_BOUNDARY` wewnątrz bloku albo frontmatter
+  rozpoznany pozycyjnie (nie `key: value` w wiadomości). Bez struktury wynik jest
+  `not-applicable`, także dla niepełnych/zagnieżdżonych przykładów w jednym polu.
+- W obecności struktury luźne znaczniki, zagnieżdżenia, dodatkowy separator lub
+  zła kolejność bazy oznaczają `unresolved`.
+- Para surowych etykiet pierwszego bloku strukturalnego obowiązuje wszystkie
+  bloki strukturalne, również w nagłówku pliku. Blok bez struktury o tej samej
+  parze przed pierwszym blokiem strukturalnym zdarzeń jest niejednoznaczny:
+  odmowa. Po nim jest rozcinany. Inna para przed nim oznacza literalny przykład,
+  zachowany bajt w bajt; po nim oznacza odmowę. Brak konfliktu zdarzeń ustawia
+  tę granicę na koniec pliku. ID i nazwy pól nie rozstrzygają już przykładów.
+- Strony powstają tylko z rozcięcia bloków rozpoznanych jako rzeczywiste. Każda
+  jest sprawdzana osobno przed unią. Wszystkie bloki, których nagłówki poprzedzały
+  pierwszy strukturalny blok zdarzeń, muszą być identyczne po obu stronach,
+  razem z białymi znakami. Dotyczy to też bloku uciętego otwarciem pseudo-konfliktu
+  wewnątrz wiadomości: nie wystarcza identyczny fragment przed znacznikiem.
+- Dopiero po walidacji działa dotychczasowa unia surowych bloków, sortowanie czasu
+  i sprawdzenie granic/epoki wyniku. Ani bloki, ani `seq` nie są przepisywane.
+- Skan nie parsuje narastającego prefiksu, nie buduje regexów w pętli i nie
+  przechowuje kopii każdej linii. Rozpoznawanie i walidacja są liniowe w rozmiarze
+  tekstu; istniejące sortowanie unii pozostaje O(liczba zdarzeń log liczba zdarzeń).
+  Bez ciągu `<<<<<<<` rozpoznawanie kończy się na `includes`, jak przed D7c.
+
+**Uzasadnione odstępstwo od B z paczki:** niepoprawny blok zawierający strukturę
+również daje `unresolved`, nawet bez innego, poprawnego bloku strukturalnego.
+Pomiar `sessionConflict.strict.test.ts`: prawdziwy `git merge-file` z dopiskiem
+`before`, literalnym otwarciem/separatorem/pełnym przykładem i `after`, dla
+merge/diff3/zdiff3 oraz LF/CRLF, daje 18 takich przypadków. Dosłowne B zwracało
+`not-applicable`, pozwalając pisać do konfliktu wbrew wymaganiu tej samej paczki.
+To rozszerza tylko odmowę, nigdy automatyczne scalanie. Przykłady bez nagłówków
+zdarzeń/frontmattera pozostają zwykłą treścią.
+
+**Dowód kompletności strony:** `_nextSeq` przy zapisie w AgentMemory zwiększa
+maksymalny numer, a `formatSessionEvent` emituje `seq` jako ostatnie pole dla
+każdego typu, także nieznanego, pustego wyniku narzędzia, `messages_removed`,
+`sub_task_history` i `session_epoch`. Wymagamy pojedynczego końcowego pola z dodatnią
+bezpieczną liczbą całkowitą i ściśle rosnących numerów w obrębie każdej strony.
+Luki są dozwolone. Nie wymagamy `content`, `result`, ID ani pól specyficznych
+dla typu: pisarz pomija puste wartości. Starszy format v1 i transkrypt nie miały
+`seq`; takie bloki dopuszczamy wyłącznie we wspólnym, bajtowo identycznym prefiksie.
+Rozbieżny blok bez dowodu zakończenia odmawia zamiast udawać, że jest kompletny.
+Zdrowe pliki nadal czyta zwykły parser, bez tych wymagań. Wcześniej scalony log
+może mieć powtórzone lub malejące `seq`: kolejny konflikt takiego pliku
+może odmówić, mimo że sam zdrowy log nadal działa. Nie zmieniamy historycznych numerów.
+
+**Granice odmowy:** literalny znacznik lub `=======` w rozchodzącej się wiadomości,
+zagnieżdżony przykład, wspólny przykład o tych samych etykietach co merge,
+przykład o innych etykietach po rozbieżności, niepełne zdarzenie i niezgodny
+prefiks dają `unresolved`. Remis czasu może zostawić wspólny nagłówek przed
+pierwszym hunkiem: wtedy odmawiamy, jeśli nie da się dowieść wspólnego bloku.
+Sam remis w kompletnych blokach nadal ma stabilny porządek. Konflikt wyłącznie
+wartości pól, bez żadnej struktury, pozostaje `not-applicable` według B: nie można
+go odróżnić od zdrowej rozmowy o gicie. Odmowa zostawia plik nietknięty i blokuje
+dalszy zapis; użytkownik zaczyna nową rozmowę. Oryginalny przykład o INNYCH
+etykietach we wspólnej wiadomości, również bez ID, jest teraz zachowany przy
+prawdziwym konflikcie późniejszych dopisków.
 
 Unia bloków usuwa tylko bajtowo identyczne kopie po przeciwnych stronach; powtórzenia
 wewnątrz jednej strony zostają (maksimum liczności z obu stron). Bloki nie są
@@ -1448,10 +1476,14 @@ Jeżeli zakres objąłby ID spoza jawnej listy usuwanej przez okno, zapisuje tyl
 listę ID i usuwa ten zakres. Zdrowy zakres zachowuje bajty i dotychczasowe I/O.
 Decyduje treść, więc działa to również po naprawie wykonanej wcześniej przez inny
 adapter. Dla `legacy:N` potrzebny jest dowód, że odczytany przez okno event-log
-nadal jest dokładnym prefiksem bieżącego logu (frontmatter pomijamy, dopiski na
-końcu są dozwolone). `loadActiveSession` rejestruje źródło w WeakMap dla wyniku
-i jego tablicy wiadomości; `sessionRemovalContext` przekazuje ślad do okna/pisarza.
-Nie ma dodatkowego skanowania zdrowej treści ani nowych pól danych użytkownika.
+nadal jest prefiksem bieżącego logu (frontmatter pomijamy, dopiski na końcu są
+dozwolone). D7c rejestruje w WeakMap wyniku i tablicy wiadomości wyłącznie długość
+części zdarzeń w jednostkach UTF-16 i 32-bitowy FNV-1a po tych jednostkach.
+`sessionRemovalContext` przekazuje ten mały odcisk do okna/pisarza; klucz zapisu
+usunięcia nie serializuje już pełnego źródła. Odczyt liczy skrót raz, liniowo;
+sprawdzenie legacy liczy skrót prefiksu nowego źródła o starej długości. Brak odcisku,
+skrócenie lub różnica skrótu odmawiają. To nie jest dowód kryptograficzny:
+kolizja 32-bitowego skrótu jest możliwa. Brak nowych pól danych użytkownika.
 Bez dowodu lub bez jawnych ID usunięcie rzuca `SessionRemovalConflictError` przed
 zapisaniem usunięcia/ogona; wcześniejsza naprawa z kopią może już pozostać na dysku.
 Ślad jest wyłącznie w RAM i nie trafia do modelu ani loga. Zmiana wcześniejszych
@@ -1460,7 +1492,8 @@ ponownie otwiera rozmowę zamiast ryzykować usunięcie innej wiadomości.
 
 `loadActiveSession` używa jednego wyniku `mergeSessionConflict` do parsowania,
 unieważnienia cache i ustalenia własności. Bez `<<<<<<<` analiza nadal kończy się
-na sprawdzeniu obecności tego ciągu, a rejestracja śladu odczytu ma stały koszt.
+na sprawdzeniu obecności tego ciągu. Rejestracja odcisku odczytu D7c ma liniowy
+koszt CPU i stały koszt przechowywania, bez dodatkowego I/O.
 
 Testy D7b w `sessionConflict.review.test.ts`: zachowanie surowych pól i kopii,
 odmowa dla metadanych oraz niejednoznacznych przykładów, 72 rzeczywiste wywołania
@@ -1468,6 +1501,23 @@ odmowa dla metadanych oraz niejednoznacznych przykładów, 72 rzeczywiste wywoł
 także zdarzenia legacy bez ID i dowód identycznych bajtów prefiksu różnych historii,
 usunięcia na osobnych adapterach nad wspólnym dyskiem przed/po wcześniejszej naprawie,
 odmowa legacy, dokładne bajty zdarzenia i I/O zdrowego usunięcia.
+
+Testy D7c w `sessionConflict.strict.test.ts`: 24 rzeczywiste konflikty z literalnymi
+znacznikami i odmową pierwszego zapisu, 6 wariantów par etykiet, pseudo-blok między
+wiadomościami, zdrowe przykłady z dokładnymi bajtami/I/O, błędne znaczniki,
+kompletność/seq/prefiks, odcisk usunięcia i pomiary odczytu 1/5 MB (bez przykładów,
+20 przykładów, gęste przykłady) oraz prawdziwego konfliktu 1 MB, z progiem 2 s.
+Pięć istniejących fixture'ów ma wyniki jak przed D7c, także identyczne bajty obu napraw.
+W dawnej macierzy 72 wejść zmieniają się 44 wyniki: 40 `merged -> unresolved`
+z powodu powtarzanego/malejącego `seq` w syntetycznym generatorze oraz 4
+`unresolved -> not-applicable` (merge, 3/3 tur, remisy: brak strukturalnego bloku,
+reguła B). Nie zmieniono tych wejść; asercje są teraz dokładne, bez `t.pass()`.
+Dodatkowe 72 warianty używają numeracji gwarantowanej przez pisarza, obejmując
+udane unie, odmowy niejednoznacznych remisów i nieoznaczalne konflikty samych pól.
+Istniejące testy D7 świadomie zmieniły oczekiwania dla rozbieżnych bloków bez seq,
+powtórzeń seq, drugiego scalenia takiej historii, różnych par etykiet nagłówka
+oraz wspólnych przykładów legacy o innych etykietach; mają także pozytywne
+przypadki wspólnego legacy prefiksu, stabilnego remisu i rosnących numerów.
 
 Czytelnicy: `loadActiveSession`, `_parseActiveSessionFile`, lista sesji i restore;
 `SaveSessionWorkflow` czyta przez `loadActiveSession`, a archiwizacja używa tekstu
@@ -1657,8 +1707,8 @@ przy niepełnym konflikcie i przy literalnym przykładzie w zdrowej wiadomości 
 ogrodzeniu kodu. To świadomie licznik śladów, nie dowód uszkodzenia.
 
 Nie klasyfikujemy naprawialności sesji ani indeksów: nie budujemy pełnych projekcji
-scalania do pomiaru liczbowego, a obecny resolver D7b może mieć koszt kwadratowy
-przy gęstych przykładach. Wszystkie cztery grupy mają tę samą tanią definicję.
+scalania do pomiaru liczbowego. D7c usunęło kwadratową heurystykę przykładów,
+ale diagnostyka nadal wymaga tylko taniego licznika śladów. Wszystkie cztery grupy mają tę samą tanią definicję.
 Koszt: listing katalogów, sortowanie nazw sesji O(S log S) oraz do 52 odczytów
 na agenta i jeden wspólny, każdy po stat; skan tekstu liniowy, pliki sekwencyjnie,
 bez przechowywania ich treści w wyniku. Nie ma limitu liczby agentów ani liczby

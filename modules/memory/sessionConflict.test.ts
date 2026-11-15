@@ -62,18 +62,21 @@ test('D7 healthy user example remains literal, including YAML-looking text in co
     t.deepEqual(readConflictAwareSession(input), parseActiveSession(input));
 });
 
-test('D7 stable ties and untimed blocks retain their side anchors without changing bytes', t => {
+test('D7c stable ties remain ordered; unnumbered divergent blocks refuse', t => {
     const tied = b.replace('10:00:01', '10:00:00');
     const unknown = '## unknown event\nopaque\n\n';
-    t.deepEqual(mergeSessionConflict(header + wrap(a + unknown, tied)), { kind: 'merged', text: header + a + unknown + tied });
-    t.deepEqual(mergeSessionConflict(header + wrap(b, a + unknown)), { kind: 'merged', text: header + a + unknown + b });
+    t.deepEqual(mergeSessionConflict(header + wrap(a, tied)), { kind: 'merged', text: header + a + tied });
+    t.deepEqual(mergeSessionConflict(header + wrap(a + unknown, tied)), { kind: 'unresolved' });
+    t.deepEqual(mergeSessionConflict(header + wrap(b, a + unknown)), { kind: 'unresolved' });
 });
 
 test('D7 three sides: sequential resolved merge works; nested and incomplete conflicts refuse', t => {
     const first = mergeSessionConflict(header + wrap(a, b));
     t.deepEqual(first, { kind: 'merged', text: header + a + b });
     const c = b.replaceAll('B', 'C').replace('10:00:01', '10:00:02');
-    t.deepEqual(mergeSessionConflict(header + wrap(a + b, a + c)), { kind: 'merged', text: header + a + b + c });
+    t.deepEqual(mergeSessionConflict(header + wrap(a + b, a + c)), { kind: 'unresolved' });
+    const b2 = b.replace('\n1\n', '\n2\n'), c2 = c.replace('\n1\n', '\n2\n');
+    t.deepEqual(mergeSessionConflict(header + wrap(a + b2, a + c2)), { kind: 'merged', text: header + a + b2 + c2 });
     t.deepEqual(mergeSessionConflict(header + wrap(wrap(a, b), c)), { kind: 'unresolved' });
     t.deepEqual(mergeSessionConflict(header + '<<<<<<< HEAD\n' + a + '=======\n' + b), { kind: 'unresolved' });
 });
@@ -112,9 +115,11 @@ test('D7 event epoch must agree on both sides and after ordering', t => {
     t.is(parseActiveSession(merged.text).metadata.epoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 });
 
-test('D7 raw union deduplicates across sides, preserving repeated identical events within a side', t => {
-    t.deepEqual(mergeSessionConflict(header + wrap(a + a, a + b)), { kind: 'merged', text: header + a + a + b });
-    t.deepEqual(mergeSessionConflict(header + wrap(a, a + a + b)), { kind: 'merged', text: header + a + a + b });
+test('D7c repeated seq refuses; identical unnumbered prefix repetitions survive', t => {
+    t.deepEqual(mergeSessionConflict(header + wrap(a + a, a + b)), { kind: 'unresolved' });
+    t.deepEqual(mergeSessionConflict(header + wrap(a, a + a + b)), { kind: 'unresolved' });
+    const prefix = '## User\n\nCommon\n\n'.repeat(2);
+    t.deepEqual(mergeSessionConflict(header + prefix + wrap(a, b)), { kind: 'merged', text: header + prefix + a + b });
 });
 
 test('D7 whole-file conflict recognizes frontmatter even before any first event', t => {

@@ -2482,17 +2482,18 @@ powtórzyć świadome usunięcie. Naprawiony plik może pozostać na dysku mimo 
 usunięcia; nie cofamy bezpiecznej naprawy. Ślad legacy wymaga dokładnego prefiksu
 event-logu, więc zmiana dawnych bajtów może wymagać otwarcia nawet bez zmiany sensu.
 
-Literalny przykład znaczników jest zachowany przez memory wyłącznie w jednym
-polu tekstowym wspólnej wiadomości z jawnym ID przed pierwszym konfliktem strukturalnym.
-Bez ID identyczne czasy nowych zdarzeń mogą dać bajtowo ten sam prefiks co przykład
-(dowód przez prawdziwy `git merge-file` w testach memory), dlatego następuje odmowa.
-To zachowawcze zaostrzenie reguły D7b. Bez strukturalnej rozbieżności odmowa obejmuje
-także hunki zaczynające wartości pól w co najmniej dwóch różnych zdarzeniach bez ID
-(wszystkie czasy mogą być identyczne). Pojedynczy izolowany przykład oraz przykłady
-z poprzedzającym tekstem zachowują wtedy dotychczasową semantykę D7.
-Zagnieżdżony przykład
-na jednej stronie oraz przykład we wspólnym zdarzeniu po wcześniejszym hunku
-strukturalnym w tym samym wejściu dają odmowę, nie zmienioną wiadomość.
+D7c zmienia rozpoznawanie w memory, bez nowych tekstów ani handlerów czatu.
+Przykład o innych etykietach niż prawdziwe scalenie we wspólnej wiadomości przed
+rozbieżnością jest zachowany, również bez ID. Te same etykiety przed rozbieżnością,
+inne po niej, literalne znaczniki w dopisku jednej strony, niepełne bloki albo
+niezgodny prefiks powodują `SessionConflictError` i istniejący komunikat PL/EN.
+Remisy czasu odmawiają, gdy zostawiają niejednoznaczny wspólny nagłówek. Pełna
+reguła, walidacja seq i wyjątek dla błędnych bloków strukturalnych: memory/CLAUDE.md.
+Bez struktury znaczniki pozostają zwykłą treścią (`not-applicable`), również gdy
+nie da się odróżnić prawdziwego konfliktu samych pól od przykładu. Po odmowie
+plik pozostaje nietknięty; dalsza praca wymaga nowej rozmowy albo ręcznej naprawy.
+Ślad starego okna jest teraz małym odciskiem (długość + FNV-1a), nie pełnym tekstem;
+ponowne otwarcie i obsługa `SessionRemovalConflictError` działają jak wcześniej.
 
 Osiem testów D7b w `chat_streaming.sendTab.test.ts` wykonuje produkcyjne restore,
 edycję i kliknięcie wysyłki: PL/EN, jawne/legacy ID, naprawa teraz/wcześniej przez

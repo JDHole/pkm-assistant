@@ -1,5 +1,5 @@
-import { splitGitConflict } from './gitConflict.js';
-import { EVENT_FIELDS, HEADER_FIELDS, KNOWN_ROLES, SESSION_BLOCK_BOUNDARY, eventTypeFromHeader, extractEventField, parseActiveSession, resolveSessionEpoch } from './activeSessionFormat.js';
+import { isGitConflictStart } from './gitConflict.js';
+import { SESSION_BLOCK_BOUNDARY, eventTypeFromHeader, parseActiveSession, resolveSessionEpoch } from './activeSessionFormat.js';
 import type { ParsedActiveSession } from './activeSessionFormat.js';
 import { readSessionDevice } from './sessionOwnership.js';
 
@@ -25,101 +25,115 @@ export function rawSessionBlocks(text: string): { header: string; blocks: string
     };
 }
 
-/** Content-only examples (including fenced ones) must remain ordinary user text.
- * Frontmatter evidence is positional, never a `key: value` inside message content. */
-function hasStructuralConflict(text: string): boolean {
-    let depth = 0;
-    let frontmatter = /^\uFEFF?---\r?\n/.test(text);
-    let first = true;
-    let beforeEvents = true;
-    for (const raw of text.split('\n')) {
-        const line = raw.replace(/\r$/, '');
-        if (/^<<<<<<<(?: |$)/.test(line)) depth++;
-        else if (/^>>>>>>>(?: |$)/.test(line)) depth = Math.max(0, depth - 1);
-        else if (depth && (SESSION_BLOCK_BOUNDARY.test(line)
-            || beforeEvents && line === '---'
-            || frontmatter && /^[^\s:]+:.*$/.test(line))) return true;
-        if (!first && line === '---' && depth === 0) frontmatter = false;
-        if (SESSION_BLOCK_BOUNDARY.test(line)) { frontmatter = false; beforeEvents = false; }
-        first = false;
-    }
-    return false;
+interface ConflictBlock {
+    start: number;
+    oursStart: number;
+    oursEnd: number;
+    theirsStart: number;
+    end: number;
+    closeStart: number;
+    opening: string;
+    closing: string;
+    structural: boolean;
+    events: boolean;
+    precedingEvents: number;
 }
 
-/** Preserve examples only in a single free-text field before divergent events.
- * A common event after a divergent hunk is ambiguous: refusing it is safer than
- * manufacturing two different messages from its literal example. */
-function splitSessionConflict(text: string, structuralConflict: boolean): ReturnType<typeof splitGitConflict> {
-    const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-    const freeText = new Set(['content', 'args', 'result', 'prompt', 'parent_conversation_text', 'question', 'sub_task_history', 'tool_calls']);
-    const labels = new RegExp(`^\\*\\*(${EVENT_FIELDS.join('|')}):\\*\\*[ \\t]*$`);
-    let event = false, field = '', divergent = false, commonEvent = false, body = false;
-    let transcript = false;
-    let eventBody = '';
-    let eventOrdinal = 0;
-    const unprovenEvents = new Set<number>();
-    let ours = '', theirs = '', pending = '';
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].replace(/\r?\n$/, '');
-        if (!/^<<<<<<<(?: |$)/.test(line)) {
-            pending += lines[i];
-            if (SESSION_BLOCK_BOUNDARY.test(line)) {
-                event = true; commonEvent = true; body = false;
-                eventOrdinal++;
-                transcript = KNOWN_ROLES.has(line.slice(3).trim().toLowerCase());
-                field = transcript ? 'content' : '';
-                eventBody = '';
-            } else eventBody += lines[i];
-            const label = line.match(labels);
-            if (!transcript && label && (!body || !HEADER_FIELDS.has(label[1]))) {
-                field = label[1];
-                if (!HEADER_FIELDS.has(field)) body = true;
+type SessionSplit =
+    | { kind: 'not-applicable' | 'unresolved' }
+    | { kind: 'split'; ours: string; theirs: string; prefixEvents: number };
+
+/** One line scan records disjoint hunks. No field/content heuristics or prefix reparsing. */
+function splitSessionConflict(text: string): SessionSplit {
+    const blocks: ConflictBlock[] = [];
+    let pending: ConflictBlock | undefined;
+    let malformed = false, invalid = false, malformedStructural = false;
+    let frontmatter = /^\uFEFF?---\r?\n/.test(text), beforeEvents = true;
+    let events = 0;
+    for (let start = 0; start < text.length;) {
+        const newline = text.indexOf('\n', start);
+        const end = newline < 0 ? text.length : newline + 1;
+        const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
+        if (isGitConflictStart(line)) {
+            if (pending) { malformed = true; malformedStructural ||= pending.structural; }
+            pending = { start, oursStart: end, oursEnd: -1, theirsStart: -1, end: -1,
+                closeStart: -1, opening: line.slice(7), closing: '', structural: false,
+                events: false, precedingEvents: events };
+            invalid = false;
+        } else if (/^>>>>>>>(?: |$)/.test(line)) {
+            if (!pending || invalid || pending.theirsStart < 0) {
+                malformed = true;
+                malformedStructural ||= pending?.structural ?? false;
             }
-            continue;
-        }
-        let hunk = lines[i], structural = false, boundary = false, closed = false;
-        for (++i; i < lines.length; i++) {
-            const inside = lines[i].replace(/\r?\n$/, '');
-            hunk += lines[i];
-            if (/^<<<<<<<(?: |$)/.test(inside)) {
-                return !structuralConflict && event && (!field || freeText.has(field)) ? { ours: text, theirs: text } : null;
+            else blocks.push({ ...pending, closeStart: start, end, closing: line.slice(7) });
+            pending = undefined;
+        } else if (pending && /^\|{7}(?: |$)/.test(line)) {
+            if (pending.oursEnd >= 0) invalid = true;
+            else pending.oursEnd = start;
+        } else if (pending && line === '=======') {
+            if (pending.theirsStart >= 0) invalid = true;
+            else {
+                if (pending.oursEnd < 0) pending.oursEnd = start;
+                pending.theirsStart = end;
             }
-            if (SESSION_BLOCK_BOUNDARY.test(inside)) structural = true;
-            const label = inside.match(labels);
-            if (!transcript && label && (!body || !HEADER_FIELDS.has(label[1]))) boundary = true;
-            if (/^>>>>>>>(?: |$)/.test(inside)) { closed = true; break; }
-        }
-        if (!closed) return !structuralConflict && event && (!field || freeText.has(field)) ? { ours: text, theirs: text } : null;
-        if (event && !structural && !divergent) {
-            if (!structuralConflict && !field) { pending += hunk; continue; }
-            if (!freeText.has(field) || boundary) return null;
-            // With equal timestamps Git can leave the new event's heading outside
-            // the first hunk. Without a common stable ID it is indistinguishable
-            // from a literal example in an old message (see real merge-file tests).
-            const normalizedBody = eventBody.replace(/\r\n/g, '\n');
-            const id = extractEventField(normalizedBody, 'message_id').trim();
-            const precedingText = transcript ? normalizedBody : extractEventField(normalizedBody, field);
-            if (!id || /^legacy:\d+$/.test(id)) {
-                if (structuralConflict) return null;
-                // Several whole-field hunks in different legacy events can be a
-                // merge whose timestamps all agree. A single literal example has
-                // historically remained ordinary content and must still do so.
-                if (!precedingText.trim()) unprovenEvents.add(eventOrdinal);
-                if (unprovenEvents.size > 1) return null;
+        } else {
+            const boundary = SESSION_BLOCK_BOUNDARY.test(line);
+            if (pending && (boundary || beforeEvents && line === '---'
+                || frontmatter && /^[^\s:]+:.*$/.test(line))) pending.structural = true;
+            if (boundary) {
+                if (pending) pending.events = true;
+                events++;
+                frontmatter = false;
+                beforeEvents = false;
             }
-            pending += hunk;
-            eventBody += hunk;
-            continue;
+            if (start > 0 && line === '---' && !pending) frontmatter = false;
         }
-        if (event && !structural && commonEvent) return null;
-        const sides = splitGitConflict(hunk);
-        if (!sides) return null;
-        ours += pending + sides.ours;
-        theirs += pending + sides.theirs;
-        pending = '';
-        if (structural) { divergent = true; event = true; commonEvent = false; }
+        start = end;
     }
-    return { ours: ours + pending, theirs: theirs + pending };
+    if (pending) { malformed = true; malformedStructural ||= pending.structural; }
+    const first = blocks.find(block => block.structural);
+    // Real merge-file can wrap event headings and a literal marker in a single
+    // malformed hunk. Treating that as healthy would allow destructive appends.
+    if (!first) return { kind: malformedStructural ? 'unresolved' : 'not-applicable' };
+    if (malformed) return { kind: 'unresolved' };
+    const firstEvent = blocks.find(block => block.events);
+    const eventStart = firstEvent?.start ?? Infinity;
+    const ours: string[] = [], theirs: string[] = [];
+    let copied = 0;
+    for (const block of blocks) {
+        const sameLabels = block.opening === first.opening && block.closing === first.closing;
+        if (block.structural ? !sameLabels : sameLabels === (block.start < eventStart)) {
+            return { kind: 'unresolved' };
+        }
+        if (!block.structural && !sameLabels) continue;
+        const common = text.slice(copied, block.start);
+        ours.push(common, text.slice(block.oursStart, block.oursEnd));
+        theirs.push(common, text.slice(block.theirsStart, block.closeStart));
+        copied = block.end;
+    }
+    const tail = text.slice(copied);
+    return { kind: 'split', ours: ours.join('') + tail, theirs: theirs.join('') + tail,
+        prefixEvents: firstEvent?.precedingEvents ?? events };
+}
+
+/** seq is the writer's terminal field, for every event type. Pre-v2/transcript
+ * blocks have no completion witness: accept those only in the identical prefix.
+ * No content field is required: the writer legitimately omits empty values. */
+function validSide(blocks: readonly string[], prefixEvents: number): boolean {
+    let previous = 0;
+    for (let i = 0; i < blocks.length; i++) {
+        const raw = blocks[i];
+        const seq = raw.match(/\n\*\*seq:\*\*[ \t]*\r?\n\s*(\d+)\s*$/);
+        if (!seq) {
+            if (i >= prefixEvents || /(?:^|\n)\*\*seq:\*\*[ \t]*(?:\r?\n|$)/.test(raw)) return false;
+            continue;
+        }
+        if (raw.search(/(?:^|\n)\*\*seq:\*\*[ \t]*(?:\r?\n|$)/) !== seq.index) return false;
+        const value = Number(seq[1]);
+        if (!Number.isSafeInteger(value) || value <= previous) return false;
+        previous = value;
+    }
+    return true;
 }
 
 function headerWithoutDerivedFields(header: string): string {
@@ -132,12 +146,12 @@ function headerWithoutDerivedFields(header: string): string {
  * timed block (leading unknowns stay first); ties preserve ours-before-theirs order. */
 export function mergeSessionConflict(text: string): SessionConflict {
     if (!text.includes('<<<<<<<')) return { kind: 'not-applicable' };
-    const structural = hasStructuralConflict(text);
-    const sides = splitSessionConflict(text, structural);
-    if (!sides) return { kind: 'unresolved' };
-    if (!structural) return { kind: 'not-applicable' };
+    const sides = splitSessionConflict(text);
+    if (sides.kind !== 'split') return sides;
     const ours = rawSessionBlocks(sides.ours), theirs = rawSessionBlocks(sides.theirs);
-    if (headerWithoutDerivedFields(ours.header) !== headerWithoutDerivedFields(theirs.header)
+    if (!validSide(ours.blocks, sides.prefixEvents) || !validSide(theirs.blocks, sides.prefixEvents)
+        || ours.blocks.slice(0, sides.prefixEvents).some((raw, i) => raw !== theirs.blocks[i])
+        || headerWithoutDerivedFields(ours.header) !== headerWithoutDerivedFields(theirs.header)
         || readSessionDevice(sides.ours).kind === 'ambiguous' || readSessionDevice(sides.theirs).kind === 'ambiguous'
         || resolveSessionEpoch(sides.ours) !== resolveSessionEpoch(sides.theirs)) return { kind: 'unresolved' };
 

@@ -61,12 +61,12 @@ test('D7b nested example and common example after a real hunk refuse without rew
     t.deepEqual(mergeSessionConflict(header + wrap(event('A1', 1), event('B1', 2)) + common), { kind: 'unresolved' });
 });
 
-test('D7b legacy text stays literal when healthy, but refuses ambiguous pre-divergence markers', t => {
+test('D7c common legacy examples with different labels survive before divergence', t => {
     const a = event('A1', 1), b = event('B1', 2);
     for (const common of ['## User\n\n' + example + '\n\n',
         `## ${time(0)} — user message\n\n**content:**\n\n**message_id:**\n\n${example}\n\n`]) {
         t.deepEqual(mergeSessionConflict(header + common), { kind: 'not-applicable' });
-        t.deepEqual(mergeSessionConflict(header + common + wrap(a, b)), { kind: 'unresolved' });
+        t.deepEqual(mergeSessionConflict(header + common + wrap(a, b)), { kind: 'merged', text: header + common + a + b });
     }
     const common = event('EXAMPLE', 3, false, example);
     const c = event('C1', 4), d = event('D1', 5);
@@ -85,35 +85,35 @@ test('D7b removal without explicit IDs refuses after repair, retaining every mes
     t.is(d.files.get(d.path), base + a + b);
 });
 
-for (const style of ['merge', 'diff3', 'zdiff3']) for (const [left, right] of [[0, 1], [1, 3], [3, 3]])
+for (const numbering of ['original', 'writer']) for (const style of ['merge', 'diff3', 'zdiff3']) for (const [left, right] of [[0, 1], [1, 3], [3, 3]])
 for (const tools of [false, true]) for (const tied of [false, true]) for (const legacy of [false, true]) {
-    test(`D7b git merge-file ${style} ${left}/${right}, tools=${tools}, tied=${tied}, legacy=${legacy}`, t => {
+    test(`D7b git merge-file ${style} ${left}/${right}, tools=${tools}, tied=${tied}, legacy=${legacy}, numbering=${numbering}`, t => {
         const dir = mkdtempSync(join(process.cwd(), '.d7b-git-'));
         t.teardown(() => rmSync(dir, { recursive: true, force: true }));
         const base = header + event('BASE', 0, false, example);
         const branch = (side: string, count: number, offset: number) => Array.from({ length: count }, (_, n) => {
             const second = 1 + n * 6 + (tied ? 0 : offset);
-            return event(side + n, second, legacy) + (tools
-                ? formatSessionEvent('tool_result', { ...(!legacy ? { message_id: side + n + 'tool' } : {}), tool: 'read_note', result: side + n + ' result', tool_call_id: side + n, seq: n + 2 }, time(second + 1))
-                : '') + formatSessionEvent('agent_message', { ...(!legacy ? { message_id: side + n + 'answer' } : {}), content: side + n + ' answer', seq: n + 3 }, time(second + 2));
+            const seq = 2 + n * (tools ? 3 : 2);
+            const user = numbering === 'original' ? event(side + n, second, legacy)
+                : formatSessionEvent('user_message', { ...(!legacy ? { message_id: side + n } : {}), content: side + n, seq }, time(second));
+            return user + (tools
+                ? formatSessionEvent('tool_result', { ...(!legacy ? { message_id: side + n + 'tool' } : {}), tool: 'read_note', result: side + n + ' result', tool_call_id: side + n, seq: numbering === 'original' ? n + 2 : seq + 1 }, time(second + 1))
+                : '') + formatSessionEvent('agent_message', { ...(!legacy ? { message_id: side + n + 'answer' } : {}), content: side + n + ' answer', seq: numbering === 'original' ? n + 3 : seq + (tools ? 2 : 1) }, time(second + 2));
         }).join('');
         const a = branch('A', left, 0), b = branch('B', right, 3);
         for (const [name, bytes] of [['base', base], ['ours', base + a], ['theirs', base + b]]) writeFileSync(join(dir, name), bytes);
         const result = spawnSync('git', ['merge-file', '-p', ...(style === 'merge' ? [] : [`--${style}`]), join(dir, 'ours'), join(dir, 'base'), join(dir, 'theirs')], { encoding: 'utf8' });
         t.true(result.status !== null && result.status >= 0 && result.status < 128, result.stderr);
         const merged = mergeSessionConflict(result.stdout);
-        if (style === 'merge' && left && tied && legacy) {
-            const firstHunk = result.stdout.slice(base.length).match(/^<<<<<<<[^\n]*\n[\s\S]*?^>>>>>>>[^\n]*\n/m)![0];
-            // Measured counterexample to treating every text hunk before event
-            // divergence as literal: the writer can produce identical prefix bytes
-            // for a common message containing that hunk as an ordinary example.
-            const literal = formatSessionEvent('user_message', { content: firstHunk.trimEnd(), seq: 2 }, time(1));
-            t.true(result.stdout.startsWith(base + literal));
-            t.deepEqual(merged, { kind: 'unresolved' });
+        // Original matrix contains repeated/decreasing seq in multi-turn branches.
+        // Keep those exact inputs as refusal regressions, and also run writer numbering.
+        const contentOnly = style === 'merge' && left === 3 && tied;
+        const refused = left > 0 && !contentOnly && (numbering === 'original' || style !== 'diff3' && tied);
+        t.is(merged.kind, refused ? 'unresolved' : left && !contentOnly ? 'merged' : 'not-applicable');
+        if (refused || contentOnly) {
+            t.deepEqual(merged, { kind: refused ? 'unresolved' : 'not-applicable' });
             return;
         }
-        if (tied && left && merged.kind === 'unresolved') { t.pass(); return; }
-        t.is(merged.kind, left ? 'merged' : 'not-applicable');
         const output = merged.kind === 'merged' ? merged.text : result.stdout;
         const expectedBlocks = (a + b).split(/(?=^## )/m).filter(Boolean).sort((x, y) => x.slice(3, 27).localeCompare(y.slice(3, 27)));
         t.is(output, base + expectedBlocks.join(''));

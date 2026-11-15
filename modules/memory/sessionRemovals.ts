@@ -1,11 +1,12 @@
 import { SESSION_BLOCK_BOUNDARY } from './activeSessionFormat.js';
 
 /** RAM-only read receipt. Never serialized into vault files or model messages. */
-export interface SessionRemovalContext { readonly source: string }
+export interface SessionRemovalContext { readonly length: number; readonly hash: number }
 const reads = new WeakMap<object, SessionRemovalContext>();
 
 export function rememberSessionRead(result: object, messages: readonly object[], source: string): void {
-    const context = { source };
+    const body = eventBody(source);
+    const context = { length: body.length, hash: fingerprint(body, body.length) };
     reads.set(result, context);
     reads.set(messages, context);
 }
@@ -26,6 +27,13 @@ function eventBody(source: string): string {
     return start < 0 ? '' : source.slice(start);
 }
 
+/** FNV-1a over UTF-16 code units; synchronous and independent of host APIs. */
+function fingerprint(text: string, length: number): number {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+    return hash >>> 0;
+}
+
 /** Positional identities are safe only while the entire observed log is still a
  * prefix. Header timestamps/counts may change; append-only events may follow it.
  * Explicit identities allow dropping a range that would sweep in unknown IDs. */
@@ -35,8 +43,9 @@ export function safeRemovalRanges(source: string, visibleIds: readonly string[],
     if (!removed.size) throw new SessionRemovalConflictError();
     const references = [...removed, ...ranges.flatMap(range => [range.from, range.to])];
     if (references.some(id => /^legacy:\d+$/.test(id))) {
-        const observed = context && eventBody(context.source);
-        if (!observed || !eventBody(source).startsWith(observed)) throw new SessionRemovalConflictError();
+        const current = eventBody(source);
+        if (!context?.length || current.length < context.length
+            || fingerprint(current, context.length) !== context.hash) throw new SessionRemovalConflictError();
     }
     return ranges.filter(range => {
         const from = visibleIds.indexOf(range.from), to = visibleIds.lastIndexOf(range.to);

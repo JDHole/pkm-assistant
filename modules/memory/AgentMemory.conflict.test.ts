@@ -187,7 +187,11 @@ test.serial('D7 warm stat detects synced conflict; fallback append also refreshe
 });
 
 test.serial('D7 metadata-only conflicts are writable by the same device and visible in list without repair', async t => {
-    const input = raw.replace('type: active_session', 'device: aaaaaaaaaaaaaaaa\ntype: active_session\n<<<<<<< HEAD\nupdated: old\n=======\nupdated: newer\n>>>>>>> theirs');
+    const mismatched = raw.replace('type: active_session', 'device: aaaaaaaaaaaaaaaa\ntype: active_session\n<<<<<<< HEAD\nupdated: old\n=======\nupdated: newer\n>>>>>>> theirs');
+    t.deepEqual(mergeSessionConflict(mismatched), { kind: 'unresolved' });
+    // Every hunk from a single merge carries the same label pair (D7c rule D).
+    const closing = raw.match(/^>>>>>>>.*$/m)![0];
+    const input = mismatched.replace('>>>>>>> theirs', closing);
     const d = disk(input);
     const listed = await d.memory.listActiveSessions();
     t.deepEqual(listed.map(s => [s.ownership, s.created, s.conflict]), [['mine', '2026-11-14T14:25:05.864Z', undefined]]);
@@ -265,8 +269,9 @@ test.serial('D7 epoch readback cannot warm a cache with a concurrent synchroniza
     await t.throwsAsync(() => d.memory.ensureActiveSessionEpoch(d.path, () => true), { instanceOf: SessionConflictError });
     t.is(d.memory.sessionEpoch, null);
     d.adapter.append = append;
-    await d.memory.appendToActiveSession(event);
-    t.deepEqual(d.backups().map(([, bytes]) => bytes), [synced]);
-    t.deepEqual((await d.memory.loadActiveSession(d.path)).messages.slice(-3).map(m => m.content), ['Remote A', 'Remote B', 'Następna wiadomość']);
-    t.is(/^(?:<<<<<<<|=======|>>>>>>>)/m.test(d.files.get(d.path)!), false);
+    // The concurrent tail has no completion witnesses: D7c refuses repair too.
+    await t.throwsAsync(() => d.memory.appendToActiveSession(event), { instanceOf: SessionConflictError });
+    t.is(d.files.get(d.path), synced);
+    t.deepEqual(d.backups(), []);
+    t.deepEqual((await d.memory.loadActiveSession(d.path)).messages.slice(-2).map(m => m.content), ['Remote A\n\n=======', 'Remote B\n\n>>>>>>> sync']);
 });
