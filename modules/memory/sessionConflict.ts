@@ -1,5 +1,5 @@
 import { splitGitConflict } from './gitConflict.js';
-import { SESSION_BLOCK_BOUNDARY, eventTypeFromHeader, parseActiveSession, resolveSessionEpoch } from './activeSessionFormat.js';
+import { EVENT_FIELDS, HEADER_FIELDS, KNOWN_ROLES, SESSION_BLOCK_BOUNDARY, eventTypeFromHeader, extractEventField, parseActiveSession, resolveSessionEpoch } from './activeSessionFormat.js';
 import type { ParsedActiveSession } from './activeSessionFormat.js';
 import { readSessionDevice } from './sessionOwnership.js';
 
@@ -46,6 +46,82 @@ function hasStructuralConflict(text: string): boolean {
     return false;
 }
 
+/** Preserve examples only in a single free-text field before divergent events.
+ * A common event after a divergent hunk is ambiguous: refusing it is safer than
+ * manufacturing two different messages from its literal example. */
+function splitSessionConflict(text: string, structuralConflict: boolean): ReturnType<typeof splitGitConflict> {
+    const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+    const freeText = new Set(['content', 'args', 'result', 'prompt', 'parent_conversation_text', 'question', 'sub_task_history', 'tool_calls']);
+    const labels = new RegExp(`^\\*\\*(${EVENT_FIELDS.join('|')}):\\*\\*[ \\t]*$`);
+    let event = false, field = '', divergent = false, commonEvent = false, body = false;
+    let transcript = false;
+    let eventBody = '';
+    let eventOrdinal = 0;
+    const unprovenEvents = new Set<number>();
+    let ours = '', theirs = '', pending = '';
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].replace(/\r?\n$/, '');
+        if (!/^<<<<<<<(?: |$)/.test(line)) {
+            pending += lines[i];
+            if (SESSION_BLOCK_BOUNDARY.test(line)) {
+                event = true; commonEvent = true; body = false;
+                eventOrdinal++;
+                transcript = KNOWN_ROLES.has(line.slice(3).trim().toLowerCase());
+                field = transcript ? 'content' : '';
+                eventBody = '';
+            } else eventBody += lines[i];
+            const label = line.match(labels);
+            if (!transcript && label && (!body || !HEADER_FIELDS.has(label[1]))) {
+                field = label[1];
+                if (!HEADER_FIELDS.has(field)) body = true;
+            }
+            continue;
+        }
+        let hunk = lines[i], structural = false, boundary = false, closed = false;
+        for (++i; i < lines.length; i++) {
+            const inside = lines[i].replace(/\r?\n$/, '');
+            hunk += lines[i];
+            if (/^<<<<<<<(?: |$)/.test(inside)) {
+                return !structuralConflict && event && (!field || freeText.has(field)) ? { ours: text, theirs: text } : null;
+            }
+            if (SESSION_BLOCK_BOUNDARY.test(inside)) structural = true;
+            const label = inside.match(labels);
+            if (!transcript && label && (!body || !HEADER_FIELDS.has(label[1]))) boundary = true;
+            if (/^>>>>>>>(?: |$)/.test(inside)) { closed = true; break; }
+        }
+        if (!closed) return !structuralConflict && event && (!field || freeText.has(field)) ? { ours: text, theirs: text } : null;
+        if (event && !structural && !divergent) {
+            if (!structuralConflict && !field) { pending += hunk; continue; }
+            if (!freeText.has(field) || boundary) return null;
+            // With equal timestamps Git can leave the new event's heading outside
+            // the first hunk. Without a common stable ID it is indistinguishable
+            // from a literal example in an old message (see real merge-file tests).
+            const normalizedBody = eventBody.replace(/\r\n/g, '\n');
+            const id = extractEventField(normalizedBody, 'message_id').trim();
+            const precedingText = transcript ? normalizedBody : extractEventField(normalizedBody, field);
+            if (!id || /^legacy:\d+$/.test(id)) {
+                if (structuralConflict) return null;
+                // Several whole-field hunks in different legacy events can be a
+                // merge whose timestamps all agree. A single literal example has
+                // historically remained ordinary content and must still do so.
+                if (!precedingText.trim()) unprovenEvents.add(eventOrdinal);
+                if (unprovenEvents.size > 1) return null;
+            }
+            pending += hunk;
+            eventBody += hunk;
+            continue;
+        }
+        if (event && !structural && commonEvent) return null;
+        const sides = splitGitConflict(hunk);
+        if (!sides) return null;
+        ours += pending + sides.ours;
+        theirs += pending + sides.theirs;
+        pending = '';
+        if (structural) { divergent = true; event = true; commonEvent = false; }
+    }
+    return { ours: ours + pending, theirs: theirs + pending };
+}
+
 function headerWithoutDerivedFields(header: string): string {
     const frontmatter = header.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0];
     if (!frontmatter) return header;
@@ -55,9 +131,11 @@ function headerWithoutDerivedFields(header: string): string {
 /** Raw union, never seq renumbering. Unknown-time blocks travel with their preceding
  * timed block (leading unknowns stay first); ties preserve ours-before-theirs order. */
 export function mergeSessionConflict(text: string): SessionConflict {
-    if (!text.includes('<<<<<<<') || !hasStructuralConflict(text)) return { kind: 'not-applicable' };
-    const sides = splitGitConflict(text);
+    if (!text.includes('<<<<<<<')) return { kind: 'not-applicable' };
+    const structural = hasStructuralConflict(text);
+    const sides = splitSessionConflict(text, structural);
     if (!sides) return { kind: 'unresolved' };
+    if (!structural) return { kind: 'not-applicable' };
     const ours = rawSessionBlocks(sides.ours), theirs = rawSessionBlocks(sides.theirs);
     if (headerWithoutDerivedFields(ours.header) !== headerWithoutDerivedFields(theirs.header)
         || readSessionDevice(sides.ours).kind === 'ambiguous' || readSessionDevice(sides.theirs).kind === 'ambiguous'

@@ -210,7 +210,7 @@ export const EVENT_FIELDS: EventFieldName[] = [
 
 /** Alternatywa regexowa ze znanych etykiet - składana RAZ. */
 const FIELD_LABELS_ALT = EVENT_FIELDS.join('|');
-const HEADER_FIELDS = new Set(['epoch', 'message_id', 'removed_messages', 'removed_ranges', 'parent_conversation_text']);
+export const HEADER_FIELDS = new Set(['epoch', 'message_id', 'removed_messages', 'removed_ranges', 'parent_conversation_text']);
 const BODY_LABELS_ALT = EVENT_FIELDS.filter(field => !HEADER_FIELDS.has(field)).join('|');
 
 /**
@@ -617,7 +617,7 @@ export function eventTypeFromHeader(header: unknown): string {
  *
  * @returns treść pola albo ''
  */
-function extractEventField(body: string, field: string): string {
+export function extractEventField(body: string, field: string): string {
     // New metadata is a contiguous prefix BEFORE any old event field. A literal
     // metadata label in content is never a delimiter, even in an unescaped legacy event.
     if (HEADER_FIELDS.has(field)) {

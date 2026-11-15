@@ -10,7 +10,8 @@ import { cancelMessageEdit } from './messageEdit.js';
 import { Notice, Platform } from 'obsidian';
 import { renderPhoneHistory } from './phoneHistoryScroll.js';
 import { RollingWindow } from './RollingWindow.js';
-import { IdleScheduler, sessionMessageId, ForeignSessionError } from '../../memory/index.js';
+import { IdleScheduler, sessionMessageId, ForeignSessionError, SessionRemovalConflictError, sessionRemovalContext } from '../../memory/index.js';
+import type { SessionRemovalContext } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
@@ -46,6 +47,12 @@ interface RestoredSession {
     rollingWindow: RollingWindow;
     tokenTracker: TokenTracker;
     sessionEpoch: string | null;
+}
+
+const removalContexts = new WeakMap<RollingWindow, SessionRemovalContext>();
+function rememberRemovalContext(window: RollingWindow, parsed: object): void {
+    const context = sessionRemovalContext(parsed);
+    if (context) removalContexts.set(window, context);
 }
 
 /**
@@ -285,6 +292,7 @@ async function _restoreSessions(this: ChatViewLike, notices: { paths: Set<string
                 }
 
                 const rollingWindow = this._createRollingWindow(agentName);
+                rememberRemovalContext(rollingWindow, parsed);
                 for (const msg of parsed.messages) {
                     await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
                     if (!current()) return;
@@ -319,6 +327,7 @@ async function _restoreSessions(this: ChatViewLike, notices: { paths: Set<string
             if (!parsed.messages.length && !hasHistory) return;
 
             const rollingWindow = this._createRollingWindow(activeAgentName);
+            rememberRemovalContext(rollingWindow, parsed);
             for (const msg of parsed.messages) {
                 await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
                 if (!current()) return;
@@ -430,7 +439,8 @@ export async function appendToActiveSession(this: ChatViewLike, event: ActiveSes
 
 export async function saveSendMessage(this: ChatViewLike, event: ActiveSessionEventInput, owner: FrozenTurnOwner,
     messages: Parameters<AgentMemory['saveSession']>[0], changes: Parameters<AgentMemory['saveSession']>[2]) {
-    return persistSendEvent.call(this, event, owner, { messages, changes });
+    return persistSendEvent.call(this, event, owner, { messages, changes: { ...changes,
+        removalContext: owner.rollingWindow ? removalContexts.get(owner.rollingWindow) : undefined } });
 }
 
 async function persistSendEvent(this: ChatViewLike, event: ActiveSessionEventInput, owner?: FrozenTurnOwner,
@@ -656,6 +666,7 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
             const removed = [...(rw.removedMessageIds ?? [])];
             const ranges = [...(rw.removedMessageRanges ?? [])];
             const savedPath = await (writer ?? memory).saveSession(rw.messages, metadata, { removedMessageIds: removed, removedRanges: ranges,
+                removalContext: removalContexts.get(rw),
                 ...(destination ? { expectedSession: destination } : {}),
             });
             if (writer && lifecycleOwner?.adoptSavedIdentity(savedPath, writer.sessionEpoch)
@@ -676,6 +687,7 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
         }
     } catch (e) {
         log.error('Chat', 'Error saving session:', e);
+        if (e instanceof SessionRemovalConflictError) new Notice(t('chat.session.removal_conflict'));
         if (this.autosaveStatus) this.autosaveStatus.textContent = t('chat.session.autosave_failed');
     }
 }
@@ -738,6 +750,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                 }
                 if (!owner.current()) return;
                 const loadedWindow = this._createRollingWindow(owner.agentName);
+                rememberRemovalContext(loadedWindow, parsed);
                 if (choice === 'continue' || choice === 'takeover') {
                     // Pełen load
                     for (const msg of parsed.messages) {

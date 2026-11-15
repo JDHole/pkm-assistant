@@ -1944,3 +1944,58 @@ for (const broken of [false, true]) test.serial(`D7 production restore and send:
         t.deepEqual([...f.files].filter(([p]) => p.includes('/backups/')).map(([, bytes]) => bytes), [original]);
     }
 });
+
+for (const locale of ['pl', 'en'] as const) for (const legacy of [false, true])
+for (const repairedFirst of [false, true]) test.serial(`D7b production edit: ${locale}, legacy=${legacy}, earlier repair=${repairedFirst}`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f); setLocale(locale);
+    const memory = new AgentMemory({ adapter: f.adapter }, 'Tester');
+    memory._structureEnsured = true;
+    const path = memory.paths.sessionsActive + '/review.md';
+    const epoch = 'a'.repeat(32);
+    const event = (id: string, second: number) => `## 2026-11-15T12:00:0${second}.000Z — user message\n\n`
+        + (legacy ? '' : `**message_id:**\n\n${id}\n\n`) + `**content:**\n\n${id}\n\n**seq:**\n\n${second + 1}\n\n`;
+    const base = `---\nagent: Tester\nepoch: ${epoch}\n---\n\n` + event('BASE', 0);
+    const a1 = event('A1', 1), a2 = event('A2', 4), b = event('B1', 2) + event('B2', 3);
+    f.files.set(path, base + a1 + a2);
+    f.files.set(memory.paths.state, '{"active_sessions":["review.md"],"last_used":"review.md"}');
+    const agent = { name: 'Tester' };
+    Object.assign(f.view.plugin.agentManager, {
+        getAllAgents: () => [agent], getActiveAgent: () => agent, getAgent: () => agent,
+        getAgentMemory: () => memory, getActiveMemory: () => memory,
+    });
+    Object.assign(f.adapter, { stat: async () => ({ size: f.files.get(path)!.length, mtime: 1 }) });
+    await _restoreActiveSession.call(f.view as never);
+    t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['BASE', 'A1', 'A2']);
+    const raw = base + `<<<<<<< local\n${a1}${a2}=======\n${b}>>>>>>> remote\n`;
+    f.files.set(path, raw);
+    const other = new AgentMemory({ adapter: { ...f.adapter } }, 'Tester');
+    other._structureEnsured = true;
+    other.setActiveSessionIdentity(path, epoch);
+    if (repairedFirst) await other.appendToActiveSession({ type: 'user_message', content: 'NEXT', timestamp: '2026-11-15T12:00:05.000Z' });
+    startEditMessage.call(f.view as never, 1, 'A1');
+    f.view.input_area.value = 'EDIT';
+    await f.clickSend();
+    const visible = (await other.loadActiveSession(path)).messages.map(m => m.content);
+    if (legacy) {
+        t.deepEqual(visible, ['BASE', 'A1', 'B1', 'B2', 'A2', ...(repairedFirst ? ['NEXT'] : [])]);
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['BASE', 'A1', 'A2']);
+        t.is(f.view.input_area.value, 'EDIT');
+        t.deepEqual(f.modelInputs, []);
+        const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
+        t.true(texts(f.view.messages_container).includes(locale === 'pl'
+            ? 'Błąd: Rozmowa została scalona po synchronizacji. Otwórz ją ponownie i powtórz usunięcie.'
+            : 'Error: This conversation was merged after synchronization. Reopen it and repeat the removal.'));
+        // Reopening supplies a fresh positional snapshot; the same removal now succeeds.
+        await _restoreActiveSession.call(f.view as never);
+        startEditMessage.call(f.view as never, 1, 'A1');
+        f.view.input_area.value = 'RETRY';
+        await f.clickSend();
+        t.deepEqual((await other.loadActiveSession(path)).messages.map(m => m.content), ['BASE', 'RETRY', 'Odpowiedź na poprawkę A']);
+    } else {
+        t.deepEqual(visible, ['BASE', 'B1', 'B2', ...(repairedFirst ? ['NEXT'] : []), 'EDIT', 'Odpowiedź na poprawkę A']);
+        t.is(f.view.input_area.value, '');
+        t.is(f.modelInputs.length, 1);
+    }
+    t.deepEqual([...f.files].filter(([p]) => p.includes('/backups/')).map(([, bytes]) => bytes), [raw]);
+});

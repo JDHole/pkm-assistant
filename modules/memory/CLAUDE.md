@@ -1382,9 +1382,36 @@ cichy częściowy zapis, błąd odczytu kontrolnego i dwie awarie odtworzenia.
 `SESSION_BLOCK_BOUNDARY` z `activeSessionFormat.ts`, co parser (również bloki legacy
 bez poprawnego czasu). Escapowanie `## ` przez pisarza chroni treść pól.
 
-Bezpiecznik wymaga granicy bloku albo wiersza frontmattera WEWNĄTRZ konfliktu.
+Bezpiecznik szuka granicy bloku albo wiersza frontmattera WEWNĄTRZ konfliktu.
 Frontmatter jest rozpoznawany po położeniu, nie po `key: value` w treści wiadomości.
-Przykład znaczników wewnątrz pola, także w fenced code, zostaje zwykłą treścią.
+D7b zachowuje bajtowo przykład znaczników PRZED pierwszym konfliktem z nagłówkiem
+zdarzenia, jeżeli wspólna wiadomość ma jawne stabilne `message_id`, a cały przykład
+mieści się w jednym polu dowolnego tekstu:
+`content`, `result`, `args`, `prompt`, `parent_conversation_text`, `question`,
+`sub_task_history`, `tool_calls`. Dotyczy to też fenced code. Ostatnie trzy pola
+normalnie niosą JSON, ale pisarz dopuszcza również string. Etykiety pól są wspólne
+z parserem, także jego rozróżnienie metadanych nagłówka i starych delimiterów treści.
+Warunek ID jest świadomym zaostrzeniem pierwotnej propozycji D7b, opartym na
+kontrprzykładzie z `git merge-file`: bez ID i przy identycznym czasie nowego zdarzenia
+Git zostawia nagłówek oraz etykietę `content` wspólne, a rozbieżność w samym polu.
+Test porównuje ten prefiks bajtowo z wynikiem pisarza zapisującego zwykły przykład
+znaczników. Nie da się odróżnić tych historii z samych bajtów wejścia. Dlatego przy
+dalszym konflikcie strukturalnym taki hunk legacy/transkryptowy daje `unresolved`.
+Gdy wszystkie czasy są identyczne, plik może nie mieć ani jednego strukturalnego
+hunku. Dlatego również hunki zaczynające wartości pól w co najmniej dwóch różnych
+zdarzeniach bez stabilnego ID dają odmowę. Pojedynczy izolowany przykład bez ID
+zachowuje dotychczasowy kontrakt D7, także gdy wypełnia całe pole.
+Bez strukturalnej rozbieżności przykłady z poprzedzającym tekstem oraz nieznane
+bloki zachowują dotychczasowe zachowanie D7. Samych znaczników w dowolnym tekście
+nie da się zawsze odróżnić od śladów gita bez historii bazowej; nie wprowadzamy
+nowego formatu ani nie zgadujemy po nazwach gałęzi.
+Hunk w `message_id`, `seq`, `tokens` lub innym polu nietekstowym przed rozbieżnymi
+zdarzeniami oznacza `unresolved`, również przy wspólnym nagłówku z identycznym czasem.
+Od pierwszego konfliktu strukturalnego hunki są rozcinane; wyjątek zachowawczy:
+niestrukturalny hunk w kolejnym wspólnym zdarzeniu (jego nagłówek poza hunkiem)
+odmawia. Przykład zagnieżdżony w dopisku jednej strony również odmawia. Nie tworzymy
+dwóch zmienionych kopii takiej wiadomości. Po uprzednim pełnym scaleniu pliku nowy
+przykład we wspólnej części przed następną rozbieżnością jest znowu chroniony.
 Wiele bloków i diff3 rekonstruują dwie pełne strony; baza diff3 nie wchodzi do wyniku.
 Zagnieżdżony lub niekompletny konflikt struktury daje `unresolved`. Trzy urządzenia
 można scalić kolejno po rozwiązaniu poprzedniego konfliktu; nie rozwijamy drzewa
@@ -1411,6 +1438,33 @@ z kontrolnym blokiem odwołującym się do `legacy:N` lub niepustym `removed_ran
 przeplatanie mogłoby zmienić cel albo objąć wiadomości drugiej strony. Nie zmieniamy
 ID ani seq w surowych blokach. Resolver epoki musi zgadzać się na obu stronach i po
 sortowaniu, również gdy epoka pochodzi z eventu zamiast frontmattera.
+
+D7b chroni również usunięcia oczekujące w starym oknie. `sessionRemovals.ts`
+porównuje zakresy z widocznymi ID z aktualnego odczytu w kolejce `saveSession`.
+Jeżeli zakres objąłby ID spoza jawnej listy usuwanej przez okno, zapisuje tylko
+listę ID i usuwa ten zakres. Zdrowy zakres zachowuje bajty i dotychczasowe I/O.
+Decyduje treść, więc działa to również po naprawie wykonanej wcześniej przez inny
+adapter. Dla `legacy:N` potrzebny jest dowód, że odczytany przez okno event-log
+nadal jest dokładnym prefiksem bieżącego logu (frontmatter pomijamy, dopiski na
+końcu są dozwolone). `loadActiveSession` rejestruje źródło w WeakMap dla wyniku
+i jego tablicy wiadomości; `sessionRemovalContext` przekazuje ślad do okna/pisarza.
+Nie ma dodatkowego skanowania zdrowej treści ani nowych pól danych użytkownika.
+Bez dowodu lub bez jawnych ID usunięcie rzuca `SessionRemovalConflictError` przed
+zapisaniem usunięcia/ogona; wcześniejsza naprawa z kopią może już pozostać na dysku.
+Ślad jest wyłącznie w RAM i nie trafia do modelu ani loga. Zmiana wcześniejszych
+bajtów logu może odmówić nawet semantycznie bezpiecznej operacji legacy: użytkownik
+ponownie otwiera rozmowę zamiast ryzykować usunięcie innej wiadomości.
+
+`loadActiveSession` używa jednego wyniku `mergeSessionConflict` do parsowania,
+unieważnienia cache i ustalenia własności. Bez `<<<<<<<` analiza nadal kończy się
+na sprawdzeniu obecności tego ciągu, a rejestracja śladu odczytu ma stały koszt.
+
+Testy D7b w `sessionConflict.review.test.ts`: zachowanie surowych pól i kopii,
+odmowa dla metadanych oraz niejednoznacznych przykładów, 72 rzeczywiste wywołania
+`git merge-file` (normal/diff3/zdiff3, 0/1, 1/3, 3/3 tur, narzędzia, remisy czasu),
+także zdarzenia legacy bez ID i dowód identycznych bajtów prefiksu różnych historii,
+usunięcia na osobnych adapterach nad wspólnym dyskiem przed/po wcześniejszej naprawie,
+odmowa legacy, dokładne bajty zdarzenia i I/O zdrowego usunięcia.
 
 Czytelnicy: `loadActiveSession`, `_parseActiveSessionFile`, lista sesji i restore;
 `SaveSessionWorkflow` czyta przez `loadActiveSession`, a archiwizacja używa tekstu

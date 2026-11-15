@@ -11,6 +11,7 @@ export const en: Record<string, string> = {
   "modal.takeover_session.description": "This conversation is active on another device. Take it over only when that device is no longer using it and has synced. The safer option is to archive it there and open it here from the archive.",
   "modal.takeover_session.confirm": "Take over conversation",
   "chat.session.sync_conflict": "This conversation has a synchronization conflict that could not be merged automatically. Saving is blocked. The original or its backup has been preserved.",
+  "chat.session.removal_conflict": "This conversation was merged after synchronization. Reopen it and repeat the removal.",
   "chat.state_corrupt": "The state file for agent {{agent}} is corrupted after synchronization and could not be repaired. The conversation was not saved.",
   "diagnostics.custom_identifier": "Custom identifier",
   "diagnostics.local_error": "Class: {{name}}; code: {{code}}",

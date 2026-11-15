@@ -2464,3 +2464,37 @@ Sprawdzają literalne teksty, pojedyncze powiadomienie, brak zmian źródła na 
 kopię 1:1 po turze, zerową liczbę znaczników, odmowę modelu i zachowany szkic.
 Warstwa Notice i MarkdownRenderer jest zastąpiona portem/atrapą hosta; układ i zachowanie
 prawdziwego telefonu oraz synchronizacja GitSync/obsidian-git wymagają próby na urządzeniach.
+
+### M2 D7b - stare okno i oczekujące usunięcie
+
+Restore (lista/fallback) i pełne otwarcie przechowują w WeakMap okna ślad odczytu
+z memory (`sessionRemovalContext`). `saveSendMessage` przekazuje ślad zamrożonego
+okna, `handleSaveSession` ślad zapisywanego okna. To dane tylko w RAM, bez zmian
+formatu vaulta i bez dodatkowych odczytów. Memory usuwa zakres obejmujący obce ID,
+pozostawiając jawną listę usuwanych ID; przy niepewnej tożsamości `legacy:N` odmawia
+przez publiczny `SessionRemovalConflictError`. Zawartość pliku decyduje także wtedy,
+gdy naprawę wcześniej wykonał dopisek innego pisarza. Zdrowy zakres zostaje zakresem.
+
+`safeErrorText` mapuje odmowę na `chat.session.removal_conflict` PL/EN. Bramka wysyłki
+zachowuje szkic i dotychczasowe wiadomości, nie uruchamia modelu. Autosave pokazuje
+Notice i nie potwierdza kolejki usunięć. Ponowne otwarcie daje nowy ślad i pozwala
+powtórzyć świadome usunięcie. Naprawiony plik może pozostać na dysku mimo odmowy
+usunięcia; nie cofamy bezpiecznej naprawy. Ślad legacy wymaga dokładnego prefiksu
+event-logu, więc zmiana dawnych bajtów może wymagać otwarcia nawet bez zmiany sensu.
+
+Literalny przykład znaczników jest zachowany przez memory wyłącznie w jednym
+polu tekstowym wspólnej wiadomości z jawnym ID przed pierwszym konfliktem strukturalnym.
+Bez ID identyczne czasy nowych zdarzeń mogą dać bajtowo ten sam prefiks co przykład
+(dowód przez prawdziwy `git merge-file` w testach memory), dlatego następuje odmowa.
+To zachowawcze zaostrzenie reguły D7b. Bez strukturalnej rozbieżności odmowa obejmuje
+także hunki zaczynające wartości pól w co najmniej dwóch różnych zdarzeniach bez ID
+(wszystkie czasy mogą być identyczne). Pojedynczy izolowany przykład oraz przykłady
+z poprzedzającym tekstem zachowują wtedy dotychczasową semantykę D7.
+Zagnieżdżony przykład
+na jednej stronie oraz przykład we wspólnym zdarzeniu po wcześniejszym hunku
+strukturalnym w tym samym wejściu dają odmowę, nie zmienioną wiadomość.
+
+Osiem testów D7b w `chat_streaming.sendTab.test.ts` wykonuje produkcyjne restore,
+edycję i kliknięcie wysyłki: PL/EN, jawne/legacy ID, naprawa teraz/wcześniej przez
+osobny adapter. Sprawdzają tekst komunikatu, zachowane obce wiadomości, szkic i okno,
+brak wywołania modelu przy odmowie oraz skuteczną ponowną edycję po otwarciu.

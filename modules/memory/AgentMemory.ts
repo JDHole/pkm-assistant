@@ -1,4 +1,6 @@
 import { mergeSessionConflict, readConflictAwareSession, SessionConflictError } from './sessionConflict.js';
+import { rememberSessionRead, sessionRemovalContext, safeRemovalRanges } from './sessionRemovals.js';
+import type { SessionRemovalContext } from './sessionRemovals.js';
 import type { ConflictAwareSession } from './sessionConflict.js';
 import { ForeignSessionError, readSessionDevice, ownershipOfSessionDevice, sessionOwnershipFromText } from './sessionOwnership.js';
 import { SessionHeaderWriteError, SessionSourceChangedError, writeSessionHeader } from './sessionHeaderWrite.js';
@@ -336,6 +338,7 @@ export interface BrainLogEntry {
 }
 
 type SessionChanges = {
+    removalContext?: SessionRemovalContext;
     removedMessageIds?: readonly string[];
     removedRanges?: readonly { from: string; to: string }[];
     expectedSession?: { path: string; epoch: string | null };
@@ -883,9 +886,14 @@ export class AgentMemory {
         }
 
         const content = await this.vault.adapter.read(path);
-        if (mergeSessionConflict(content).kind !== 'not-applicable') this._invalidateSessionWriterCache(path);
-        const parsed = this._parseActiveSessionFile(content);
-        return this.deviceId ? { ...parsed, ownership: this.getSessionOwnership(content) } : parsed;
+        const conflict = mergeSessionConflict(content);
+        if (conflict.kind !== 'not-applicable') this._invalidateSessionWriterCache(path);
+        const effective = conflict.kind === 'merged' ? conflict.text : content;
+        const parsed: ConflictAwareSession = parseActiveSession(effective);
+        if (conflict.kind === 'unresolved') parsed.conflict = 'unresolved';
+        const result = this.deviceId ? { ...parsed, ownership: sessionOwnershipFromText(effective, this.deviceId) } : parsed;
+        rememberSessionRead(result, parsed.messages, effective);
+        return result;
     }
 
     /**
@@ -1620,6 +1628,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
      * @returns Path to saved session
      */
     async saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata = {}, changes: SessionChanges = {}): Promise<string> {
+        if (!changes.removalContext && messages) changes = { ...changes, removalContext: sessionRemovalContext(messages) };
         const path = changes.expectedSession?.path ?? this.activeSessionPath;
         if (!path || (!changes.removedMessageIds?.length && !changes.removedRanges?.length)) {
             return this._saveSession(messages, metadata, changes);
@@ -1628,7 +1637,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
         // Only identical snapshots share a promise; subsequent edits still enter the path queue.
         const key = JSON.stringify([path, changes.expectedSession ? changes.expectedSession.epoch : this.sessionEpoch,
             (messages ?? []).map(message => [knownSessionMessageId(message), message]),
-            changes.removedMessageIds, changes.removedRanges]);
+            changes.removedMessageIds, changes.removedRanges, changes.removalContext]);
         const pending = this._removalSavesInFlight.get(key);
         if (pending) return pending;
         const save = this._saveSession(messages, metadata, changes).finally(() => {
@@ -1641,7 +1650,8 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
     private async _saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata, changes: SessionChanges): Promise<string> {
         const list: ChatMessageLike[] = Array.isArray(messages) ? [...messages] : [];
         const removed = new Set(changes.removedMessageIds);
-        const removedRanges = changes.removedRanges?.map(range => ({ ...range })) ?? [];
+        let removedRanges = changes.removedRanges?.map(range => ({ ...range })) ?? [];
+        const removalContext = changes.removalContext;
         // Reuse existing session file if already saved (prevents duplicates)
         let path: string;
         const isNewFile = !changes.expectedSession && !this.activeSessionPath;
@@ -1699,6 +1709,9 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
             }
 
             const parsedMessages = parsed.messages;
+            if (removed.size || removedRanges.length) {
+                removedRanges = safeRemovalRanges(existing, parsedMessages.map(sessionMessageId), removed, removedRanges, removalContext);
+            }
             const knownIds = new Set(parsedMessages.map(sessionMessageId));
             const known = parsedMessages.filter(msg => !removed.has(sessionMessageId(msg))).length;
             // Baza ogona: większa z „ile widać w pliku" i „ile już dopisaliśmy w tym biegu"

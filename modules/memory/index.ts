@@ -247,3 +247,5 @@ export type { MemorySettingsCtx, MemoryPkmSlice } from './SettingsContent.js';
 export { sessionMessageId, bindSessionMessageId } from './sessionMessageIdentity.js';
 
 export { SessionConflictError } from './sessionConflict.js';
+export { SessionRemovalConflictError, sessionRemovalContext } from './sessionRemovals.js';
+export type { SessionRemovalContext } from './sessionRemovals.js';
