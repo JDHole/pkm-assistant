@@ -1855,3 +1855,32 @@ for (const locale of ['pl', 'en'] as const) test.serial(`D2: synced takeover rej
     t.deepEqual((await f.memory.loadActiveSession(path)).messages.map(m => m.content),
         ['Pytanie A', 'Odpowiedź A', 'Mój szkic', 'Odpowiedź na poprawkę A']);
 });
+
+for (const locale of ['pl', 'en'] as const) test.serial(`D2c: failed adoption restoration keeps backup, rejects send and restores draft (${locale})`, async t => {
+    const f = await fixture(false, ['A', 'B'], parseDeviceId('aaaaaaaaaaaaaaaa'));
+    disposeFixture(t, f); setLocale(locale);
+    const path = f.tabs[0].sessionPath;
+    const original = f.files.get(path)!;
+    const write = f.adapter.write;
+    let attempts = 0;
+    f.adapter.write = async (target, content) => {
+        if (target === path) {
+            attempts++;
+            await write(target, new TextDecoder().decode(new TextEncoder().encode(content).slice(0, 20)));
+            throw new Error('partial write');
+        }
+        await write(target, content);
+    };
+    f.view.input_area.value = 'Mój szkic';
+    await f.clickSend();
+    const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
+    t.true(texts(f.view.messages_container).includes(locale === 'pl' ? 'Błąd: Zapis nieudany' : 'Error: Save failed'));
+    t.is(f.view.input_area.value, 'Mój szkic');
+    t.deepEqual(f.modelInputs, []);
+    t.deepEqual(f.windows[0].messages.map(m => m.content), ['Pytanie A', 'Odpowiedź A']);
+    t.is(attempts, 2);
+    t.is(f.files.get(path), '---\nagent: Mira\nepoc');
+    const backups = [...f.files].filter(([p]) => p.startsWith('.pkm-assistant/backups/session-mira-A-'));
+    t.is(backups.length, 1);
+    t.is(backups[0][1], original);
+});

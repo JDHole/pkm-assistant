@@ -770,7 +770,7 @@ Flow:
   tylko `log.warn` + pomijają TEN wpis, kontrakt "nigdy nie rzuca" zostaje.
 - ⚠️ **`appendToActiveSession` dokleja ogon, nie przepisuje pliku.** Pisze przez
   `_appendSessionFile` (`adapter.append`), a pełny odczyt płaci się RAZ na ścieżkę
-  (bez id; z id D2b dodatkowo po zmianie metadanych lub przy braku wiarygodnego `stat`).
+  (bez id; z id dodatkowo po zmianie metadanych, przy braku wiarygodnego `stat` oraz co 20 ciepłych zdarzeń).
   Cache (`_sessionSeqCache`/`_sessionEndsWithNewline`, inicjalizowane na pierwszym zdarzeniu sesji
   albo pierwszym po restarcie Obsidiana) unika czytania każdego zdarzenia - naiwny read+write całego
   pliku na każde zdarzenie tury jest kwadratowy względem długości sesji i przy każdym zapisie to
@@ -779,9 +779,10 @@ Flow:
   działają w granicach jednego, kompletnego bloku zdarzenia, nigdy w poprzek dwóch osobnych
   zapisów. Adapter bez natywnego `append` dostaje fallback przez `readIfExists` (nie goły
   `exists()+read()`). Dla `session_epoch` fallback jest zabroniony: wymagany natywny append.
-  - D2b z id jednorazowo przepisuje nagłówek przy pierwszej wiadomości bez właściciela;
-    body pozostaje nietknięte. Poniższy okresowy `exists` dotyczy ścieżki bez id,
-    z id zastępuje go `stat` przed dopiskiem.
+  - Z id adopcja przy pierwszej wiadomości bez właściciela przepisuje nagłówek po
+    zweryfikowaniu kopii oryginału; body pozostaje nietknięte. Poniższy okresowy
+    `exists` dotyczy ścieżki bez id. Z id przed dopiskiem jest `stat`, a co 20
+    ciepłych zdarzeń dodatkowo pełny odczyt niezależnie od metadanych (D2c).
   - **Plik skasowany Z ZEWNĄTRZ między zdarzeniami, na ciepłym cache, jest realnym ryzykiem** -
     natywny `adapter.append` na brakującym pliku wg wielu implementacji nie rzuca, tylko cicho
     zakłada plik OD NOWA (jak `fs` z flagą `a`), więc bez dodatkowej ochrony taki plik wracał
@@ -836,7 +837,8 @@ Flow:
   okresowej weryfikacji z odczytanego tekstu, nawet na ciepłym cache. Ensure robi to także
   po readbacku. Błąd dopisku/ensure unieważnia te trzy cache, zachowując licznik autosave
   `_sessionSavedCounts`. Bez id ciepły `appendToActiveSession` nadal nie czyta treści.
-  Z id od D2b jeden `stat` wykrywa zmianę rozmiaru/mtime i wymusza odczyt,
+  Z id jeden `stat` wykrywa zmianę rozmiaru/mtime i wymusza odczyt; od D2c także
+  co 20 ciepłych zdarzeń pełny odczyt wymusza
   odświeżenie seq/newline oraz sprawdzenie własności przed dopiskiem (szczegóły niżej).
   Event epoki zawsze zaczyna się dodatkowym newline, także przy ciepłym cache.
 - ⚠️ **Znacznikiem pokrycia na szczeblach L1→L2 i L2→L3 jest PLIK NADRZĘDNY, nie stempel w
@@ -877,8 +879,9 @@ Flow:
   narzędzia - maska zmienia ZAPIS rozmowy, nie jej przebieg. Zakres jest świadomie wąski:
   `brain*`, `summaries/L1..L3` i `.state.json` mają własnych pisarzy i przez ten writer nie
   przechodzą. `maskSensitiveData` jest idempotentna, więc wielokrotne przepisywanie tego samego
-  pliku niczego nie psuje. Wyjątek D2/D2b: jawne przejęcie i pierwsza adopcja zmieniają tylko zwalidowany `device`
-  w nagłówku, bez ponownego maskowania zastanej treści (kontrakt zachowania bajtów zdarzeń).
+  pliku niczego nie psuje. Wyjątek D2/D2c: jawne przejęcie i pierwsza adopcja zmieniają nagłówek
+  (`device`, przy przejęciu także `taken_over`), bez ponownego maskowania zastanej treści
+  (kontrakt zachowania bajtów zdarzeń). Kopia ratunkowa zachowuje surowy oryginał 1:1.
 
 ---
 
@@ -1247,7 +1250,7 @@ błędu, jeden świeży odczyt, nietknięte bajty źródła, zero zapisów źró
 Istniejące testy D1b nadal sprawdzają sukces mutacji na świeżym poprawnym obiekcie.
 
 
-## Mobile M2 D2/D2b - własność aktywnej rozmowy
+## Mobile M2 D2/D2b/D2c - własność aktywnej rozmowy
 
 `src/main.ts` przed budową `AgentManager` odczytuje raz identyfikator z publicznego
 `app.loadLocalStorage('pkm-assistant.device-id')`; brak/zła wartość oznacza wygenerowanie
@@ -1264,13 +1267,14 @@ reguły przez `sessionOwnershipFromText` / `ownershipOfSessionDevice`. Stany to
 `mine`, `foreign`, `unowned`, `ambiguous`. Duplikat `device`, znaczniki konfliktu
 w nagłówku lub niezamknięty nagłówek dają `ambiguous`; zapis i przejęcie odmawiają.
 Pojedyncze obecne, lecz niepoprawne pole jest `foreign`. Brak pola albo lokalnego
-id to `unowned`. BOM/CRLF są obsługiwane. Archiwum pozostaje wspólne, bez `device`.
+id to `unowned`. BOM/CRLF są obsługiwane. Archiwum pozostaje wspólne, bez `device` i `taken_over`.
 
 Odczyt/restore nie adoptuje pliku. PIERWSZE dopisanie wiadomości do sesji z poprawnym
 frontmatterem bez `device` adoptuje ją pod tą samą kolejką ścieżki: jednorazowy zapis
 nagłówka, potem zwykły append. Istniejące body (również nieznane bloki i sekrety)
 pozostaje bajt w bajt, bez ponownego maskowania. Druga wiadomość nie przepisuje
-nagłówka. `saveSession` adoptuje również przy zapisie brakującego ogona wiadomości.
+nagłówka po udanej adopcji. `saveSession` adoptuje również przy zapisie brakującego ogona wiadomości.
+Pełny zapis metadanych przez `saveSession` pozostaje bez zmian i ma tę samą klasę ryzyka częściowego zapisu co przed D2.
 Plik bez frontmattera pozostaje bezgłowy przy appendzie. Migracja P3 jest nadal
 append-only: event `session_epoch` NIE adoptuje i nie zmienia starych bajtów.
 Adopcja jest osobną operacją, nie wyjątkiem od kontraktu migracji epoki.
@@ -1287,7 +1291,9 @@ UTF-8 (po maskowaniu nowych bajtów) ORAZ `mtime`: rozmiar wykrywa dopisek takż
 przy niezmienionym czasie, czas wykrywa zamianę identyfikatora tej samej długości.
 Natywny `append` otrzymuje publiczne `DataWriteOptions.mtime`; dzięki temu znany
 jest oczekiwany czas własnego zapisu bez drugiego `stat`. Niezmieniony ciepły plik:
-jeden `stat`, zero odczytów treści. Zmiana wymusza odczyt i odświeżenie właściciela,
+jeden `stat` na zdarzenie i pełny odczyt co `APPEND_VERIFY_EVERY_N` (=20) ciepłych
+zdarzeń, niezależnie od wyniku `stat`. Cudza albo niejednoznaczna własność odmawia
+przed dopiskiem. Zmiana metadanych wymusza wcześniejszy odczyt i odświeżenie właściciela,
 seq oraz newline przed appendem. Brak `stat`, wyjątek, brak pełnych metadanych lub
 adapter ignorujący/zaokrąglający przekazany czas powoduje świeży odczyt. Zdrowa
 własna sesja nadal działa; błąd odczytu blokuje zapis. Przy `null` nadal zero `stat`
@@ -1295,12 +1301,32 @@ i dotychczasowe okresowe `exists`. Pełny zapis unieważnia cache pisarza dla id
 
 `takeOverActiveSession(path)` wymaga id, pliku bezpośrednio w `sessions/active/`
 tego agenta i jednoznacznego nagłówka. Pod kolejką zmienia tylko nagłówek, zachowuje
-body bajt w bajt i odświeża cache. Nie naprawia danych; nie nadpisujemy odrzuconego
-pliku i nie potrzeba kopii ratunkowej. Naprawa splecionych plików z kopią należy do D7.
+body bajt w bajt i odświeża cache. Dodaje `taken_over: <ISO>`, a przy kolejnych
+przejęciach dopisuje `,<ISO>` do wartości. Zachowuje BOM/CRLF i szerokość zapisu
+identyfikatora, więc także A -> B -> A -> B przy stałym `mtime` zwiększa rozmiar
+po każdym przejęciu; stary ciepły pisarz odmawia już pierwszego dopisku. Starszy
+czytnik ignoruje nieznane pole (parser `activeSessionFormat.ts` identyczny z 558d888).
+Naprawa splecionych plików pozostaje zakresem D7.
+
+Adopcja i przejęcie używają `sessionHeaderWrite.ts`: przed przepisaniem kopia 1:1
+w `.pkm-assistant/backups/session-<agent>-<nazwa bez .md>-<czas>[-<sufiks>].md.bak`,
+wybór wolnej nazwy przez `probeFile` i odczyt kontrolny. Ten sam wzorzec co D1/settingsArmor,
+bez rotacji i bez usuwania kopii po sukcesie. Tuż przed zapisem sprawdzamy również,
+czy źródło nadal równa się oryginałowi. Brak pewnej kopii oznacza brak próby przepisania.
+Po zapisie nagłówka wymagany odczyt równy oczekiwanej treści. Wyjątek lub rozbieżność
+powodują jedną próbę `write` oryginału + odczyt kontrolny. Gdy kopia zawiodła albo
+odtworzenie się udało, adopcja loguje jeden `warn` i dopisuje wiadomość zwykłym appendem
+do nadal niczyjej sesji; następna wiadomość ponawia adopcję. Przejęcie w tych sytuacjach
+odmawia (nie deklaruje zmiany właściciela). Nieudane odtworzenie rzuca
+`SessionHeaderWriteError`, blokuje append i loguje `error` ze ścieżką zachowanej kopii,
+bez treści pliku. Dotychczasowa obsługa wysyłki przywraca szkic, a komunikat korzysta
+z istniejącego klucza PL/EN `chat.session.autosave_failed`.
 
 To nie jest blokada między urządzeniami: starszy plugin i skrypty mogą nadal pisać.
-Zmiana zachowująca jednocześnie rozmiar i dokładnie ten sam `mtime` jest niewidoczna
-dla `stat`; pozostaje też wyścig między sprawdzeniem a zapisem. Rzeczywiste zachowanie
+Zmiana w starym formacie zachowująca rozmiar i dokładnie ten sam `mtime` jest
+niewidoczna dla `stat`, ale okresowy odczyt ogranicza okno do najwyżej 19 dopisków
+po przejęciu (zwykle zero dzięki metadanym). Pozostaje wyścig między sprawdzeniem
+a zapisem/odtworzeniem: adapter nie oferuje atomowego porównania i zapisu. Rzeczywiste zachowanie
 mtime/rozdzielczość na Capacitorze i desktopie wymaga próby na urządzeniach.
 
 `sessionOwnership.test.ts` sprawdza odmowy, przejęcie, restore, adopcję/P3, stary
@@ -1311,3 +1337,11 @@ dla id te same read/write/exists/append oraz dodatkowy stat na dopisek.
 pierwszy dopisek po przejęciu, zewnętrzny własny dopisek bez newline, UTF-8 i koszt
 ciepłego zapisu, brak/błąd/niewiarygodny stat, odmowy wszystkich pisarzy dla konfliktów
 i duplikatów oraz natychmiastowa adopcja z zachowaniem opaque body i wyjątkiem bezgłowym.
+
+D2c w `sessionOwnership.review.test.ts`: 40 dopisków z id i bez id (bajty i liczniki),
+kolizje rozmiaru/mtime dla cudzej i niejednoznacznej własności (odmowa zdarzenia 20),
+A -> B -> A -> B, archiwum bez pola, BOM/CRLF i szerokie identyfikatory oraz macierz
+adopcja/przejęcie: sukces, brak/błędna kopia, wyjątek po 20 bajtach, cichy częściowy
+zapis, błąd odczytu kontrolnego i dwie awarie odtworzenia. Sprawdza kopie, jedną próbę
+odtworzenia, logi bez treści, brak appendu do uszkodzenia i ponowienie adopcji bez
+nadpisania wcześniejszej kopii. Bazowy fixture bez id pozostaje nietknięty.

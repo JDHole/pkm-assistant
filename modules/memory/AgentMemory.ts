@@ -1,4 +1,5 @@
 import { ForeignSessionError, readSessionDevice, ownershipOfSessionDevice, sessionOwnershipFromText } from './sessionOwnership.js';
+import { SessionHeaderWriteError, writeSessionHeader } from './sessionHeaderWrite.js';
 import type { DeviceId, SessionOwnership, SessionDevice } from './sessionOwnership.js';
 import { knownSessionMessageId, sessionMessageId } from './sessionMessageIdentity.js';
 /**
@@ -136,7 +137,8 @@ function _nullishToString(value: unknown): string {
 class SessionFileMissingError extends Error {}
 
 /**
- * Ile appendów na CIEPŁYM cache mija między jednym tanim `exists()`. Natywny `adapter.append`
+ * Z id: co N ciepłych dopisków pełny odczyt własności niezależnie od stat (max N-1
+ * dopisków po niewidocznej zmianie właściciela). Bez id: odstęp między tanimi `exists()`. Natywny `adapter.append`
  * na brakującym pliku zwykle NIE rzuca — po prostu tworzy plik od nowa (jak `fs` z flagą `a`),
  * więc zewnętrzne skasowanie sesji między zdarzeniami zostałoby wykryte tylko przez ten
  * periodyczny, metadanowy `exists()` (bez odczytu treści — O(1) względem rozmiaru pliku,
@@ -722,8 +724,28 @@ export class AgentMemory {
             }
             // The inserted id is already validated. Existing header and event data must not
             // be remasked during takeover (opaque user data, no new event payload).
-            const output = this._setFrontmatterField(header, 'device', deviceId) + content.slice(header.length);
-            await this.vault.adapter.write(path, output);
+            // Preserve header line endings too: normalization could shrink a large CRLF
+            // header and cancel out the size increase used by other devices' stat checks.
+            const newline = header.includes('\r\n') ? '\r\n' : '\n';
+            const insert = (text: string, line: string) => text.replace(/\r?\n---(\r?\n|$)$/, match => newline + line + match);
+            let nextHeader = device === undefined ? insert(header, `device: ${deviceId}`)
+                : header.replace(/^device:[^\r\n]*/m, line => line.includes(device)
+                    ? line.replace(device, deviceId)
+                    // Escaped JSON ids may be longer than 16 bytes. Keep their byte width.
+                    : `device: ${deviceId}`.padEnd(new TextEncoder().encode(line).length));
+            const stamp = new Date().toISOString();
+            nextHeader = /^taken_over:/m.test(nextHeader)
+                ? nextHeader.replace(/^taken_over:[^\r\n]*/m, line => `${line},${stamp}`)
+                : insert(nextHeader, `taken_over: ${stamp}`);
+            const output = nextHeader + content.slice(header.length);
+            try {
+                if (!await writeSessionHeader(this.vault.adapter, this.safeName, path, content, output)) {
+                    throw new SessionHeaderWriteError();
+                }
+            } catch (error) {
+                this._invalidateSessionWriterCache(path);
+                throw error;
+            }
             this._refreshSessionWriterState(path, output);
             this._sessionSavedCounts.delete(path);
         });
@@ -733,7 +755,7 @@ export class AgentMemory {
         const header = content.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0];
         if (!header) return content;
         // Remove only the marker line, never neighboring unknown metadata.
-        return header.replace(/^[ \t]*device[ \t]*:[^\r\n]*\r?\n/gm, '') + content.slice(header.length);
+        return header.replace(/^[ \t]*(?:device|taken_over)[ \t]*:[^\r\n]*\r?\n/gm, '') + content.slice(header.length);
     }
 
     /**
@@ -1204,12 +1226,14 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 // 1,1 MB). Odczyt CAŁOŚCI inicjalizuje numerację i stan końcowego newline
                 // przy zimnym cache. Z id D2b wymusza go też po zmianie metadanych albo
                 // przy ich braku, aby sprawdzić właściciela i odświeżyć cache. Niezmieniony
-                // ciepły plik przy wiarygodnym stat wymaga tylko dopisania nowego bloku.
+                // ciepły plik przy wiarygodnym stat czytamy też co N zdarzeń (własność).
                 let input: ObservedWriterInput = { kind: 'cached' };
                 // A repaired target is cold and read below; do not charge a second stat.
                 const changed = this.deviceId && attemptsLeft > 0 ? await this._deviceWriterChanged(path) : false;
+                const verifyDevice = this.deviceId !== null
+                    && (this._appendsSinceVerify.get(path) || 0) + 1 >= APPEND_VERIFY_EVERY_N;
                 const cacheWasCold = !this._sessionSeqCache.has(path) || !this._sessionEndsWithNewline.has(path)
-                    || (this.deviceId !== null && (!this._sessionDevices.has(path) || changed));
+                    || (this.deviceId !== null && (!this._sessionDevices.has(path) || changed || verifyDevice));
                 let pathIsDead = false;
 
                 if (cacheWasCold) {
@@ -1225,12 +1249,12 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                     } else {
                         input = { kind: 'observed', content: probe.content };
                     }
-                } else if (!this.deviceId) {
+                } else {
                     // Ciepły cache ufa, że plik żyje, bez czytania go na każde
                     // zdarzenie — ale natywny `adapter.append` na brakującym pliku zwykle NIE
                     // rzuca (po prostu go zakłada od nowa, jak `fs` z flagą `a`), więc zewnętrzne
                     // skasowanie sesji MIĘDZY zdarzeniami byłoby inaczej niewidoczne. Co
-                    // `APPEND_VERIFY_EVERY_N` zdarzeń płacimy JEDEN tani `exists()` (metadane,
+                    // `APPEND_VERIFY_EVERY_N` zdarzeń BEZ ID płacimy JEDEN tani `exists()` (metadane,
                     // bez odczytu treści — O(1) względem rozmiaru pliku, nie O(n) jak `read()`).
                     const seen = (this._appendsSinceVerify.get(path) || 0) + 1;
                     if (seen >= APPEND_VERIFY_EVERY_N) {
@@ -1290,8 +1314,9 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 const fresh = this._sessionDevices.get(path);
                 if (fresh?.kind === 'marker' && fresh.device === undefined && fresh.header) {
                     const output = this._setFrontmatterField(fresh.header, 'device', this.deviceId) + content.slice(fresh.header.length);
-                    await this.vault.adapter.write(path, output);
-                    this._refreshSessionWriterState(path, output);
+                    if (await writeSessionHeader(this.vault.adapter, this.safeName, path, content, output)) {
+                        this._refreshSessionWriterState(path, output);
+                    }
                 }
             }
             const seq = this._nextSeq(path, '');
@@ -1407,7 +1432,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 // tablica rozjechałaby YAML.
                 const meta: TranscriptMetadata = {};
                 for (const [key, value] of Object.entries(parsed.metadata || {})) {
-                    if (key === 'device' || value === null || typeof value === 'object') continue;
+                    if (key === 'device' || key === 'taken_over' || value === null || typeof value === 'object') continue;
                     meta[key] = value;
                 }
                 meta.updated = now;

@@ -2385,7 +2385,7 @@ Adaptery częściowego widoku w `chat_streaming.sendTab.test.ts`, `chatViewClose
 oraz jego początkowy stan, ponieważ omijają konstruktor.
 
 
-## Mobile M2 D2/D2b - cudza rozmowa i jawne przejęcie
+## Mobile M2 D2/D2b/D2c - cudza rozmowa i jawne przejęcie
 
 Restore pomija `foreign` i `ambiguous` przed ładowaniem okna i historii subów;
 po odczycie ponownie sprawdza własność. Sprzątanie pustego wpisu przy id wymaga
@@ -2403,9 +2403,10 @@ z ponowną kontrolą własności i otwiera historię z właściwą ścieżką/ep
 Kontrole lifecycle chronią uchwyconą zakładkę podczas I/O. Przy przejmowaniu sesji
 już otwartej pomijamy autozapis starego snapshotu. Archiwum zachowuje swój czytnik.
 
-Publiczne `openProfileSession` przez barrel czatu oczekuje utworzenia widoku
-(`setViewState`), ujawnia go przez `openChatView`, wybiera agenta
-i kieruje do `handleLoadSession`. Wywołuje je przycisk przy cudzej aktywnej sesji
+Publiczne `openProfileSession` przez barrel czatu najpierw oczekuje
+`plugin.openChatView()` (ta sama ścieżka co komenda otwarcia czatu, oczekuje
+`setViewState` i bez prawego liścia korzysta z `getLeaf('tab')`). Dopiero potem
+wyszukuje gotowy widok, wybiera agenta i kieruje do `handleLoadSession`. Wywołuje je przycisk przy cudzej aktywnej sesji
 w Profilu agenta, zakładka Persona (tam jest ta lista; Pamięć/Sesje to archiwum).
 To miejsce wskazuje komunikat PL/EN.
 
@@ -2422,3 +2423,12 @@ oraz EACCES; BOM i pełne wejście profil -> modal -> anuluj/przejmij -> czat.
 `chat_streaming.sendTab.test.ts` sprawdza odmowę wysyłki po przejęciu, komunikat,
 szkic oraz udaną wysyłkę po przejęciu z powrotem. Testy używają oddzielnych adapterów
 urządzeń nad wspólnymi plikami. Cele dotykowe są deklaracją CSS, nie pomiarem telefonu.
+
+D2c: produkcyjny przycisk profilu z zamkniętym czatem i `getRightLeaf(false) === null`
+jest sprawdzany przez rzeczywiste `openChatView` z `src/main.ts`: powstaje nowa karta,
+widoczny modal przejęcia, brak komunikatów błędu (PL/EN, anulowanie i przejęcie).
+Test `/clear` zatrzymuje `handleNewSession` na kontrolowanej obietnicy, wymaga
+nierozstrzygniętej komendy i po odrzuceniu sprawdza obsłużony komunikat oraz szkic;
+mutacja `await` na `void` psuje asercję oczekiwania. Test wysyłki PL/EN z częściowym
+zapisem adopcji i awarią odtworzenia sprawdza przywrócenie szkicu, brak wywołania
+modelu, zachowaną historię w kopii i brak nowej wiadomości w uszkodzonym pliku.

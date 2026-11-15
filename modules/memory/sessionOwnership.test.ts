@@ -62,6 +62,8 @@ for (const id of [null, A]) test.serial(`D2 golden from 558d888: start, three tu
 });
 
 test.serial('two devices: foreign writers refuse every mutation, explicit takeover preserves events and reverses ownership', async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-15T10:00:00.000Z') });
+    t.teardown(() => mock.timers.reset());
     const d = disk(), a = d.memory(A), b = new AgentMemory({ adapter: { ...d.adapter } }, 'Mira', {}, B);
     await a.initialize(); await b.initialize();
     const path = await a.startActiveSession();
@@ -84,8 +86,8 @@ test.serial('two devices: foreign writers refuse every mutation, explicit takeov
         t.deepEqual([d.counts.write, d.counts.append, d.counts.remove, d.counts.mkdir], [0, 0, 0, 0]);
     }
     await b.takeOverActiveSession(path);
-    t.is(d.files.get(path), before.find(([p]) => p === path)![1].replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
-    t.is(d.counts.write, 1);
+    t.is(d.files.get(path), before.find(([p]) => p === path)![1].replace('device: aaaaaaaaaaaaaaaa\n', 'device: bbbbbbbbbbbbbbbb\ntaken_over: 2026-11-15T10:00:00.000Z\n'));
+    t.is(d.counts.write, 2);
     await b.appendToActiveSession({ type: 'agent_message', content: 'Kontynuacja na B' });
     await t.throwsAsync(() => a.appendSessionEvent(path, { type: 'user_message', content: 'Spóźniona tura' }, epoch), { instanceOf: ForeignSessionError });
     t.deepEqual((await b.loadActiveSession(path)).messages.map(m => m.content), ['Moja rozmowa', 'Kontynuacja na B']);
@@ -111,7 +113,7 @@ test.serial('unowned restore is read-only; P3 appends epoch without adoption; fi
     t.is(d.counts.write, 0); t.is(d.counts.append, 1);
     await a.appendToActiveSession({ type: 'agent_message', content: 'Nowa wiadomość' });
     t.is(parseFrontmatter(d.files.get(path)!).device, 'aaaaaaaaaaaaaaaa');
-    t.is(d.counts.write, 1);
+    t.is(d.counts.write, 2);
     const messages = (await a.loadActiveSession(path)).messages;
     d.reset(); await a.saveSession(messages);
     t.is(d.counts.write, 1); t.is(d.counts.read, 1); t.is(d.counts.append, 0);
@@ -163,12 +165,14 @@ for (const mode of ['save', 'repair'] as const) test.serial(`new device header v
 });
 
 test.serial('takeover keeps opaque CRLF event bytes and history-only archive drops only ownership', async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-15T10:00:00.000Z') });
+    t.teardown(() => mock.timers.reset());
     const d = disk(), memory = d.memory(B); await memory.initialize();
     const path = `${memory.paths.sessionsActive}/opaque.md`;
     const body = '\r\n## unknown event\r\n\r\nprivate: sk-abcdefghijklmnopqrstuvwxyz0123456789\r\n<<<<<<< HEAD\r\nopaque\r\n=======\r\nother\r\n>>>>>>> cloud\r\n';
     d.files.set(path, '\uFEFF---\r\nagent: Mira\r\ndevice: aaaaaaaaaaaaaaaa\r\n---\r\n' + body);
     await memory.takeOverActiveSession(path);
-    t.is(d.files.get(path), '---\nagent: Mira\ndevice: bbbbbbbbbbbbbbbb\n---\n' + body);
+    t.is(d.files.get(path), '\uFEFF---\r\nagent: Mira\r\ndevice: bbbbbbbbbbbbbbbb\r\ntaken_over: 2026-11-15T10:00:00.000Z\r\n---\r\n' + body);
     // Archive's established masking policy remains in effect; use an ordinary opaque body here.
     d.files.set(path, '---\ndevice: bbbbbbbbbbbbbbbb\n  custom: zachowaj\n---\n\r\nOpaque history\r\n');
     const archive = await memory.archiveActiveSession(path);

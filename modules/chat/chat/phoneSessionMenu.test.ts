@@ -15,6 +15,7 @@ import type { ChatViewLike } from './chatViewShape.js';
 // Reuse the harness Menu, including its opened/close lifecycle. Only record events/notices.
 const hostSource = `
 export * from 'obsidian';
+export { default } from 'obsidian';
 import { Notice as BaseNotice, Menu as BaseMenu } from 'obsidian';
 export const notices = [], menus = [];
 export const getOpenMenus = () => BaseMenu.opened;
@@ -32,6 +33,7 @@ export async function resolve(specifier, context, next) {
     return next(specifier, context);
 }
 export async function load(url, context, next) {
+    if (url.endsWith('.md')) return { format: 'module', source: 'export default ""', shortCircuit: true };
     if (url.endsWith('.css')) return { format: 'module', source: 'export default {}', shortCircuit: true };
     return next(url, context);
 }`));
@@ -41,6 +43,7 @@ const host = await import('obsidian') as unknown as typeof import('obsidian') & 
     menus: HostMenu[]; notices: string[]; getOpenMenus(): HostMenu[];
 };
 const { ChatView } = await import('../chat_view.js');
+const { default: Plugin } = await import('../../../src/main.js');
 const { SessionCloseModal } = await import('../SessionCloseModal.js');
 const { SaveSessionModal } = await import('../SaveSessionModal.js');
 const { OpenSessionModal } = await import('../OpenSessionModal.js');
@@ -780,6 +783,8 @@ for (const entry of ['menu', 'sidebar'] as const) {
 
 for (const locale of ['pl', 'en']) for (const choice of ['cancel', 'takeover'] as const) for (const bom of [false, true])
 test.serial(`D2: real phone takeover dialog ${choice}/${locale}/BOM=${bom}`, async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-15T10:00:00.000Z') });
+    t.teardown(() => mock.timers.reset());
     const f = await fixture(t, 'phone', locale, parseDeviceId('bbbbbbbbbbbbbbbb'));
     const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('aaaaaaaaaaaaaaaa'));
     const path = await remote.saveSession([{ role: 'user', content: 'Rozmowa z laptopa' }, { role: 'assistant', content: 'Wspólny kontekst' }]);
@@ -798,7 +803,7 @@ test.serial(`D2: real phone takeover dialog ${choice}/${locale}/BOM=${bom}`, asy
         t.deepEqual([...f.files], before);
         t.deepEqual(f.view.rollingWindow.messages, []);
     } else {
-        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace(/^\uFEFF/, '').replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
+        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace('device: aaaaaaaaaaaaaaaa\n', 'device: bbbbbbbbbbbbbbbb\ntaken_over: 2026-11-15T10:00:00.000Z\n'));
         t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Rozmowa z laptopa', 'Wspólny kontekst']);
         t.is(f.view.chatTabs.find(tab => tab.isActive)?.sessionPath, path);
         t.is(f.memory.activeSessionPath, path);
@@ -838,6 +843,8 @@ test.serial('D2: production restore creates only own tab; foreign empty and none
 });
 
 test.serial('D2: taking back an already open foreign tab discards its stale RAM snapshot without appending it', async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-15T10:00:00.000Z') });
+    t.teardown(() => mock.timers.reset());
     const f = await fixture(t, 'phone', 'en', parseDeviceId('bbbbbbbbbbbbbbbb'));
     const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('aaaaaaaaaaaaaaaa'));
     const path = await remote.saveSession([{ role: 'user', content: 'Aktualna rozmowa laptopa' }]);
@@ -850,7 +857,7 @@ test.serial('D2: taking back an already open foreign tab discards its stale RAM 
     const modal = await until(() => f.opened.find((m): m is InstanceType<typeof OpenSessionModal> => m instanceof OpenSessionModal));
     descendants(modal.contentEl).find(el => el.tagName.toLowerCase() === 'button' && el.textContent === 'Take over conversation')!.dispatchEvent(new Event('click'));
     await opening;
-    t.is(f.files.get(path), before.replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
+    t.is(f.files.get(path), before.replace('device: aaaaaaaaaaaaaaaa\n', 'device: bbbbbbbbbbbbbbbb\ntaken_over: 2026-11-15T10:00:00.000Z\n'));
     t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Aktualna rozmowa laptopa']);
     t.is(f.view.chatTabs[0].sessionPath, path);
 });
@@ -939,14 +946,18 @@ test.serial(`D2b pruning requires a fresh owned empty session: ${mode}`, async t
 });
 
 for (const choice of ['cancel', 'takeover'] as const) for (const locale of ['pl', 'en'])
-for (const alreadyOpen of [true, false])
+for (const alreadyOpen of [true, false, 'no-right'] as const)
 test.serial(`D2b production profile button opens takeover and chat: ${choice}/${locale}/open=${alreadyOpen}`, async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-15T10:00:00.000Z') });
+    t.teardown(() => mock.timers.reset());
     const f = await fixture(t, 'phone', locale, parseDeviceId('aaaaaaaaaaaaaaaa'));
     const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('bbbbbbbbbbbbbbbb'));
     const path = await remote.saveSession([{ role: 'user', content: 'Rozmowa z laptopa' }]);
     const before = [...f.files];
     Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
-    let ready = alreadyOpen;
+    let ready = alreadyOpen === true;
+    let visible = false;
+    const tabs: string[] = [];
     const leaf = {
         get view() { return ready ? f.view : undefined; },
         async setViewState(state: { type: string; active: boolean }) {
@@ -955,10 +966,13 @@ test.serial(`D2b production profile button opens takeover and chat: ${choice}/${
             ready = true;
         },
     };
-    Object.assign(f.view.plugin, { openChatView: async () => { t.true(ready); } });
+    Object.assign(f.view.plugin, { openChatView: Plugin.prototype.openChatView });
     Object.assign(f.view.app.workspace, {
         getLeavesOfType: () => ready ? [leaf] : [],
-        getRightLeaf: (split: boolean) => { t.false(split); return leaf; },
+        getRightLeaf: (split: boolean) => { t.false(split); return alreadyOpen === 'no-right' ? null : leaf; },
+        getLeaf: (mode: string) => { tabs.push(mode); return leaf; },
+        rightSplit: { collapsed: false },
+        revealLeaf: async (target: typeof leaf) => { t.is(target, leaf); t.true(ready); visible = true; },
     });
     const { renderProfileTab } = await import('../../agents/profile/profile_persona.js');
     const profile = browserEvents(createDiv());
@@ -969,6 +983,9 @@ test.serial(`D2b production profile button opens takeover and chat: ${choice}/${
     button.dispatchEvent(new Event('click'));
     const modal = await until(() => f.opened.find((m): m is InstanceType<typeof OpenSessionModal> => m instanceof OpenSessionModal));
     t.is(modal.foreign, true);
+    t.true(visible);
+    t.deepEqual(tabs, alreadyOpen === 'no-right' ? ['tab'] : []);
+    t.deepEqual(host.notices, []);
     t.deepEqual([...f.files], before);
     const buttons = descendants(modal.contentEl).filter(el => el.tagName.toLowerCase() === 'button');
     buttons[choice === 'takeover' ? 0 : 1].dispatchEvent(new Event('click'));
@@ -977,7 +994,7 @@ test.serial(`D2b production profile button opens takeover and chat: ${choice}/${
         t.deepEqual([...f.files], before);
         t.deepEqual(f.view.rollingWindow.messages, []);
     } else {
-        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace('device: bbbbbbbbbbbbbbbb', 'device: aaaaaaaaaaaaaaaa'));
+        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace('device: bbbbbbbbbbbbbbbb\n', 'device: aaaaaaaaaaaaaaaa\ntaken_over: 2026-11-15T10:00:00.000Z\n'));
         t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Rozmowa z laptopa']);
         t.is(f.view.chatTabs[0].sessionPath, path);
     }
@@ -998,4 +1015,30 @@ test.serial(`D2b production restore and explicit open reject ambiguous header: $
     t.is(host.notices.at(-1), 'wymaga naprawy po synchronizacji');
     t.is(f.files.get(f.memory.paths.state), state);
     t.is(f.files.get(path), `---\n${fields}\n---\n\n## User\n\nNiepewna historia\n`);
+});
+
+for (const locale of ['pl', 'en']) test.serial(`D2c /clear waits for the controlled gate and handles rejection: ${locale}`, async t => {
+    const f = await fixture(t, 'phone', locale);
+    let reject!: (reason: Error) => void;
+    const gate = new Promise<void>((_resolve, fail) => { reject = fail; });
+    // Observe rejection even under the void mutation so the timing assertion is the failure.
+    void gate.catch(() => {});
+    f.view.handleNewSession = () => gate;
+    f.view.input_area.value = '/clear';
+    const errors: unknown[][] = [];
+    mock.method(log, 'error', (...args: unknown[]) => { errors.push(args); });
+    t.teardown(() => mock.restoreAll());
+    let settled = false;
+    const command = f.view.slashCommands.execute('/clear', { view: f.view, plugin: f.view.plugin });
+    void command.then(() => { settled = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    t.false(settled, 'the command must remain pending until handleNewSession settles');
+    t.is(f.view.input_area.value, '');
+    f.view.input_area.value = 'Szkic podczas oczekiwania';
+    reject(new Error('Controlled refusal'));
+    t.is(await command, true);
+    t.is(settled, true);
+    t.is(f.view.input_area.value, 'Szkic podczas oczekiwania');
+    t.deepEqual(host.notices, [locale === 'pl' ? 'Nie udało się rozpocząć nowej rozmowy. Sprawdź, czy sesja została zarchiwizowana.' : 'Could not start a new conversation. Check whether the session was archived.']);
+    t.is(errors.length, 1);
 });
