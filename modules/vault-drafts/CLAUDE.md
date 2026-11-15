@@ -245,8 +245,9 @@ i nieznany format; test P5 w `tools/vaultDraftRuntime.test.ts` sprawdza referenc
 
 ## Mobile M4 F2a - magazyn na adapterze vaulta
 
-Barrel eksportuje `AdapterDraftStorage(adapter)`. Konstruktor przyjmuje wyłącznie
-`Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>`.
+Barrel eksportuje `AdapterDraftStorage(adapter, nextTemporaryId?)`. Konstruktor przyjmuje
+`Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>`
+oraz opcjonalny generator UUID v4 (domyślnie `crypto.randomUUID`, wstrzykiwany w testach kolizji).
 Nie wykrywa platformy i nie importuje Node ani runtime Obsidiana. F2a dostarczyło
 port, a F2b wybiera go przez istniejący `Platform.isMobile`, współdzieli jedną
 instancję na namespace i kończy restore przed dopuszczeniem pisarzy.
@@ -273,6 +274,16 @@ nazwy. Inne ścieżki nie czekają na tę publikację; tworzenie wspólnych rodz
 osobną serializację. Błąd nie zatruwa kolejki. Rejestr zachowuje także niepewny cel,
 żeby brak potwierdzenia nie pozwolił nadpisać go w tym runtime.
 
+F2c: nazwa stagingu to dokładnie 40 znaków: małe szesnastkowe UUID v4
+`xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx.tmp` (nawias oznacza jeden z czterech
+znaków wariantu). Funkcje `temporaryName` i `isTemporaryName` wspólnie definiują
+tworzenie i ścisłe rozpoznawanie całej nazwy, bez dodatkowego prefiksu/sufiksu.
+Instancja rezerwuje nazwę przed pierwszym await, sprawdza jej istnienie przez stat
+i trzyma rezerwację do końca sprzątania publikacji. Kolizja w RAM lub na adapterze
+powoduje kolejną próbę, maksymalnie osiem; wyczerpanie prób daje io-error bez zapisu
+i bez usuwania zastanego wpisu. Błąd stat zwalnia rezerwację i odmawia publikacji.
+Nie jest to blokada zewnętrznego pisarza między stat a writeBinary.
+
 Po rename, także odrzuconym, odczyt celu rozstrzyga wynik: brak oznacza błąd,
 identyczne bajty oznaczają sukces, inne bajty powodują próbę usunięcia i błąd.
 Rename, który nic nie zrobił mimo resolve, również kończy się błędem.
@@ -298,7 +309,11 @@ Opcjonalne `DraftStorageIO.cleanupTemporary()` zwraca `RecoveryIssue[]`.
 DraftStore.restore wywołuje je przez persistence wyłącznie przed odtwarzaniem,
 na pustym store, przed przyjęciem pracy. Zwykły skan/GC nie sprząta stagingu aktywnego
 pisarza. Desktop nie implementuje hooka, zatem nie dostaje dodatkowego I/O.
-Pozostałości są raportowane nawet po skutecznym usunięciu; błąd skanu lub sprzątania
+Sprzątanie rozpoznaje wyłącznie zwykłe pliki o powyższej nazwie (stat.type=file).
+Obce nazwy, również ze spacjami lub dodatkowymi znakami, oraz podfoldery pozostają
+nietknięte i nie są zgłaszane jako przerwana publikacja. Cały `.staging` jest ukryty
+przed publicznym listowaniem magazynu, więc jego obce wpisy nie trafiają do skanu
+manifestów ani blobów. Rozpoznane pozostałości są raportowane nawet po skutecznym usunięciu; błąd skanu lub sprzątania
 nie blokuje startu. Jak inne issues, blokują GC w tym store.
 
 Po przerwanym stagingu restore zwraca poprzednią kompletną generację i issue.
@@ -316,6 +331,10 @@ Testy:
   po operacjach, ucięte zapisy, rename po wykonaniu/bez efektu/częściowy, błędy
   readback i cleanup, obie postacie listingu, współbieżność i granice Stopu.
   Snapshot plików na granicy I/O pozwala odtworzyć nowy store po symulowanym ubiciu.
+  F2c dodaje restore mieszanego stagingu dla obu postaci listingu, ponowny restore
+  bez fałszywych issues, kolizje nazw w RAM (także podczas stat) i na adapterze,
+  ponowienie/odmowę bez nadpisania oraz test mikrozadania odbierającego prawo
+  publikacji: rename musi rozpocząć się przed jego wykonaniem.
 - `DraftStore.test.ts`: wszystkie dotychczasowe 26 scenariuszy uruchamiane dodatkowo
   na nowym porcie, z tymi samymi asercjami i nową instancją portu przy restarcie.
 

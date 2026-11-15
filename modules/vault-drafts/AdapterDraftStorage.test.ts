@@ -6,6 +6,8 @@ import { MemoryAdapter } from './test-support/MemoryAdapter.js';
 const target = `${DRAFT_ROOT}/sample/manifests/000001.json`;
 const blob = `${DRAFT_ROOT}/sample/blobs/abc`;
 const staging = `${DRAFT_ROOT}/.staging`;
+const temporaryId = '12345678-1234-4123-8123-123456789abc';
+const otherTemporaryId = 'abcdef12-abcd-4abc-9abc-abcdef123456';
 const bytes = new Uint8Array([1, 2, 255]);
 function fixture() {
     const adapter = new MemoryAdapter();
@@ -23,8 +25,8 @@ function barrier() {
 // Every occurrence on the successful publication path, including parent mkdir/stat,
 // staging readback, target readback and final cleanup. Expectations are literal states.
 const publicationBoundaries = [
-    ...Array.from({ length: 12 }, (_, i) => ({ operation: 'stat' as const, occurrence: i + 1,
-        expected: i === 10 ? 'uncertain' : i === 11 ? 'published' : 'rejected' })),
+    ...Array.from({ length: 13 }, (_, i) => ({ operation: 'stat' as const, occurrence: i + 1,
+        expected: i === 11 ? 'uncertain' : i === 12 ? 'published' : 'rejected' })),
     ...Array.from({ length: 6 }, (_, i) => ({ operation: 'mkdir' as const, occurrence: i + 1, expected: 'rejected' })),
     { operation: 'writeBinary' as const, occurrence: 1, expected: 'rejected' },
     { operation: 'readBinary' as const, occurrence: 1, expected: 'rejected' },
@@ -177,6 +179,93 @@ test('Stop before rename cancels, Stop after rename admission cannot revoke comp
     t.is(allowed, false);
     t.deepEqual(files(adapter), [[target, [1, 2, 255]]]);
 });
+test('rename admission retains permission until the microtask scheduled by mayPublish', async t => {
+    const { adapter, port } = fixture();
+    let allowed = true;
+    const admission: boolean[] = [];
+    const rename = adapter.rename;
+    adapter.rename = (from, to) => {
+        admission.push(allowed);
+        return rename(from, to);
+    };
+    t.is(await port.publish(target, bytes, () => {
+        void Promise.resolve().then(() => { allowed = false; });
+        return allowed;
+    }), 'published');
+    t.deepEqual(admission, [true]);
+    t.false(allowed);
+    t.deepEqual([...await port.read(target)], [1, 2, 255]);
+});
+test('concurrent staging collision retries without overwriting the first publication', async t => {
+    const adapter = new MemoryAdapter();
+    const ids = [temporaryId, temporaryId, otherTemporaryId];
+    const port = new AdapterDraftStorage(adapter, () => ids.shift()!);
+    const entered = barrier(), release = barrier();
+    const temporary = `${staging}/${temporaryId}.tmp`;
+    adapter.after = async (operation, path) => {
+        if (operation === 'writeBinary' && path === temporary) { entered.resolve(); await release.promise; }
+    };
+    const first = port.publish(target, bytes, () => true);
+    await entered.promise;
+    const other = `${DRAFT_ROOT}/sample/manifests/000002.json`;
+    try {
+        t.is(await port.publish(other, new Uint8Array([8]), () => true), 'published');
+        t.deepEqual([...new Uint8Array(await adapter.readBinary(temporary))], [1, 2, 255]);
+    } finally { release.resolve(); }
+    t.is(await first, 'published');
+    t.deepEqual([...await port.read(target)], [1, 2, 255]);
+    t.deepEqual([...await port.read(other)], [8]);
+});
+test('repeated in-flight collision refuses before writing even while the first stat is pending', async t => {
+    const adapter = new MemoryAdapter();
+    const port = new AdapterDraftStorage(adapter, () => temporaryId);
+    const entered = barrier(), release = barrier();
+    const temporary = `${staging}/${temporaryId}.tmp`;
+    adapter.before = async (operation, path) => {
+        if (operation === 'stat' && path === temporary) { entered.resolve(); await release.promise; }
+    };
+    const first = port.publish(target, bytes, () => true);
+    await entered.promise;
+    const other = `${DRAFT_ROOT}/sample/manifests/000002.json`;
+    try {
+        await t.throwsAsync(port.publish(other, new Uint8Array([8]), () => true),
+            { code: 'io-error', message: 'Cannot reserve draft staging' });
+        t.deepEqual(files(adapter), []);
+    } finally { release.resolve(); }
+    t.is(await first, 'published');
+    t.deepEqual(files(adapter), [[target, [1, 2, 255]]]);
+    adapter.before = undefined;
+    t.is(await port.publish(other, new Uint8Array([8]), () => true), 'published');
+    t.deepEqual([...await port.read(other)], [8]);
+});
+for (const retry of [true, false]) test(`existing staging is preserved on collision, retry=${retry}`, async t => {
+    const adapter = new MemoryAdapter();
+    const temporary = `${staging}/${temporaryId}.tmp`;
+    adapter.files.set(temporary, new Uint8Array([7]));
+    let attempts = 0;
+    const port = new AdapterDraftStorage(adapter, () => ++attempts > 1 && retry ? otherTemporaryId : temporaryId);
+    if (retry) {
+        t.is(await port.publish(target, bytes, () => true), 'published');
+        t.deepEqual([...await port.read(target)], [1, 2, 255]);
+    } else {
+        await t.throwsAsync(port.publish(target, bytes, () => true),
+            { code: 'io-error', message: 'Cannot reserve draft staging' });
+        t.deepEqual(adapter.calls.map(call => call.operation), Array<string>(9).fill('stat'));
+    }
+    t.deepEqual(files(adapter), retry ? [[temporary, [7]], [target, [1, 2, 255]]] : [[temporary, [7]]]);
+});
+for (const outcome of ['stat-error', 'cancelled', 'callback-error'] as const) test(`staging reservation is reusable after ${outcome}`, async t => {
+    const adapter = new MemoryAdapter();
+    const port = new AdapterDraftStorage(adapter, () => temporaryId);
+    if (outcome === 'stat-error') adapter.fault = { operation: 'stat', occurrence: 2, moment: 'before' };
+    if (outcome === 'cancelled') t.is(await port.publish(target, bytes, () => false), 'cancelled');
+    else await t.throwsAsync(port.publish(target, bytes, () => { throw new Error('Callback failed'); }),
+        { message: outcome === 'stat-error' ? 'Injected stat before' : 'Callback failed' });
+    t.deepEqual(files(adapter), []);
+    adapter.fault = undefined;
+    t.is(await port.publish(target, new Uint8Array([8]), () => true), 'published');
+    t.deepEqual([...await port.read(target)], [8]);
+});
 test('callback failure cleans staging and leaves queue usable', async t => {
     const { adapter, port } = fixture();
     await t.throwsAsync(port.publish(target, bytes, () => { throw new Error('Callback failed'); }), { message: 'Callback failed' });
@@ -245,7 +334,7 @@ for (const checkpoint of ['staging', 'truncated-manifest'] as const) test(`proce
 for (const operation of ['stat', 'list', 'remove'] as const) for (const moment of ['before', 'after'] as const) {
     test(`restart cleanup tolerates ${operation} ${moment} failure and reports it`, async t => {
         const { adapter } = await initialStore();
-        const abandoned = `${staging}/abandoned.tmp`;
+        const abandoned = `${staging}/${temporaryId}.tmp`;
         adapter.files.set(abandoned, new Uint8Array([7]));
         adapter.calls.length = 0;
         adapter.fault = { operation, moment };
@@ -273,6 +362,33 @@ test('unacknowledged complete generation is recoverable; vanished generation can
     t.is(lost.text, 'Previous');
     t.deepEqual(lost.restored.issues, []);
     t.is(decode(await vault.read()), 'Base');
+});
+for (const fullPaths of [true, false]) test(`restore removes only owned staging files, fullPaths=${fullPaths}`, async t => {
+    const { adapter } = await initialStore();
+    adapter.fullPaths = fullPaths;
+    const abandoned = `${staging}/${temporaryId}.tmp`;
+    adapter.files.set(abandoned, new Uint8Array([7]));
+    const foreignNames = ['personal.md', 'Moja notatka.md', '000999.json', 'f'.repeat(64), 'abandoned.tmp',
+        `${temporaryId}.tmp.bak`, `prefix-${temporaryId}.tmp`, `${temporaryId}.tmp\n`,
+        `${temporaryId.toUpperCase()}.tmp`, `${temporaryId.replace('-4123-', '-5123-')}.tmp`,
+        `${otherTemporaryId}.tmp/nested.md`];
+    for (const name of foreignNames) adapter.files.set(`${staging}/${name}`, new Uint8Array([9, 8]));
+    // A folder whose exact name matches staging must also survive.
+    adapter.folders.add(`${staging}/${otherTemporaryId}.tmp`);
+    const { restored, text } = await restoredProposal(adapter);
+    t.is(text, 'Previous');
+    t.deepEqual(restored.issues, [{ path: abandoned, code: 'io-error', message: 'Interrupted draft staging found' }]);
+    t.deepEqual([...adapter.files].filter(([path]) => path.startsWith(`${staging}/`))
+        .map(([path, data]) => [path.slice(staging.length + 1), [...data]]), foreignNames.map(name => [name, [9, 8]]));
+    t.is((await adapter.stat(`${staging}/${otherTemporaryId}.tmp`))?.type, 'folder');
+    const port = new AdapterDraftStorage(adapter);
+    t.deepEqual(await port.list(DRAFT_ROOT), ['sample']);
+    t.deepEqual(await port.list(`${DRAFT_ROOT}/sample/manifests`), ['000001.json', '000002.json']);
+    t.deepEqual(await port.list(`${DRAFT_ROOT}/sample`), ['blobs', 'manifests']);
+    // A second restore sees only foreign entries and must not report interrupted publication.
+    const again = await restoredProposal(adapter);
+    t.is(again.text, 'Previous');
+    t.deepEqual(again.restored.issues, []);
 });
 test('staging namespace is inaccessible to callers and malformed listings cannot escape it', async t => {
     const { adapter, port } = fixture();

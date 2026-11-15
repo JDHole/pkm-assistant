@@ -5,6 +5,16 @@ import type { DraftStorageIO, RecoveryIssue } from './types.js';
 
 type Adapter = Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>;
 const STAGING = `${DRAFT_ROOT}/.staging`;
+// crypto.randomUUID(): lowercase UUID v4 plus .tmp, including the exact end of name.
+function isTemporaryName(name: string): boolean {
+    return name.length === 40 && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/.test(name);
+}
+function temporaryName(id: string): string {
+    const name = `${id}.tmp`;
+    if (!isTemporaryName(name)) throw new DraftError('io-error', 'Invalid staging identifier');
+    return name;
+}
+const STAGING_ATTEMPTS = 8;
 const equal = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 /** Mobile integrity, NOT desktop durability: no fsync, hard links, atomic rename or
@@ -14,7 +24,8 @@ const equal = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length &
 export class AdapterDraftStorage implements DraftStorageIO {
     private readonly queues = new Map<string, Promise<unknown>>();
     private readonly published = new Set<string>();
-    constructor(private readonly adapter: Adapter) {}
+    private readonly reservedTemporary = new Set<string>();
+    constructor(private readonly adapter: Adapter, private readonly nextTemporaryId: () => string = () => crypto.randomUUID()) {}
 
     private path(path: string, internal = false): string {
         if (!(path === DRAFT_ROOT || path.startsWith(`${DRAFT_ROOT}/`))
@@ -42,13 +53,14 @@ export class AdapterDraftStorage implements DraftStorageIO {
             });
         }
     }
-    private async children(path: string): Promise<string[]> {
+    private async children(path: string, acceptName?: (name: string) => boolean): Promise<string[]> {
         const stat = await this.adapter.stat(path);
         if (!stat) return [];
         if (stat.type !== 'folder') throw new DraftError('io-error', 'Draft directory is not a folder');
         const listing = await this.adapter.list(path);
-        return [...new Set([...listing.files, ...listing.folders].map(entry => {
-            const name = entry.startsWith(`${path}/`) ? entry.slice(path.length + 1) : entry;
+        const names = [...listing.files, ...listing.folders]
+            .map(entry => entry.startsWith(`${path}/`) ? entry.slice(path.length + 1) : entry);
+        return [...new Set(names.filter(name => !acceptName || acceptName(name)).map(name => {
             if (name.includes('/')) throw new DraftError('invalid-path', 'Invalid draft listing');
             this.path(`${path}/${name}`, true);
             return name;
@@ -72,6 +84,22 @@ export class AdapterDraftStorage implements DraftStorageIO {
         try { if (await this.adapter.stat(path)) await this.adapter.remove(path); }
         catch { /* Best effort: staging is hidden, corrupt targets are reported by restore. */ }
     }
+    private async reserveTemporary(): Promise<string> {
+        for (let attempt = 0; attempt < STAGING_ATTEMPTS; attempt++) {
+            const path = `${STAGING}/${temporaryName(this.nextTemporaryId())}`;
+            if (this.reservedTemporary.has(path)) continue;
+            // Reserve before stat yields, so distinct publication queues cannot share it.
+            this.reservedTemporary.add(path);
+            try {
+                if (!await this.adapter.stat(path)) return path;
+            } catch (cause) {
+                this.reservedTemporary.delete(path);
+                throw cause;
+            }
+            this.reservedTemporary.delete(path);
+        }
+        throw new DraftError('io-error', 'Cannot reserve draft staging');
+    }
     async writeBlob(path: string, bytes: Uint8Array): Promise<void> {
         this.path(path);
         const owned = bytes.slice();
@@ -93,7 +121,7 @@ export class AdapterDraftStorage implements DraftStorageIO {
         return this.queued(path, async () => {
             const existing = await this.adapter.stat(path);
             if (existing || this.published.has(path)) throw new DraftError('io-error', 'Generation already exists');
-            const temporary = `${STAGING}/${crypto.randomUUID()}.tmp`;
+            const temporary = await this.reserveTemporary();
             try {
                 await this.parents(path);
                 await this.parents(temporary);
@@ -117,15 +145,19 @@ export class AdapterDraftStorage implements DraftStorageIO {
                 await this.adapter.remove(path);
                 this.published.delete(path);
                 throw new DraftError('integrity-error', 'Published manifest readback mismatch');
-            } finally { await this.discard(temporary); }
+            } finally {
+                await this.discard(temporary);
+                this.reservedTemporary.delete(temporary);
+            }
         });
     }
     /** Call only during restore before admitting writers. Never treat staging as a draft. */
     async cleanupTemporary(): Promise<readonly RecoveryIssue[]> {
         const issues: RecoveryIssue[] = [];
         try {
-            for (const name of await this.children(STAGING)) {
+            for (const name of await this.children(STAGING, isTemporaryName)) {
                 const path = `${STAGING}/${name}`;
+                if ((await this.adapter.stat(path))?.type !== 'file') continue;
                 issues.push({ path, code: 'io-error', message: 'Interrupted draft staging found' });
                 await this.discard(path);
             }
