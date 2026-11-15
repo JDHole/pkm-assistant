@@ -1,7 +1,7 @@
 import type { App } from 'obsidian';
 import { hostWindow } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
-import { DesktopDraftStorage, DraftPersistence, DraftStore, DraftReview, parseDraftId } from '../vault-drafts/index.js';
+import { AdapterDraftStorage, DRAFT_ROOT, DesktopDraftStorage, DraftPersistence, DraftStore, DraftReview, parseDraftId } from '../vault-drafts/index.js';
 import type { DraftStorageIO, DraftHasher, DraftClock, DraftFileSystem, DraftViewIO, DraftReviewIO } from '../vault-drafts/index.js';
 import { SubRunDrafts } from '../sub-agents/index.js';
 import type { SubTaskRegistry } from '../sub-agents/index.js';
@@ -12,10 +12,13 @@ import { createSubagentChangesTool } from './SubagentChangesTool.js';
 export async function initializeVaultDrafts(input: {
     storage: DraftStorageIO; vault: DraftViewIO & DraftReviewIO; hasher: DraftHasher;
     registry: SubTaskRegistry; clock?: DraftClock;
+    /** Mobile-only empty namespace probe. Errors must propagate, never mean empty. */
+    storagePresent?: () => Promise<boolean>;
 }) {
     const persistence = new DraftPersistence(input.storage, input.hasher);
     const store = new DraftStore(persistence, input.vault, input.clock ?? { now: () => Date.now() });
-    const recovered = await store.restore();
+    const present = input.storagePresent ? await input.storagePresent() : true;
+    const recovered = present ? await store.restore() : { issues: [] };
     const drafts = new SubRunDrafts(store, persistence, input.vault, () => parseDraftId(crypto.randomUUID()));
     const registry = input.registry;
     drafts.setRetention(id => {
@@ -31,10 +34,25 @@ export async function initializeVaultDrafts(input: {
     };
     const off = ['thread:closed', 'task:finished', 'task:plan', 'draft:changed'].map(event => registry.events.on(event, collect));
     const review = new DraftReview(store, persistence, input.vault);
-    collect();
+    if (present) collect();
     await pending;
     return { store, persistence, drafts, review, tool: createSubagentChangesTool(review), issues: recovered.issues,
         flush: () => pending, dispose: () => { for (const unsubscribe of off) unsubscribe(); } };
+}
+
+/** Mobile capability boundary; never reads desktop capabilities or falls back to live writes. */
+export function mobileDraftPorts(app: App): Pick<Parameters<typeof initializeVaultDrafts>[0], 'storage' | 'vault' | 'hasher' | 'storagePresent'> {
+    const adapter = app.vault.adapter;
+    const methods = ['list', 'readBinary', 'writeBinary', 'rename', 'remove', 'stat', 'mkdir'] as const;
+    if (!adapter || methods.some(name => typeof adapter[name] !== 'function'))
+        throw new Error('Adapter draft storage unavailable');
+    return {
+        storage: new AdapterDraftStorage(adapter),
+        storagePresent: async () => (await adapter.stat(DRAFT_ROOT)) !== null,
+        vault: { ...createDraftReviewHost(app), list: path => adapter.list(path) },
+        hasher: { sha256: async bytes => Array.from(new Uint8Array(await hostWindow.crypto.subtle.digest('SHA-256', bytes.slice().buffer)))
+            .map(byte => byte.toString(16).padStart(2, '0')).join('') },
+    };
 }
 
 /** Desktop-only storage capability. The composition root skips this port on mobile. */

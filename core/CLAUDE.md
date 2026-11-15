@@ -516,8 +516,9 @@ desktop/tablet zachowują stare napisy. Test renderu: `modules/chat/chat/Trigger
 
 `VAULT_GITIGNORE_ENTRIES` zawiera w kolejności `.pkm-assistant/settings.json`,
 `.pkm-assistant/settings.last-good.json`, `.pkm-assistant/backups/`,
-`.pkm-assistant/logs/` oraz `.pkm-assistant/agents/*/memory/brain.md.bak`.
-Ostatni wzorzec obejmuje jeden katalog agenta i dokładną nazwę kopii indeksu.
+`.pkm-assistant/logs/`, `.pkm-assistant/agents/*/memory/brain.md.bak`
+oraz (od F2b) `.pkm-assistant/subagent-drafts/`.
+Wzorzec kopii brain obejmuje jeden katalog agenta i dokładną nazwę kopii indeksu.
 Start używa istniejącego `PluginBase.ensureGitignoreEntries`: dopisuje brakujące
 wiersze sekwencyjnie przez adapter, zachowuje starą treść, nie tworzy `.gitignore`
 przy jego braku. Ponowny start nie pisze niczego. Reguła nie usuwa pliku już
@@ -532,3 +533,17 @@ M2 D6 dodaje PL/EN dla sekcji śladów konfliktu pamięci, limitów i niepełneg
 D6b przywraca zgodę wyłącznie na test połączenia, a o lokalnym przeglądzie
 informuje osobnym akapitem `diagnostics.memory_notice`;
 reguły prywatności i zgody należą do `modules/diagnostics/CLAUDE.md`.
+
+
+## Mobile M4 F2 - lokalny namespace kopii
+
+`VAULT_GITIGNORE_ENTRIES` dopisuje `.pkm-assistant/subagent-drafts/` na obu
+platformach, ponieważ namespace wymaga jednego aktywnego właściciela i nie może
+być współdzielonym magazynem urządzeń. Zachowane są wcześniejsze wpisy, bajty
+użytkownika, idempotencja i brak tworzenia nieistniejącego `.gitignore`.
+Już śledzone kopie i synchronizatory inne niż git wymagają wyłączenia przez
+właściciela vaulta; plugin nie zmienia ich konfiguracji ani indeksu gita.
+Testy listy i rzeczywistego `git check-ignore` rozszerzono w keySanitizer.test.ts;
+PluginBase.test.ts obejmuje append/fallback, a main.mobile.test.ts pełny start
+obu platform. I18n odmowy mobile mówi teraz o niedostępności magazynu na tym
+urządzeniu, zamiast o niewdrożonej funkcji; oba języki sprawdza runnerDrafts.test.ts.

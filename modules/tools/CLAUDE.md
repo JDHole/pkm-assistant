@@ -962,7 +962,8 @@ Niepoprawne dane są pomijane; przy potwierdzonej epoce diagnostyka nie jest prz
 ## Mobile M1 P1 - granice desktopu
 
 Composition root nie inicjalizuje `desktopDraftPorts` na mobile i przekazuje obu
-narzędziom (`delegate`, `sub_agent`) `{ kind: 'unavailable' }` oraz `isMobile`.
+narzędziom (`delegate`, `sub_agent`) runtime adapterowy z F2b oraz `isMobile`;
+`{ kind: 'unavailable' }` pozostaje wyłącznie po błędzie inicjalizacji.
 Nie ma fallbacku zapisu do żywego vaulta. Czytający subagent nadal działa.
 `SettingsContent` na mobile od razu wybiera import JSON z pliku, bez czytania
 `process` ani `fs`. `ExternalMcpManager` odmawia stdio czytelnym komunikatem i18n
@@ -988,3 +989,42 @@ zmiana domyślnego modelu urządzenia nie podmienia modelu istniejącej rozmowy.
 Niedostępny model nadal zamyka wątek i kieruje do nowej delegacji.
 Test `SubAgentTool.test.ts` uruchamia kontynuację prawdziwym runnerem przy opt-inie
 oraz innym domyślnym modelu; sprawdza model wykonania i powrót wątku do idle.
+
+
+## Mobile M4 F2 - porty i inicjalizacja kopii
+
+Barrel eksportuje `mobileDraftPorts(app)`, wybierane wyłącznie przez
+`Platform.isMobile` w composition root. Granica sprawdza siedem metod magazynu:
+list/readBinary/writeBinary/rename/remove/stat/mkdir. Host review jest wspólny
+z desktopem: używa Vault API i adaptera, bez Node/Electrona; operacje review
+zachowują istniejące wymagania process/create/trash, bez niezabezpieczonych fallbacków.
+SHA-256 pochodzi z Web Crypto. Desktop zawsze używa `desktopDraftPorts`, również
+przy niedostępnym Node odmawia zamiast wybierać magazyn adapterowy.
+
+Opcjonalny port `storagePresent` w `initializeVaultDrafts` służy tylko mobilnemu
+sprawdzeniu korzenia. Wyłącznie potwierdzony brak (`stat === null`) pozwala
+utworzyć pusty store bez restore i początkowego GC: jeden stat, zero zapisów.
+Nie jest to cache istnienia: dalsze operacje i GC używają zwykłego adaptera.
+Istniejący katalog przechodzi pełne restore i GC przed dopuszczeniem delegacji;
+błąd stat/restore trafia raz do Loggera, start pozostaje udany, a writer dostaje
+odmowę i18n. Czytanie i rozmowa pozostają dostępne. Mobile nie pokazuje notice
+przy starcie dla niedostępnego runtime; desktop zachowuje dotychczasowy notice.
+
+Testy `src/main.mobile.test.ts`: produkcyjny start, licznik operacji, brak Node,
+brak każdej metody portu, awaria stat/restore, zachowany desktop i brak fallbacku.
+Dawny test „mobile pomija vault i rejestruje tylko delegate/sub_agent” zastąpiono
+asercją jednego stat oraz rejestracji subagent_changes razem z delegacją.
+`runnerDrafts.test.ts` używa syntetycznego adaptera i sterowanego modelu:
+write/continuation, nietknięty vault, list, restart, accept/reject z literalnymi
+bajtami i podglądem, read-only oraz odmowy PL/EN przy niedostępnym runtime.
+
+Przegląd kodu UI F2b: `chat/chat/draftPresentation.ts` to projekcja danych,
+`chat/chat/subTaskStrip.ts` otwiera szczegóły przez click, a ApprovalModal i DiffModal
+mają przyciski click i telefoniczne reguły M3 U4 w `src/styles.css` (48 px,
+przewijanie, zawijanie treści). Nie znaleziono blokady przyjęcia/odrzucenia dotykiem;
+nie jest to wynik próby na fizycznym ekranie i nie wymaga zmiany UI w F2b.
+
+Uwaga poza zakresem F2b (z kodu, bez pomiaru ekranu): pasek drzewa nie gwarantuje
+celów dotyku 44 px - `src/styles.css:1453` ustawia min-height:0 chipów,
+a `src/styles.css:1500` daje toggle min-width:29px. To kandydat do późniejszej
+poprawy wygody, nie blokada przycisków przyjęcia/odrzucenia w modalach.

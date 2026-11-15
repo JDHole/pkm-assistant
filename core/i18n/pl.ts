@@ -74,7 +74,7 @@ export const pl: Record<string, string> = {
 
   'mcp.obsidian_app.screenshot_mobile': 'Zrzuty ekranu nie są dostępne na telefonie. Możesz sprawdzić stan obszaru roboczego lub otworzyć notatkę.',
   'chat.open_failed': 'Nie udało się otworzyć czatu. Spróbuj ponownie.',
-  'subagent.draft.unavailable_mobile': 'Zapis subagentów przez kopię roboczą nie jest jeszcze dostępny na telefonie. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.',
+  'subagent.draft.unavailable_mobile': 'Magazyn kopii roboczych jest niedostępny na tym urządzeniu mobilnym. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.',
   'settings.mcp_stdio_mobile': 'Lokalne serwery MCP (stdio) działają tylko na desktopie. Na telefonie użyj serwera HTTP.',
   'tools.label.subagent_changes': 'Zmiany suba',
   'tool.subagent_changes': 'Zmiany suba',

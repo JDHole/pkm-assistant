@@ -73,6 +73,7 @@ import {
   createDelegateTool,
   initializeVaultDrafts,
   desktopDraftPorts,
+  mobileDraftPorts,
   createSubAgentTool,
   // Przerwanie biegów delegacji przy demontażu (patrz onunload)
   stopAllDelegations,
@@ -1066,16 +1067,15 @@ export default class PkmAssistantPlugin extends PluginBase {
     return obsidianAppEnabled;
   }
 
-  /** Mobile has no atomic draft storage port yet; skip it before touching Node. */
+  /** Restore the platform's private draft storage before admitting delegation. */
   async initializeVaultDraftRuntime(toolRegistry: ToolRegistry) {
-    if (!Platform.isMobile) {
-      try {
-        if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
-        this.vaultDraftRuntime = await initializeVaultDrafts({ ...desktopDraftPorts(this.app), registry: this.subTaskRegistry });
-      } catch (error) {
-        log.error('VaultDrafts', 'Draft runtime unavailable:', error);
-        new Notice(t('subagent.draft.unavailable'), 10000);
-      }
+    try {
+      if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
+      const ports = Platform.isMobile ? mobileDraftPorts(this.app) : desktopDraftPorts(this.app);
+      this.vaultDraftRuntime = await initializeVaultDrafts({ ...ports, registry: this.subTaskRegistry });
+    } catch (error) {
+      log.error('VaultDrafts', 'Draft runtime unavailable:', error);
+      if (!Platform.isMobile) new Notice(t('subagent.draft.unavailable'), 10000);
     }
     if (this.vaultDraftRuntime?.issues.length) {
       log.warn('VaultDrafts', 'Recovery issues:', this.vaultDraftRuntime.issues);

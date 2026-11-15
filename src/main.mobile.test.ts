@@ -4,8 +4,9 @@ import * as fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { mock } from 'node:test';
 import Obsidian, { Platform, Notice } from 'obsidian';
-import { ToolRegistry, ServerManager } from '../modules/tools/index.js';
-import { SubTaskRegistry } from '../modules/sub-agents/index.js';
+import { ToolRegistry, ServerManager, createWriteTool } from '../modules/tools/index.js';
+import { SubAgentRunner, SubTaskRegistry } from '../modules/sub-agents/index.js';
+import { MemoryAdapter } from '../modules/vault-drafts/test-support/MemoryAdapter.js';
 import { log } from '../core/utils/Logger.js';
 import { setLocale } from '../core/i18n/index.js';
 
@@ -99,9 +100,9 @@ test.serial('inline comment waits for first chat view and preserves formatted me
     ]]);
 });
 
-for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agents', 'mcp'] as const) {
+for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agents', 'mcp', ...(mobile ? ['drafts' as const] : [])] as const) {
     const skinFails = failure === 'skin';
-    const scenario = failure === 'agents' || failure === 'mcp'
+    const scenario = failure === 'agents' || failure === 'mcp' || failure === 'drafts'
         ? `U13 production startup: ${mobile ? 'mobile' : 'desktop'}, ${failure} failure`
         : `U12 production startup: ${mobile ? 'mobile' : 'desktop'}, skin failure=${skinFails}`;
     test.serial(scenario, async t => {
@@ -129,12 +130,30 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
                 return read(path);
             });
         }
+        const draftOperations: Array<[string, string]> = [];
+        for (const method of ['stat', 'list', 'readBinary', 'writeBinary', 'rename', 'remove', 'mkdir'] as const) {
+            const original = app.vault.adapter[method].bind(app.vault.adapter);
+            mock.method(app.vault.adapter, method, (...args: [string, ...unknown[]]) => {
+                if (args[0].startsWith('.pkm-assistant/subagent-drafts')) {
+                    draftOperations.push([method, args[0]]);
+                    if (failure === 'drafts') throw new Error('Controlled draft storage failure');
+                }
+                return Reflect.apply(original, app.vault.adapter, args);
+            });
+        }
+        await app.vault.adapter.write('.gitignore', '# Synthetic vault\n');
         let localReads = 0, localWrites = 0;
         if (failure === 'none') {
             app.loadLocalStorage = key => { localReads++; return key === 'pkm-assistant.device-id' ? '0123456789abcdef' : null; };
             app.saveLocalStorage = () => { localWrites++; };
         }
 
+        const draftErrors: unknown[][] = [];
+        const originalError = log.error.bind(log);
+        mock.method(log, 'error', (...args: Parameters<typeof log.error>) => {
+            if (args[0] === 'VaultDrafts') draftErrors.push(args);
+            else originalError(...args);
+        });
         const plugin = new Plugin(app, {
             id: 'pkm-assistant', name: 'PKM Assistant', version: '2.4.1',
             minAppVersion: '1.11.0', author: 'Test', description: 'Startup test',
@@ -144,8 +163,9 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         let now = 100;
         const clock = mock.method(performance, 'now', () => now);
         const requireDescriptor = Object.getOwnPropertyDescriptor(window, 'require');
+        let nodeReads = 0;
         Object.defineProperty(window, 'require', mobile
-            ? { configurable: true, get() { throw new Error('Node reached on mobile'); } }
+            ? { configurable: true, get() { nodeReads++; throw new Error('Node reached on mobile'); } }
             : { configurable: true, value: () => fs });
         t.teardown(async () => {
             clock.mock.restore();
@@ -194,6 +214,31 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         now = 1100;
         await Promise.all(layouts.map(callback => callback()));
         t.true(plugin._ready);
+        if (failure !== 'mcp') {
+            t.deepEqual(draftOperations, mobile ? [['stat', '.pkm-assistant/subagent-drafts/v1']] : []);
+            if (failure === 'drafts') {
+                t.is(draftErrors.length, 1);
+                t.is(plugin.toolRegistry?.getTool('delegate')?.name, 'delegate');
+                t.is(plugin.toolRegistry?.getTool('sub_agent')?.name, 'sub_agent');
+                t.is(plugin.toolRegistry?.getTool('subagent_changes'), null);
+                const runner = new SubAgentRunner({ app, plugin, toolRegistry: plugin.toolRegistry,
+                    drafts: { kind: 'unavailable' }, isMobile: true });
+                const answer = await runner.runTask('Read only', { name: 'Tester' }, { name: 'child', tools: ['read'], description: 'Test', role: 'worker', model: 'openai/model',
+                        scope: null, prompt: 'Test', enabled: true, max_iterations: 5, min_iterations: 1, max_tool_result_length: 1000 },
+                    { stream(_payload: unknown, handlers: { done(value: unknown): void }) {
+                        handlers.done({ choices: [{ message: { role: 'assistant', content: 'Conversation remains available' } }] });
+                    } } as never);
+                t.is(answer.result, 'Conversation remains available');
+            } else {
+                t.is(plugin.toolRegistry?.getTool('subagent_changes')?.name, 'subagent_changes');
+                t.deepEqual(draftErrors, []);
+            }
+            t.is(nodeReads, 0);
+        }
+        t.is(await app.vault.adapter.read('.gitignore'), '# Synthetic vault\n' +
+            '.pkm-assistant/settings.json\n.pkm-assistant/settings.last-good.json\n' +
+            '.pkm-assistant/backups/\n.pkm-assistant/logs/\n' +
+            '.pkm-assistant/agents/*/memory/brain.md.bak\n.pkm-assistant/subagent-drafts/\n');
         if (failure === 'none') {
             t.deepEqual([localReads, localWrites], [1, 0]);
             t.is<string | null | undefined, string>(plugin.agentManager?.getActiveMemory()?.deviceId, '0123456789abcdef');
@@ -215,6 +260,7 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
             .map(line => line.replace(/\| OK \| \d+ \|/, '| OK | <collection-ms> |')), [
             {
                 none: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+                drafts: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
                 skin: '| plugin.startupMs | OK | <collection-ms> | 11194 |',
                 agents: '| plugin.startupMs | OK | <collection-ms> | 11184 |',
                 mcp: '| plugin.startupMs | OK | <collection-ms> | 11174 |',
@@ -251,16 +297,50 @@ test.serial('unloading during first chat opening does not reveal a disposed view
     t.deepEqual(timers, []);
 });
 
-test.serial('mobile draft startup registers delegation quietly without reading desktop capabilities', async t => {
-    Platform.isMobile = true;
-    const errors: unknown[] = [];
-    mock.method(log, 'error', (...args: unknown[]) => { errors.push(args); });
-    let desktopReads = 0;
-    const host = { app: { get vault() { desktopReads++; throw new Error('Desktop port reached'); } }, toolRegistry: new ToolRegistry() };
-    await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
-    t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['delegate', 'sub_agent']);
-    t.deepEqual([desktopReads, notices, errors], [0, [], []]);
-});
+for (const failure of ['none', 'stat', 'missing-stat', 'restore', 'list', 'readBinary', 'writeBinary', 'rename', 'remove', 'mkdir'] as const) {
+    test.serial(`F2b mobile draft startup: ${failure}`, async t => {
+        Platform.isMobile = true;
+        const adapter = new MemoryAdapter();
+        if (failure === 'stat') adapter.fault = { operation: 'stat', moment: 'before' };
+        else if (failure === 'restore') {
+            adapter.folders.add('.pkm-assistant/subagent-drafts/v1');
+            adapter.fault = { operation: 'list', moment: 'before' };
+        } else if (failure !== 'none') Reflect.deleteProperty(adapter, failure === 'missing-stat' ? 'stat' : failure);
+        const errors: unknown[][] = [];
+        mock.method(log, 'error', (...args: unknown[]) => { errors.push(args); });
+        const oldRequire = Object.getOwnPropertyDescriptor(window, 'require');
+        let nodeReads = 0;
+        Object.defineProperty(window, 'require', { configurable: true, get() { nodeReads++; throw new Error('Node reached'); } });
+        Object.defineProperty(adapter, 'getBasePath', { get() { nodeReads++; throw new Error('Desktop adapter reached'); } });
+        const registry = new SubTaskRegistry();
+        const host = { app: { vault: { adapter } }, subTaskRegistry: registry, toolRegistry: new ToolRegistry(),
+            vaultDraftRuntime: undefined as Awaited<ReturnType<typeof import('../modules/tools/index.js').initializeVaultDrafts>> | undefined };
+        t.teardown(async () => {
+            await host.vaultDraftRuntime?.flush(); host.vaultDraftRuntime?.dispose(); registry.dispose();
+            if (oldRequire) Object.defineProperty(window, 'require', oldRequire); else Reflect.deleteProperty(window, 'require');
+        });
+        await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
+        if (failure === 'none') {
+            t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['subagent_changes', 'delegate', 'sub_agent']);
+            t.deepEqual(adapter.calls, [{ operation: 'stat', path: '.pkm-assistant/subagent-drafts/v1' }]);
+            t.deepEqual(host.vaultDraftRuntime?.store.list(), []);
+            t.deepEqual(errors, []);
+        } else {
+            t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['delegate', 'sub_agent']);
+            t.is(errors.length, 1);
+            t.deepEqual(errors[0].slice(0, 2), ['VaultDrafts', 'Draft runtime unavailable:']);
+            host.toolRegistry.registerTool(createWriteTool());
+            const runner = new SubAgentRunner({ app: host.app, plugin: {}, toolRegistry: host.toolRegistry,
+                drafts: host.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' }, isMobile: true });
+            const result = await runner.runTask('Write', { name: 'Tester' }, { name: 'child', tools: ['write'],
+                prompt: 'Test', enabled: true, description: 'Test', role: 'worker', model: 'openai/model',
+                scope: null, max_iterations: 5, min_iterations: 1, max_tool_result_length: 1000 }, {} as never, { origin: { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) } });
+            t.deepEqual([result.failed, result.result], [true,
+                'Sub-agent child error: Draft storage is unavailable on this mobile device. You can continue chatting and run read-only tasks.']);
+        }
+        t.deepEqual([nodeReads, notices, [...adapter.files]], [0, [], []]);
+    });
+}
 
 test.serial('desktop draft startup restores real storage and registers review alongside delegation', async t => {
     const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
@@ -277,6 +357,26 @@ test.serial('desktop draft startup restores real storage and registers review al
     await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
     t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['subagent_changes', 'delegate', 'sub_agent']);
     t.deepEqual(notices, []);
+});
+
+test.serial('F2b desktop without Node never falls back to the mobile adapter', async t => {
+    const adapter = new MemoryAdapter();
+    const oldRequire = Object.getOwnPropertyDescriptor(window, 'require');
+    Object.defineProperty(window, 'require', { configurable: true, value: undefined });
+    const registry = new SubTaskRegistry();
+    const errors: unknown[][] = [];
+    mock.method(log, 'error', (...args: unknown[]) => { errors.push(args); });
+    const host = { app: { vault: { adapter: Object.assign(adapter, { getBasePath: () => '/synthetic-vault' }) } },
+        subTaskRegistry: registry, toolRegistry: new ToolRegistry() };
+    t.teardown(() => {
+        registry.dispose();
+        if (oldRequire) Object.defineProperty(window, 'require', oldRequire); else Reflect.deleteProperty(window, 'require');
+    });
+    await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
+    t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['delegate', 'sub_agent']);
+    t.deepEqual(notices, ['Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.']);
+    t.is(errors.length, 1);
+    t.deepEqual(adapter.calls, []);
 });
 
 test.serial('mobile Obsidian App registers state/open with no Electron and reports disabled screenshot', async t => {

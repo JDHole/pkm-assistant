@@ -2,7 +2,8 @@ import { AgentMemory, SessionEpochPersistenceError } from '../memory/index.js';
 import { freezeTurnOwner } from '../chat/chat/turnOwner.js';
 import { getLocale, setLocale } from '../../core/i18n/index.js';
 import { buildSubTaskResultDelivery } from '../chat/chat/subTaskResultDelivery.js';
-import { initializeVaultDrafts, createDraftReviewHost } from './index.js';
+import { initializeVaultDrafts, mobileDraftPorts, createDraftReviewHost } from './index.js';
+import { MemoryAdapter } from '../vault-drafts/test-support/MemoryAdapter.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { createHash } from 'node:crypto';
@@ -15,6 +16,7 @@ import { KomunikatorManager } from '../komunikator/KomunikatorManager.js';
 import { __test__ as modelsTest } from '../models/index.js';
 import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.js';
 import { MCPClient } from './MCPClient.js';
+import type { DiffApprovalOptions } from './MCPClient.js';
 import { ToolRegistry } from './ToolRegistry.js';
 import { createWriteTool } from './WriteTool.js';
 import { createListTool } from './ListTool.js';
@@ -41,13 +43,14 @@ function storage(): DraftStorageIO {
         publish: async (path, bytes, allowed) => { if (!allowed()) return 'cancelled'; files.set(path, bytes.slice()); return 'published'; },
     };
 }
-async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }) {
-    const files = new Map(Object.entries(initial).map(([path, text]) => [path, encode(text)]));
-    const folders = new Set<string>();
+async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }, adapter?: MemoryAdapter) {
+    const files = adapter?.files ?? new Map<string, Uint8Array>();
+    for (const [path, text] of Object.entries(initial)) files.set(path, encode(text));
+    const folders = adapter?.folders ?? new Set<string>();
     const io: DraftViewIO = {
         async stat(path): Promise<VaultStat> {
             const bytes = files.get(path);
-            return bytes ? { kind: 'file', bytes: bytes.length, mtime: 7 }
+            return bytes ? { kind: 'file', bytes: bytes.length, mtime: adapter ? 1 : 7 }
                 : folders.has(path) || [...files.keys()].some(key => key.startsWith(`${path}/`)) ? { kind: 'folder' } : { kind: 'missing' };
         },
         async read(path) { const bytes = files.get(path); if (!bytes) throw new Error('ENOENT'); return bytes.slice(); },
@@ -61,10 +64,11 @@ async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }) {
             return { files: [...children], folders: [...dirs] };
         },
     };
-    const entry = (path: string) => ({ path, name: path.split('/').pop()!, basename: path.split('/').pop()!.replace(/\.md$/, ''), extension: path.split('.').pop()! });
+    const entry = (path: string) => ({ path, stat: { mtime: adapter ? 1 : 7 }, name: path.split('/').pop()!, basename: path.split('/').pop()!.replace(/\.md$/, ''), extension: path.split('.').pop()! });
     const read = async (file: { path: string }) => decode(await io.read(parseVaultPath(file.path)));
     const app = {
         vault: {
+            getFileByPath: (path: string) => files.has(path) ? entry(path) : null,
             getAbstractFileByPath: (path: string) => files.has(path) ? entry(path) : folders.has(path) ? { ...entry(path), children: [] } : null,
             getMarkdownFiles: () => [...files.keys()].filter(path => path.endsWith('.md')).map(entry),
             read, cachedRead: read,
@@ -80,6 +84,12 @@ async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }) {
                 mkdir: async (path: string) => { folders.add(path); },
                 read: (path: string) => read({ path }), list: async (path: string) => { const listed = await io.list(path === '/' ? '' : path); return { files: [...listed.files], folders: [...listed.folders] }; },
                 exists: async (path: string) => (await io.stat(parseVaultPath(path))).kind !== 'missing',
+                ...(adapter ?? {}),
+                ...(adapter ? { list: async (path: string) => {
+                    if (path !== '' && path !== '/') return adapter.list(path);
+                    const listed = await io.list('');
+                    return { files: [...listed.files], folders: [...listed.folders] };
+                } } : {}),
             },
         },
         metadataCache: { getFileCache: (file: { path: string }) => {
@@ -109,8 +119,10 @@ class Mailbox<T> {
 type Payload = { messages: Array<{ role: string; content: string }>; tools: Array<{ function: { name: string } }> };
 type Request = { payload: Payload; done(text: string): void; call(name: string, args: object): void; fail(): void };
 const origin = { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) };
-async function runtime(t: ExecutionContext, activate = false) {
-    const f = await fixture({ 'a.md': 'Baza', 'b.md': 'Baza-B', 'source.png': 'IMG' });
+async function runtime(t: ExecutionContext, activate: boolean | 'mobile' = false) {
+    const mobile = activate === 'mobile';
+    const adapter = mobile ? new MemoryAdapter() : undefined;
+    const f = await fixture({ 'a.md': 'Baza', 'b.md': 'Baza-B', 'source.png': 'IMG' }, adapter);
     const registry = new SubTaskRegistry();
     const tools = new ToolRegistry();
     for (const tool of [createWriteTool(), createReadTool(), createListTool(), createDeleteTool(), createCreateFolderTool(f.app as never),
@@ -138,9 +150,16 @@ async function runtime(t: ExecutionContext, activate = false) {
             chat: { platform: 'openai', models: { openai: 'model' }, apiKeys: { openai: 'fixture-key' } } } },
             config: { chat: { providers: { openai: { info: { id: 'openai' } } }, http: { send: async () => ({ status: 200, headers: {}, text: '', json: () => ({}) }) }, transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } } },
     };
-    const client = new MCPClient(f.app as never, plugin, tools);
+    const previews: DiffApprovalOptions[] = [];
+    const client = new MCPClient(f.app as never, plugin, tools, mobile ? {
+        diffModalFactory: (_app, options) => {
+            previews.push(options);
+            return { waitForApproval: async () => 'approve' };
+        },
+    } : undefined);
     const fullPlugin = Object.assign(plugin, { mcpClient: client });
-    const boot = activate ? await initializeVaultDrafts({ storage: f.disk, registry,
+    const boot = mobile ? await initializeVaultDrafts({ ...mobileDraftPorts(f.app as never), registry })
+        : activate ? await initializeVaultDrafts({ storage: f.disk, registry,
         vault: { ...createDraftReviewHost(f.app as never), ...f.io },
         hasher: { sha256: async bytes => createHash('sha256').update(bytes).digest('hex') },
     }) : undefined;
@@ -148,7 +167,7 @@ async function runtime(t: ExecutionContext, activate = false) {
     t.teardown(() => boot?.dispose());
     let sequence = 0;
     const drafts = boot?.drafts ?? new SubRunDrafts(f.store, f.persistence, f.io, () => parseDraftId(`run-draft-${++sequence}`));
-    const runner = new SubAgentRunner({ app: f.app, plugin: fullPlugin, toolRegistry: tools, drafts });
+    const runner = new SubAgentRunner({ app: f.app, plugin: fullPlugin, toolRegistry: tools, drafts, isMobile: mobile });
     const requests = new Mailbox<Request>();
     class Model {
         providerId = 'openai'; modelId = 'model';
@@ -168,7 +187,7 @@ async function runtime(t: ExecutionContext, activate = false) {
     };
     const restored = async () => { const store = new DraftStore(f.persistence, f.io, { now: () => 200 }); await store.restore(); return store; };
     t.teardown(() => { registry.stopAll(); registry.dispose(); });
-    return { ...f, registry, tools, plugin: fullPlugin, runner, client, drafts, run, ownView, restored, requests, Model,
+    return { ...f, boot, adapter, previews, registry, tools, plugin: fullPlugin, runner, client, drafts, run, ownView, restored, requests, Model,
         agent, config, memory, journal, permissions, approvals: () => approvals };
 }
 function lastTool(request: Request): Record<string, unknown> {
@@ -658,7 +677,7 @@ for (const locale of ['pl', 'en']) test.serial(`P4 frozen failure reason survive
 });
 
 
-for (const locale of ['pl', 'en']) test.serial(`M1 mobile refuses draft writers through both delegation tools (${locale})`, async t => {
+for (const locale of ['pl', 'en']) test.serial(`F2b mobile with unavailable runtime refuses writers through both delegation tools (${locale})`, async t => {
     const f = await runtime(t), previousLocale = getLocale();
     setLocale(locale);
     modelsTest.setChatModelFactory(() => new f.Model() as never);
@@ -669,8 +688,8 @@ for (const locale of ['pl', 'en']) test.serial(`M1 mobile refuses draft writers 
     const args = { task: 'Write', aspect: 'child', background: false, _invocationDelegationDepth: 1,
         _invocationOrigin: origin, _invocationAgentName: 'Tester' };
     const expected = locale === 'pl'
-        ? 'Błąd sub-agenta child: Zapis subagentów przez kopię roboczą nie jest jeszcze dostępny na telefonie. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.'
-        : 'Sub-agent child error: Sub-agent writes through drafts are not yet available on mobile. You can continue chatting and run read-only tasks.';
+        ? 'Błąd sub-agenta child: Magazyn kopii roboczych jest niedostępny na tym urządzeniu mobilnym. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.'
+        : 'Sub-agent child error: Draft storage is unavailable on this mobile device. You can continue chatting and run read-only tasks.';
     t.like(await delegate.execute(args, f.app, f.plugin as never), { success: false, error: expected, tools_used: [] });
     t.is(decode(f.files.get('a.md')!), 'Baza');
 
@@ -691,4 +710,68 @@ for (const locale of ['pl', 'en']) test.serial(`M1 mobile refuses draft writers 
     next.done('Read Baza');
     t.like(await reading, { success: true, result: 'Read Baza', tools_used: ['read'] });
     t.is(decode(f.files.get('a.md')!), 'Baza');
+});
+
+
+for (const action of ['accept', 'reject'] as const) test.serial(`F2b mobile writer, continuation, restart and ${action} through MCP`, async t => {
+    const f = await runtime(t, 'mobile');
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
+    const deps = { drafts: f.drafts, isMobile: true };
+    f.tools.registerTool(createDelegateTool(f.app, deps));
+    f.tools.registerTool(createSubAgentTool(f.app, deps));
+    const call = (name: string, args: object) => f.client.executeToolCall({ name, arguments: args }, 'Tester', { origin, autonomy: 'yolo' });
+    const delegated = await call('delegate', { task: 'Prepare', aspect: 'child' });
+    t.like(delegated, { success: true, started: true });
+    (await f.requests.next()).call('write', { path: 'a.md', content: 'Pierwszy szkic' });
+    const next = await f.requests.next();
+    t.like(lastTool(next), { success: true, path: 'a.md' }); next.done('Prepared');
+    await __test__._settleBackground(true);
+    t.deepEqual([f.registry.list()[0].status, decode(f.files.get('a.md')!)], ['done', 'Baza']);
+    const thread = f.registry.listThreads(origin)[0];
+    const continued = call('sub_agent', { action: 'task', sub_id: thread.threadId, task: 'Revise', background: false });
+    (await f.requests.next()).call('write', { path: 'a.md', content: 'Literalna treść: ąę\nDruga linia.\n' });
+    const revised = await f.requests.next();
+    t.like(lastTool(revised), { success: true, path: 'a.md' }); revised.done('Revised');
+    t.like(await continued, { success: true, result: 'Revised' });
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+    const last = f.store.list().at(-1)!;
+    const args = { draft_id: last.draftId, change_id: last.changes[0].id, revision: last.changes[0].revision };
+    t.like(await call('subagent_changes', { action: 'list', draft_id: last.draftId }),
+        { kind: 'listed', changes: [{ path: 'a.md', status: 'pending', ...args }] });
+    await f.boot!.flush(); f.boot!.dispose(); f.registry.dispose();
+    // Fresh runtime and port on the same adapter files, before any review decision.
+    const registry = new SubTaskRegistry();
+    f.adapter!.calls.length = 0;
+    const reboot = await initializeVaultDrafts({ ...mobileDraftPorts(f.app as never), registry });
+    t.log(`Pending two-draft restart: ${f.adapter!.calls.length} adapter operations`);
+    t.teardown(async () => { await reboot.flush(); reboot.dispose(); registry.dispose(); });
+    f.tools.registerTool(reboot.tool);
+    t.deepEqual(reboot.issues, []);
+    t.like(await call('subagent_changes', { action: 'list', draft_id: last.draftId }),
+        { kind: 'listed', changes: [{ path: 'a.md', status: 'pending', ...args }] });
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+    const decision = await call('subagent_changes', { action, ...args });
+    t.like(decision, { kind: action === 'accept' ? 'accepted' : 'rejected' });
+    t.deepEqual(f.previews.map(preview => [preview.path, preview.oldContent, preview.newContent]), action === 'accept'
+        ? [['a.md', 'Baza', 'Literalna treść: ąę\nDruga linia.\n']] : []);
+    t.is(decode(f.files.get('a.md')!), action === 'accept' ? 'Literalna treść: ąę\nDruga linia.\n' : 'Baza');
+});
+
+test.serial('F2b mobile available runtime runs a writer and keeps read-only delegation live', async t => {
+    const f = await runtime(t, 'mobile');
+    const writing = f.run(['write']);
+    (await f.requests.next()).call('write', { path: 'a.md', content: 'Szkic telefonu' });
+    const written = await f.requests.next();
+    t.like(lastTool(written), { success: true }); written.done('Draft ready');
+    const result = await writing;
+    t.deepEqual([result.result, result.toolsUsed, result.draftSummary?.pending], ['Draft ready', ['write'], 1]);
+    const reading = f.run(['read']);
+    (await f.requests.next()).call('read', { path: 'a.md' });
+    const read = await f.requests.next();
+    t.deepEqual(lastTool(read), { success: true, path: 'a.md', content: 'Baza' }); read.done('Read base');
+    const reader = await reading;
+    t.deepEqual([reader.result, reader.toolsUsed, reader.draft], ['Read base', ['read'], undefined]);
+    t.is(decode(f.files.get('a.md')!), 'Baza');
+    t.is(f.store.list().length, 1);
 });

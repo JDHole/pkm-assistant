@@ -300,6 +300,7 @@ test('VAULT_GITIGNORE_ENTRIES: pełna lista wpisów .gitignore w kolejności', t
         '.pkm-assistant/backups/',
         '.pkm-assistant/logs/',
         '.pkm-assistant/agents/*/memory/brain.md.bak',
+        '.pkm-assistant/subagent-drafts/',
     ]);
     t.true(VAULT_GITIGNORE_ENTRIES.includes('.pkm-assistant/logs/'));
     // Regresja: starsze wpisy zostają.
@@ -333,6 +334,10 @@ test('D5: git ignoruje kopie brain.md dwóch agentów, zachowuje pozostałą pam
             '.pkm-assistant/agents/tester-a/memory/brain.md.bak.md',
             'Notatki/brain.md.bak',
             '.pkm-assistant/diagnostics/report.md',
+            '.pkm-assistant/subagent-drafts/v1/test-draft/manifests/000001.json',
+            '.pkm-assistant/subagent-drafts/v1/test-draft/blobs/abc',
+            '.pkm-assistant/subagent-drafts-other/note.md',
+            'Notatki/.pkm-assistant/subagent-drafts/note.md',
             '.pkm-assistant/agents/group/tester-a/memory/brain.md.bak',
             'Notatki/.pkm-assistant/agents/tester-a/memory/brain.md.bak',
         ].join('\n') + '\n',
@@ -347,6 +352,10 @@ test('D5: git ignoruje kopie brain.md dwóch agentów, zachowuje pozostałą pam
         '::\t.pkm-assistant/agents/tester-a/memory/brain.md.bak.md\n' +
         '::\tNotatki/brain.md.bak\n' +
         '::\t.pkm-assistant/diagnostics/report.md\n' +
+        '.gitignore:6:.pkm-assistant/subagent-drafts/\t.pkm-assistant/subagent-drafts/v1/test-draft/manifests/000001.json\n' +
+        '.gitignore:6:.pkm-assistant/subagent-drafts/\t.pkm-assistant/subagent-drafts/v1/test-draft/blobs/abc\n' +
+        '::\t.pkm-assistant/subagent-drafts-other/note.md\n' +
+        '::\tNotatki/.pkm-assistant/subagent-drafts/note.md\n' +
         '::\t.pkm-assistant/agents/group/tester-a/memory/brain.md.bak\n' +
         '::\tNotatki/.pkm-assistant/agents/tester-a/memory/brain.md.bak\n');
 });

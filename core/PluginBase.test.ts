@@ -415,7 +415,7 @@ test('addToGitignore: adapter bez `append` dostaje SKLEJONĄ treść przez `writ
 // ═════════════════════════════════════════════════════════════════════════════
 
 for (const nativeAppend of [true, false]) {
-    test(`D5: ensureGitignoreEntries dodaje tylko kopię brain, drugi start i brak pliku bez zapisu (append=${nativeAppend})`, async t => {
+    test(`D5/F2b: ensureGitignoreEntries dodaje kopię brain i lokalne kopie subagentów, drugi start i brak pliku bez zapisu (append=${nativeAppend})`, async t => {
         const files = new Map<string, string>([['.gitignore',
             '# Własne reguły  \r\nNotatki/local/\r\n' +
             '.pkm-assistant/settings.json\r\n' +
@@ -439,12 +439,13 @@ for (const nativeAppend of [true, false]) {
                 files.set(path, (files.get(path) ?? '') + data);
             } } : {}),
         };
-        const expected = '# Własne reguły  \r\nNotatki/local/\r\n' +
+        const afterBrain = '# Własne reguły  \r\nNotatki/local/\r\n' +
             '.pkm-assistant/settings.json\r\n' +
             '.pkm-assistant/settings.last-good.json\r\n' +
             '.pkm-assistant/backups/\r\n' +
             '.pkm-assistant/logs/\r\n' +
             '.pkm-assistant/agents/*/memory/brain.md.bak\n';
+        const expected = afterBrain + '.pkm-assistant/subagent-drafts/\n';
         const start = async () => {
             const plugin = await makeBarePlugin({ app: { vault: { adapter } } });
             await plugin.ensureGitignoreEntries(VAULT_GITIGNORE_ENTRIES);
@@ -454,7 +455,10 @@ for (const nativeAppend of [true, false]) {
         t.is(await adapter.read('.gitignore'), expected);
         t.deepEqual(changes, [{
             kind: nativeAppend ? 'append' : 'write', path: '.gitignore',
-            data: nativeAppend ? '.pkm-assistant/agents/*/memory/brain.md.bak\n' : expected,
+            data: nativeAppend ? '.pkm-assistant/agents/*/memory/brain.md.bak\n' : afterBrain,
+        }, {
+            kind: nativeAppend ? 'append' : 'write', path: '.gitignore',
+            data: nativeAppend ? '.pkm-assistant/subagent-drafts/\n' : expected,
         }]);
 
         changes.length = 0;

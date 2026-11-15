@@ -136,7 +136,8 @@ A test calls the code the way its caller would, and checks the observable result
 
 Manifest dopuszcza Obsidian Mobile (`isDesktopOnly: false`), ale obsługa telefonu jest
 w budowie. Composition root używa istniejącego `Platform.isMobile`: pomija desktopowy
-magazyn kopii roboczych i port Electron, przekazuje platformę do narzędzi delegacji.
+magazyn kopii roboczych i port Electron; od M4 F2 używa magazynu na adapterze vaulta
+i przekazuje runtime oraz platformę do narzędzi delegacji.
 `openChatView` czeka na `setViewState`, następnie odsłania liść; brak prawego liścia
 kieruje do nowej karty. Ten kontrakt obowiązuje również na desktopie. Komentarz inline
 czeka na otwarcie i zachowuje pochodzenie `machine`; zakończony runtime nie odsłania
@@ -239,4 +240,9 @@ Na obu platformach komenda diagnostyki przy zapisie lokalnego raportu zlicza śl
 
 ## Mobile M4 F2a - magazyn kopii roboczych na adapterze vaulta
 
-Nowy, jeszcze niepodłączony port `AdapterDraftStorage` zachowuje format kopii i sprawdza integralność przez adapter vaulta, z jawnie słabszą trwałością mobilną, sprzątaniem stagingu przy restore i wspólnymi testami kontraktu desktop/mobile; gwarancje i ograniczenia opisuje `modules/vault-drafts/CLAUDE.md`.
+Port `AdapterDraftStorage` (podłączony w F2b) zachowuje format kopii i sprawdza integralność przez adapter vaulta, z jawnie słabszą trwałością mobilną, sprzątaniem stagingu przy restore i wspólnymi testami kontraktu desktop/mobile; gwarancje i ograniczenia opisuje `modules/vault-drafts/CLAUDE.md`.
+
+
+## Mobile M4 F2 - sub-agent z zapisem na telefonie
+
+`Platform.isMobile` wybiera magazyn na adapterze vaulta z przeglądem i odtwarzaniem po restarcie, pusty magazyn wymaga jednego `stat` bez zapisu, a lokalny namespace kopii jest pomijany przez git na obu platformach; desktop zachowuje port Node, szczegóły i ograniczenia są w `modules/tools/CLAUDE.md` i `modules/vault-drafts/CLAUDE.md`.

@@ -21,7 +21,7 @@ wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 - `DraftView.ts`: własna kopia → zamrożeni poprzednicy → vault; listing, tombstones,
   tekst/binary, pochodzenie i kolejka read-modify-write współdzielona przez hosty biegu.
 - `AdapterDraftStorage.ts`: port mobilny nad wąskim `Pick<DataAdapter, ...>`, bez Node,
-  z kontrolą bajtów, kolejkami i sprzątaniem stagingu przed restore (F2a, jeszcze bez podłączenia).
+  z kontrolą bajtów, kolejkami i sprzątaniem stagingu przed restore (F2a, podłączony przez F2b).
 - `DraftStore.test.ts`: AVA, odczyty faktycznie zapisanych bajtów przez nową instancję,
   awarie i bariery sterujące wyścigami; bez Obsidiana i rzeczywistych timerów.
 
@@ -202,8 +202,8 @@ uprawnień, host review, trwałe bajty i restart, kontrolowane bariery),
 ## 2.4.7 P5 — runtime, zdarzenia i sprzątanie
 
 `DesktopDraftStorage(fs, basePath)` jest implementacją portu prywatnego magazynu dla
-Obsidiana desktop. Na mobile composition root pomija ten port i zostawia kopie
-niedostępne, bez fallbacku do zapisu live. Node jest wstrzykiwany jako wąska
+Obsidiana desktop. Na mobile composition root pomija ten port i od F2b wybiera
+AdapterDraftStorage, bez fallbacku do zapisu live. Node jest wstrzykiwany jako wąska
 zdolność; moduł nie importuje runtime'u Node ani Obsidiana. Adapter odrzuca traversal,
 ścieżki spoza namespace i symlinki. Zapisuje staging create-only, wykonuje fsync
 zawartości, następnie sprawdza mayPublish i synchronicznie publikuje przez linkSync.
@@ -247,10 +247,10 @@ i nieznany format; test P5 w `tools/vaultDraftRuntime.test.ts` sprawdza referenc
 
 Barrel eksportuje `AdapterDraftStorage(adapter)`. Konstruktor przyjmuje wyłącznie
 `Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>`.
-Nie wykrywa platformy i nie importuje Node ani runtime Obsidiana. F2a nie podłącza
-portu do pluginu; composition root, runner, narzędzia i DesktopDraftStorage pozostają
-bez zmian. F2b ma wybrać port przez istniejący `Platform.isMobile`, współdzielić jedną
-instancję na namespace i zakończyć restore przed dopuszczeniem pisarzy.
+Nie wykrywa platformy i nie importuje Node ani runtime Obsidiana. F2a dostarczyło
+port, a F2b wybiera go przez istniejący `Platform.isMobile`, współdzieli jedną
+instancję na namespace i kończy restore przed dopuszczeniem pisarzy.
+Runner i DesktopDraftStorage pozostają bez zmian.
 
 Format i korzeń pozostają wspólne: `.pkm-assistant/subagent-drafts/v1`.
 Walidacja nazw zachowuje desktopowe ASCII, odrzuca `..`, `.`, puste segmenty,
@@ -322,6 +322,34 @@ Testy:
 Testy pamięciowe nie dowodzą zachowania CapacitorAdapter na Androidzie/iOS:
 pozostają próby ukrytych katalogów, rename przy ubiciu procesu, zaniku zasilania,
 wydajności i pamięci dla dużych blobów oraz synchronizacji między urządzeniami.
-F2b musi uwzględnić te ograniczenia również przy dopuszczeniu review; dane pod
-wspólnym korzeniem mogą podlegać synchronizacji vaulta. F2a nie zmienia gitignore
-ani zasad współdzielenia danych między urządzeniami.
+F2b zachowuje te ograniczenia również przy dopuszczeniu review i dodaje regułę
+gitignore dla lokalnego namespace; inne mechanizmy synchronizacji vaulta mogą
+nadal przenosić te dane i muszą je wykluczyć po stronie użytkownika.
+
+
+## Mobile M4 F2 - podłączenie, koszt startu i próby na urządzeniu
+
+`tools/mobileDraftPorts` buduje AdapterDraftStorage, wspólny host review bez Node
+oraz SHA-256 przez Web Crypto. Tylko potwierdzony brak korzenia pozwala runtime
+pominąć restore i początkowe GC: jeden stat, zero zapisów (licznik w
+`src/main.mobile.test.ts`). Każdy istniejący katalog przechodzi dotychczasowy
+pełny skan; błędy nie oznaczają pustego magazynu. Desktopowe I/O bez zmian.
+
+Koszt z kodu dla poprawnych zamkniętych pending kopii, bez stagingu do usunięcia,
+GC payloadu ani napraw: trzy skany manifestów (restore, kontrola GC, orphan GC).
+Na kopię każdy skan wymaga stat+list katalogu manifestów, jednego readBinary
+manifestu i B odczytów blobów: łącznie `9 + 3B` operacji na kopię, plus 10 operacji
+stałych, albo 11 gdy istnieje pusty staging. B obejmuje bazy firstTouches,
+propozycje i recoveryBlob. Dwie kopie po jednej zmianie istniejącego tekstu
+(B=2) dały 41 operacji w teście restartu runnerDrafts.test.ts. Uszkodzone generacje,
+open/applying i GC rozstrzygniętych zmian dodają odczyty lub zapisy.
+Nie optymalizujemy pełnego odzyskiwania w tej paczce; koszt rośnie z liczbą kopii,
+blobów i ich rozmiarem, a SHA-256 nadal przetwarza pełne bajty w RAM.
+
+Do prób wyłącznie na fizycznym telefonie pozostają:
+
+- ubicie aplikacji w trakcie writeBinary/rename i przyjęcia zmiany, potem restart;
+- rename na Androidzie: awaria przed/po przeniesieniu i widoczność ukrytych katalogów;
+- duże pliki i magazyny: czas startu, pamięć WebView, odzyskiwanie po przerwaniu;
+- rzeczywista obsługa dotykiem okien decyzji i wyłączenie innych synchronizatorów.
+Test adaptera pamięciowego nie potwierdza trwałości CapacitorAdapter ani fsync.

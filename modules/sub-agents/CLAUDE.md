@@ -1076,13 +1076,23 @@ Bez przyczyny używa odmowy ogólnej; brak fallbacku zapisu live. Warstwy poprze
 nadal wymagają pełnego właściciela. Testy P4 w `../tools/runnerDrafts.test.ts`
 sprawdzają realny odczyt, odmowę przez delegate, izolację A/B i kopię po ponowieniu.
 
-## Mobile M1 P1 - brak magazynu kopii
+## Mobile M1 P1 - odmowa przy niedostępnym magazynie kopii
 
 Runner dostaje opcjonalne `isMobile` z composition root przez `DelegateTool` (także
 kontynuacje `sub_agent`). Domyślne false zachowuje desktopowy kontrakt. Tylko dla
 mobile i `drafts.kind === 'unavailable'` odmowa writera mówi PL/EN, że zapis przez
-kopię roboczą nie jest jeszcze dostępny na telefonie. Kod odmowy i brak fallbacku
+kopię roboczą jest niedostępny na tym urządzeniu mobilnym. Kod odmowy i brak fallbacku
 do żywego vaulta pozostają bez zmian; zadania tylko do odczytu nadal działają.
 Scenariusze mobile w `../tools/runnerDrafts.test.ts` wykonują publiczne delegate,
 kontynuację sub_agent oraz rzeczywisty odczyt przez runner/MCP; sprawdzają literalne
 teksty obu języków i niezmienioną treść pliku.
+
+
+## Mobile M4 F2 - zapis przez dostępny runtime
+
+Runner już rozróżnia dostępny `SubRunDrafts` i `{kind:'unavailable'}` przed wyborem
+komunikatu platformowego, więc F2b nie zmienia jego logiki ani narzędzi delegacji.
+Mobile otrzymuje teraz dostępny runtime z composition root; writer tworzy kopię,
+kontynuacja dziedziczy warstwy, read-only bez warstw pozostaje live. Nowe testy
+`../tools/runnerDrafts.test.ts` wykonują te drogi z adapterem w pamięci, MCP,
+restartem i decyzjami, obok dotychczasowych odmów dla runtime niedostępnego.
