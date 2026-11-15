@@ -70,13 +70,17 @@ test('D7c stable ties remain ordered; unnumbered divergent blocks refuse', t => 
     t.deepEqual(mergeSessionConflict(header + wrap(b, a + unknown)), { kind: 'unresolved' });
 });
 
-test('D7 three sides: sequential resolved merge works; nested and incomplete conflicts refuse', t => {
+test('D7d sequential merge accepts repeated seq only in common prefix; malformed conflicts refuse', t => {
     const first = mergeSessionConflict(header + wrap(a, b));
     t.deepEqual(first, { kind: 'merged', text: header + a + b });
     const c = b.replaceAll('B', 'C').replace('10:00:01', '10:00:02');
     t.deepEqual(mergeSessionConflict(header + wrap(a + b, a + c)), { kind: 'unresolved' });
     const b2 = b.replace('\n1\n', '\n2\n'), c2 = c.replace('\n1\n', '\n2\n');
     t.deepEqual(mergeSessionConflict(header + wrap(a + b2, a + c2)), { kind: 'merged', text: header + a + b2 + c2 });
+    // A prior repair's duplicate numbers are safe only outside the divergent hunk.
+    const d2 = c2.replaceAll('C', 'D').replace('10:00:02', '10:00:03');
+    t.deepEqual(mergeSessionConflict(header + a + b + wrap(c2, d2)),
+        { kind: 'merged', text: header + a + b + c2 + d2 });
     t.deepEqual(mergeSessionConflict(header + wrap(wrap(a, b), c)), { kind: 'unresolved' });
     t.deepEqual(mergeSessionConflict(header + '<<<<<<< HEAD\n' + a + '=======\n' + b), { kind: 'unresolved' });
 });

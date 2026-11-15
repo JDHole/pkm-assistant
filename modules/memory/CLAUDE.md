@@ -1425,17 +1425,31 @@ To rozszerza tylko odmowę, nigdy automatyczne scalanie. Przykłady bez nagłów
 zdarzeń/frontmattera pozostają zwykłą treścią.
 
 **Dowód kompletności strony:** `_nextSeq` przy zapisie w AgentMemory zwiększa
-maksymalny numer, a `formatSessionEvent` emituje `seq` jako ostatnie pole dla
+maksymalny numer ze świeżego odczytu (`_refreshSessionWriterState` ustawia
+`maxSeq(content)`, `_nextSeq` zwraca licznik + 1), a `formatSessionEvent` emituje `seq` jako ostatnie pole dla
 każdego typu, także nieznanego, pustego wyniku narzędzia, `messages_removed`,
 `sub_task_history` i `session_epoch`. Wymagamy pojedynczego końcowego pola z dodatnią
-bezpieczną liczbą całkowitą i ściśle rosnących numerów w obrębie każdej strony.
+bezpieczną liczbą całkowitą. D7d wymaga ściśle rosnących numerów tylko w części
+rozbieżnej każdej strony (indeks bloku >= `prefixEvents`), a jej pierwszy numer
+musi przekraczać maksimum całego wspólnego prefiksu (0 przy braku numerów).
+W bajtowo identycznym prefiksie dopuszczamy powtórzenia i spadki numerów po
+wcześniejszych naprawach; pozostałe reguły kompletności pozostają bez zmian.
 Luki są dozwolone. Nie wymagamy `content`, `result`, ID ani pól specyficznych
 dla typu: pisarz pomija puste wartości. Starszy format v1 i transkrypt nie miały
 `seq`; takie bloki dopuszczamy wyłącznie we wspólnym, bajtowo identycznym prefiksie.
 Rozbieżny blok bez dowodu zakończenia odmawia zamiast udawać, że jest kompletny.
 Zdrowe pliki nadal czyta zwykły parser, bez tych wymagań. Wcześniej scalony log
-może mieć powtórzone lub malejące `seq`: kolejny konflikt takiego pliku
-może odmówić, mimo że sam zdrowy log nadal działa. Nie zmieniamy historycznych numerów.
+może mieć powtórzone lub malejące `seq`: kolejny konflikt dopisków ponad maksimum
+takiego wspólnego prefiksu może być naprawiony bez zmiany historycznych numerów.
+
+Gwarancja `maxSeq + 1` dotyczy odczytanego pliku: frozen append i ensure odświeżają
+licznik przy odczycie, live append przy zimnym cache/weryfikacji, a naprawa zawsze
+ustawia go z wyniku unii. Zastane wyjątki: ciepły live append może nie zauważyć
+zewnętrznego zapisu; `saveSession` i fallback append bez naprawy mogą użyć ciepłego
+licznika zamiast maksimum świeżego pliku. Kolejka nie chroni przed innym adapterem.
+Tak powstały rozbieżny numer <= maksimum prefiksu nadal daje odmowę: nie ma dowodu
+bezpiecznej kontynuacji, a rozluźnienie tej granicy osłabiłoby rozpoznawanie D7c.
+D7d nie zmienia pisarzy, cache ani I/O zdrowych plików.
 
 **Granice odmowy:** literalny znacznik lub `=======` w rozchodzącej się wiadomości,
 zagnieżdżony przykład, wspólny przykład o tych samych etykietach co merge,
@@ -1518,6 +1532,19 @@ Istniejące testy D7 świadomie zmieniły oczekiwania dla rozbieżnych bloków b
 powtórzeń seq, drugiego scalenia takiej historii, różnych par etykiet nagłówka
 oraz wspólnych przykładów legacy o innych etykietach; mają także pozytywne
 przypadki wspólnego legacy prefiksu, stabilnego remisu i rosnących numerów.
+
+Testy D7d w `sessionConflict.repeated.test.ts`: dwa pełne cykle dopisków A/B,
+prawdziwego `git merge-file` i naprawy pierwszym zapisem, w merge/diff3/zdiff3,
+z native append oraz fallbackiem. Osobne adaptery i identyfikatory nad wspólnym
+dyskiem pracują na starszej niczyjej sesji; literalne bajty i odczyt rozmowy
+potwierdzają kolejność, zachowane numery, brak znaczników oraz dwie wierne kopie.
+Osiem odmów sprawdza na obu stronach numery poniżej/równe maksimum prefiksu
+(większemu od jego ostatniego numeru), spadek i powtórzenie w części rozbieżnej.
+Pozytywny przypadek obejmuje legacy bez seq, powtórzenia/spadki prefiksu i luki.
+Test trzech stron w `sessionConflict.test.ts` rozszerzono o udane kolejne scalenie
+ze wspólnym powtórzonym seq. Dawna odmowa powtórzeń wewnątrz rozbieżnego hunka
+pozostaje; przypadki odmowy i pseudo-bloku z `sessionConflict.strict.test.ts`
+nie zmieniają asercji.
 
 Czytelnicy: `loadActiveSession`, `_parseActiveSessionFile`, lista sesji i restore;
 `SaveSessionWorkflow` czyta przez `loadActiveSession`, a archiwizacja używa tekstu

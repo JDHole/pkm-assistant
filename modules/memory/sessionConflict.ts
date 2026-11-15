@@ -118,6 +118,8 @@ function splitSessionConflict(text: string): SessionSplit {
 
 /** seq is the writer's terminal field, for every event type. Pre-v2/transcript
  * blocks have no completion witness: accept those only in the identical prefix.
+ * That prefix can contain seq repetitions from prior repairs. Divergent seq must
+ * increase from its maximum, matching a writer refreshed from the common file.
  * No content field is required: the writer legitimately omits empty values. */
 function validSide(blocks: readonly string[], prefixEvents: number): boolean {
     let previous = 0;
@@ -130,8 +132,9 @@ function validSide(blocks: readonly string[], prefixEvents: number): boolean {
         }
         if (raw.search(/(?:^|\n)\*\*seq:\*\*[ \t]*(?:\r?\n|$)/) !== seq.index) return false;
         const value = Number(seq[1]);
-        if (!Number.isSafeInteger(value) || value <= previous) return false;
-        previous = value;
+        if (!Number.isSafeInteger(value) || value <= 0) return false;
+        if (i >= prefixEvents && value <= previous) return false;
+        previous = Math.max(previous, value);
     }
     return true;
 }
