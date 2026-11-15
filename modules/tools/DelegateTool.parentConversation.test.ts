@@ -178,7 +178,7 @@ test.serial('P4: cofnięte uprawnienie w kolejce blokuje start i zachowuje pendi
     await __test__._settleBackground(true);
 });
 
-test.serial('P5: opublikowany schemat dopuszcza tryb per zadanie, odrzuca niejednoznaczny batch', t => {
+test.serial('P5/F2d: schemat dopuszcza tryb per zadanie, wykonawca odrzuca niejednoznaczny batch', async t => {
     const registry = new ToolRegistry();
     registry.registerTool(createDelegateTool({}) as never);
     const definition = registry.getToolDefinitions().find(tool => tool.function.name === 'delegate')!;
@@ -188,8 +188,14 @@ test.serial('P5: opublikowany schemat dopuszcza tryb per zadanie, odrzuca niejed
         { tasks: [{ task: 'A', context_mode: 'parent_conversation' }, { task: 'B', context_mode: 'clean' }, { task: 'C' }] },
         { task: 'Zły', context_mode: 'other' }, { task: 'Null', context_mode: null },
         { tasks: [{ task: 'Zły', context_mode: 'other' }] }, { tasks: [{ task: 'Null', context_mode: null }] },
-        { tasks: [{ task: 'A' }], context_mode: 'parent_conversation' }, { tasks: [{ task: 'A' }], context_mode: 'clean' },
-    ].map(args => validator.validate(args).valid), [true, true, true, true, false, false, false, false, false, false]);
+    ].map(args => validator.validate(args).valid), [true, true, true, true, false, false, false, false]);
+    // Cross-field dependencies are private validation, not provider-facing JSON Schema.
+    const f = fixture(t, 'openai');
+    for (const context_mode of ['parent_conversation', 'clean']) {
+        t.deepEqual(await f.delegate.execute({ tasks: [{ task: 'A' }], context_mode,
+            _invocationOrigin: owner }, {}, f.plugin as never, f.runtime),
+        { success: false, error: 'Invalid delegation context mode.' });
+    }
 });
 
 test.serial('P5: prowadzący → sub → wnuk otrzymuje tylko rozmowę bezpośredniego rodzica', async t => {

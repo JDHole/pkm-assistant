@@ -1,7 +1,6 @@
 import test from 'ava';
 import { createHash } from 'node:crypto';
 import type { App } from 'obsidian';
-import { Validator } from '@cfworker/json-schema';
 import { DraftStore, DraftPersistence, DraftReview, parseDraftId, parseVaultPath } from '../vault-drafts/index.js';
 import type { DraftStorageIO, DraftReviewContext, DraftMutation, ChangeSummary, ReviewDecision, DraftManifest } from '../vault-drafts/index.js';
 import { PermissionSystem } from '../../core/index.js';
@@ -281,15 +280,61 @@ test('P4 list scopes isolate sessions and agents; agent scope discovers old draf
 
 test('P4 schema rejects bulk, force, content, paths, missing draft and invalid revisions', async t => {
     const f = await fixture(), draft = await f.make(), valid = f.decision(draft);
-    const validator = new Validator(f.tool.inputSchema);
     for (const input of [{ ...valid, all: true }, { ...valid, force: true }, { ...valid, path: 'y.md' }, { ...valid, content: 'Injected' },
         { ...valid, revision: 0 }, { ...valid, revision: 1.5 }, { action: 'list', change_id: 'change-1' }, { ...valid, draft_id: '../a' }]) {
-        t.false(validator.validate(input).valid); t.is((await f.call(input) as Result).kind, 'denied');
+        t.deepEqual(await f.call(input), { kind: 'denied', isError: true, message: 'Invalid change review arguments.' });
     }
     t.is((await f.call({ ...valid, revision: 99 }) as Result).kind, 'stale-revision');
     const open = await f.make('open', [['y.md', { kind: 'text', text: 'Open' }]], owner, false);
     t.is((await f.call(f.decision(open, 'y.md')) as Result).kind, 'not-sealed'); t.is(f.text(), 'Baza');
 });
+
+// F2d characterization: these outcomes were measured with the original oneOf schema.
+type ValidationCase = [string, Record<string, unknown>, 'listed' | 'accepted' | 'rejected' | 'invalid'];
+const validationCases: ValidationCase[] = [
+    ['list', { action: 'list' }, 'listed'],
+    ['list scope', { action: 'list', scope: 'agent' }, 'listed'],
+    ['list draft', { action: 'list', draft_id: 'draft-a' }, 'listed'],
+    ['list detail', { action: 'list', draft_id: 'draft-a', change_id: 'change-1' }, 'listed'],
+    ['accept', { action: 'accept', draft_id: 'draft-a', change_id: 'change-1', revision: 1 }, 'accepted'],
+    ['reject', { action: 'reject', draft_id: 'draft-a', change_id: 'change-1', revision: 1 }, 'rejected'],
+    ['missing action', {}, 'invalid'],
+    ['unknown action', { action: 'delete' }, 'invalid'],
+    ['list change without draft', { action: 'list', change_id: 'change-1' }, 'invalid'],
+    ['list revision', { action: 'list', revision: 1 }, 'invalid'],
+    ['list unknown field', { action: 'list', extra: true }, 'invalid'],
+    ['list invalid scope', { action: 'list', scope: 'all' }, 'invalid'],
+    ['list invalid cursor', { action: 'list', cursor: 'draft-a' }, 'invalid'],
+    ['list invalid id', { action: 'list', draft_id: '../draft-a' }, 'invalid'],
+    ...(['accept', 'reject'] as const).flatMap<ValidationCase>(action => [
+        [`${action} missing draft`, { action, change_id: 'change-1', revision: 1 }, 'invalid'],
+        [`${action} missing change`, { action, draft_id: 'draft-a', revision: 1 }, 'invalid'],
+        [`${action} missing revision`, { action, draft_id: 'draft-a', change_id: 'change-1' }, 'invalid'],
+        ...[
+            { revision: '1' }, { revision: 0 }, { revision: 1.5 }, { revision: 9007199254740992 },
+            { scope: 'session' }, { cursor: 'draft-a/change-1' }, { extra: true },
+        ].map<ValidationCase>(extra => [`${action} ${JSON.stringify(extra)}`,
+            { action, draft_id: 'draft-a', change_id: 'change-1', revision: 1, ...extra }, 'invalid']),
+    ]),
+];
+for (const [label, args, expected] of validationCases) {
+    test(`F2d argument contract: ${label}`, async t => {
+        const f = await fixture();
+        await f.make();
+        const result = await f.call(args) as Result | Listed;
+        if (expected === 'invalid') {
+            t.deepEqual(result, { kind: 'denied', isError: true, message: 'Invalid change review arguments.' });
+        } else {
+            t.is(result.kind, expected);
+            if (result.kind === 'listed') t.deepEqual(result.changes.map(change =>
+                [change.draft_id, change.change_id, change.path, change.status, change.revision]),
+            [['draft-a', 'change-1', 'x.md', 'pending', 1]]);
+        }
+        t.is(f.text(), expected === 'accepted' ? 'Propozycja' : 'Baza');
+        t.is(f.store.snapshot(parseDraftId('draft-a')).changes[0].review.kind,
+            expected === 'accepted' ? 'accepted' : expected === 'rejected' ? 'rejected' : 'pending');
+    });
+}
 
 test('P4 detail truncates text explicitly and list pagination preserves paths', async t => {
     const f = await fixture();

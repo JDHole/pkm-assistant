@@ -711,11 +711,10 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
             }
         },
         required: [],
-        not: { required: ['tasks', 'context_mode'] },
     } satisfies Schema;
     // Width has its configurable limit and dedicated error below; validate every other
     // model argument together, before any preparation, consent or reservation.
-    const validator = new Validator({ ...inputSchema, properties: { ...inputSchema.properties,
+    const validator = new Validator({ ...inputSchema, not: { required: ['tasks', 'context_mode'] }, properties: { ...inputSchema.properties,
         tasks: { ...inputSchema.properties.tasks, maxItems: undefined },
     } });
     return {

@@ -82,7 +82,7 @@ export const pl: Record<string, string> = {
   "chat.subdraft.notification": "Kopia draft_id={{draft_id}}: {{count}} zmian. Przejrzyj i rozstrzygnij pliki narzędziem subagent_changes. Zakończenie suba nie oznacza przyjęcia.",
   "chat.subdraft.backlog": "Zaległe zmiany agenta: {{count}}. Użyj subagent_changes z scope: agent.",
   "chat.subdraft.recovery_error": "Nie udało się odtworzyć części kopii ({{count}}). Szczegóły w logu; pliki zachowano.",
-  "mcp.subagent_changes.desc": "Przejrzyj, przyjmij albo odrzuć pojedynczą zmianę suba.",
+  "mcp.subagent_changes.desc": "Przejrzyj, przyjmij albo odrzuć pojedynczą zmianę suba. Dla list, draft_id i change_id są opcjonalnymi filtrami; change_id wymaga draft_id. scope i cursor są dozwolone tylko dla list; revision jest niedozwolone. Dla accept albo reject podaj dokładnie action, draft_id, change_id i revision.",
   "mcp.subagent_changes.conflict": "Plik {{path}} zmienił się od przygotowania kopii. Odrzuć zmianę albo zleć ją ponownie.",
   "mcp.subagent_changes.stale_revision": "Lista zmian jest nieaktualna. Pobierz ją ponownie.",
   "mcp.subagent_changes.not_sealed": "Sub nadal przygotowuje zmiany.",

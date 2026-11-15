@@ -9,6 +9,8 @@ import { SubAgentRunner, SubTaskRegistry } from '../modules/sub-agents/index.js'
 import { MemoryAdapter } from '../modules/vault-drafts/test-support/MemoryAdapter.js';
 import { log } from '../core/utils/Logger.js';
 import { setLocale } from '../core/i18n/index.js';
+import { CHAT_PROVIDERS } from '../modules/models/index.js';
+import type { ExecutionContext } from 'ava';
 
 // Replace only browser assets; execute the actual composition root against host ports.
 register('data:text/javascript,' + encodeURIComponent(`
@@ -44,6 +46,99 @@ function deferred() {
     let resolve!: () => void;
     const promise = new Promise<void>(done => { resolve = done; });
     return { promise, resolve };
+}
+
+/** Full production registration, including the two optional built-in modules. */
+async function bootToolRegistry(t: ExecutionContext, mobile: boolean) {
+    Platform.isMobile = mobile;
+    const supportDir = process.env.PKM_TEST_SUPPORT_DIR;
+    if (!supportDir) throw new Error('AVA harness preload is required');
+    const supportUrl = pathToFileURL(`${supportDir}/`);
+    const { createMockApp } = await import(new URL('../mock/app.ts', supportUrl).href);
+    const { shutdownHarnessRuntime } = await import(new URL('obsidian.ts', supportUrl).href);
+    const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
+    const app: Obsidian.App = createMockApp(root);
+    await app.vault.adapter.mkdir('.pkm-assistant');
+    await app.vault.adapter.write('.pkm-assistant/settings.json', JSON.stringify({
+        pkmAssistant: { obsidianAppEnabled: true, komunikatorEnabled: true },
+    }));
+    const plugin = new Plugin(app, {
+        id: 'pkm-assistant', name: 'PKM Assistant', version: '2.4.1',
+        minAppVersion: '1.11.0', author: 'Tester', description: 'Tool schema test',
+    });
+    const layouts: Array<() => unknown> = [];
+    mock.method(app.workspace, 'onLayoutReady', (callback: () => unknown) => { layouts.push(callback); });
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'require');
+    Object.defineProperty(window, 'require', mobile
+        ? { configurable: true, get() { throw new Error('Node reached on mobile'); } }
+        : { configurable: true, value: () => fs });
+    t.teardown(async () => {
+        plugin.onunload();
+        await plugin.env?.dispose();
+        await plugin.traceLog?.dispose();
+        await log.disposeFileSink();
+        shutdownHarnessRuntime();
+        if (descriptor) Object.defineProperty(window, 'require', descriptor);
+        else Reflect.deleteProperty(window, 'require');
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+    await plugin.onload();
+    await Promise.all(layouts.map(callback => callback()));
+    t.is(plugin._ready, true);
+    const registry = plugin.toolRegistry!;
+    // Sentinel checks prevent a broken boot or disabled optional modules from passing vacuously.
+    for (const name of ['subagent_changes', 'obsidian_app', 'kom_send']) t.is(registry.getTool(name)?.name, name);
+    return registry;
+}
+
+for (const mobile of [false, true]) {
+    test.serial(`F2d provider schema guard: ${mobile ? 'mobile' : 'desktop'} production registry`, async t => {
+        const registry = await bootToolRegistry(t, mobile);
+        for (const { function: tool } of registry.getToolDefinitions()) {
+            const schema = tool.parameters;
+            t.is(typeof schema, 'object', tool.name);
+            t.not(schema, null, tool.name);
+            t.false(Array.isArray(schema), tool.name);
+            t.is(schema.type, 'object', tool.name);
+            for (const key of ['oneOf', 'anyOf', 'allOf', 'not', 'if', 'then', 'else', '$ref']) {
+                t.false(key in schema, `${tool.name}: top-level ${key}`);
+            }
+            t.is(typeof schema.properties, 'object', tool.name);
+            t.not(schema.properties, null, tool.name);
+            t.false(Array.isArray(schema.properties), tool.name);
+            if (schema.required !== undefined) {
+                t.true(Array.isArray(schema.required), tool.name);
+                for (const key of schema.required as unknown[]) {
+                    t.is(typeof key, 'string', tool.name);
+                    t.true(Object.hasOwn(schema.properties as object, key as string), `${tool.name}: required ${String(key)}`);
+                }
+            }
+        }
+    });
+
+    test.serial(`F2d provider boundary: ${mobile ? 'mobile' : 'desktop'} subagent_changes`, async t => {
+        const registry = await bootToolRegistry(t, mobile);
+        const tool = registry.getToolDefinitions().find(item => item.function.name === 'subagent_changes')!;
+        const providers = [CHAT_PROVIDERS.anthropic, ...Object.values(CHAT_PROVIDERS).filter(provider => provider.info.id !== 'anthropic')];
+        for (const provider of providers) for (const stream of [false, true]) {
+            const request = provider.buildRequest({ messages: [{ role: 'user', content: 'Test' }], tools: [{ ...tool, type: 'function' }] }, {
+                modelId: 'test-model', apiKey: 'test-key', maxOutputTokens: 1024, log,
+            }, stream);
+            const body = JSON.parse(request.body!) as {
+                tools: Array<{ name?: string; input_schema?: Record<string, unknown>;
+                    function?: { name: string; parameters: Record<string, unknown> };
+                    function_declarations?: Array<{ name: string; parameters: Record<string, unknown> }> }>;
+            };
+            const sent = body.tools[0];
+            const declaration = provider.info.id === 'anthropic' ? { name: sent.name, parameters: sent.input_schema }
+                : provider.info.id === 'gemini' ? sent.function_declarations![0] : sent.function!;
+            t.is(declaration.name, 'subagent_changes', provider.info.id);
+            t.is(declaration.parameters!.type, 'object', provider.info.id);
+            t.deepEqual(Object.keys(declaration.parameters!.properties as object).sort(),
+                ['action', 'change_id', 'cursor', 'draft_id', 'revision', 'scope'], provider.info.id);
+            t.deepEqual(declaration.parameters, tool.function.parameters, `${provider.info.id}: all constraints and descriptions survive`);
+        }
+    });
 }
 function workspaceFixture(existing: boolean, noRight = false) {
     const ready = deferred(), events: string[] = [];

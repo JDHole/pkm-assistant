@@ -82,7 +82,7 @@ export const en: Record<string, string> = {
   "chat.subdraft.notification": "Draft draft_id={{draft_id}}: {{count}} changes. Review and decide on files with subagent_changes. Ending the run does not accept changes.",
   "chat.subdraft.backlog": "Outstanding agent changes: {{count}}. Use subagent_changes with scope: agent.",
   "chat.subdraft.recovery_error": "Some drafts could not be restored ({{count}}). See the log; files were preserved.",
-  "mcp.subagent_changes.desc": "Review, accept or reject an individual sub-agent change.",
+  "mcp.subagent_changes.desc": "Review, accept or reject an individual sub-agent change. For list, draft_id and change_id are optional filters; change_id requires draft_id. scope and cursor are only allowed for list; revision is not allowed. For accept or reject, provide exactly action, draft_id, change_id and revision.",
   "mcp.subagent_changes.conflict": "File {{path}} changed since the draft was prepared. Reject the change or delegate it again.",
   "mcp.subagent_changes.stale_revision": "The change list is outdated. Fetch it again.",
   "mcp.subagent_changes.not_sealed": "The sub-agent is still preparing changes.",

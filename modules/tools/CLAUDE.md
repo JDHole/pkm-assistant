@@ -737,8 +737,9 @@ a wynik powtarza końcowy stan; batch zachowuje oddzielne odmowy.
 ### Publikacja argumentu (2.4.5 P5)
 
 `delegate.inputSchema` publikuje opcjonalne `context_mode: clean|parent_conversation`
-w pojedynczym zadaniu i każdym elemencie `tasks[]`. Schema odrzuca jednoczesne
-zewnętrzne `context_mode` i `tasks`, null oraz inne wartości. Brak pola oznacza clean;
+w pojedynczym zadaniu i każdym elemencie `tasks[]`. Schemat odrzuca null i inne
+wartości trybu; wewnętrzny walidator odrzuca jednoczesne zewnętrzne `context_mode`
+i `tasks` (od M4 F2d warunek `not` nie jest wysyłany dostawcom). Brak pola oznacza clean;
 ręczny `context` pozostaje niezależny. Opisy PL/EN objaśniają zakres, wykluczenia,
 zgodę innego dostawcy i brak startu po odmowie. Wykonanie zachowuje walidator P4.
 Testy P5 w `DelegateTool.parentConversation.test.ts`: publiczne definicje narzędzi,
@@ -886,7 +887,8 @@ oraz odczyty pamięci, todo i manager poczty wykonują rzeczywisty kod.
 
 Barrel eksportuje `createSubagentChangesTool(review)` i `createDraftReviewHost(app)`.
 Narzędzie jest zarejestrowane w manifeście delegacji i produkcyjnym runtime (P5). Fabryka
-publikuje ścisły oneOf list/accept/reject (additionalProperties:false); argumenty
+od M4 F2d publikuje płaski obiekt, a ścisły oneOf list/accept/reject
+(additionalProperties:false) pozostaje wewnętrznym walidatorem. Argumenty
 są unknown do walidacji i nie dopuszczają all, force, ścieżki, treści ani znaczników
 _invocation. Brak zaufanego kontekstu zawsze odmawia. List/reject nie pytają o zapis.
 
@@ -1028,3 +1030,35 @@ Uwaga poza zakresem F2b (z kodu, bez pomiaru ekranu): pasek drzewa nie gwarantuj
 celów dotyku 44 px - `src/styles.css:1453` ustawia min-height:0 chipów,
 a `src/styles.css:1500` daje toggle min-width:29px. To kandydat do późniejszej
 poprawy wygody, nie blokada przycisków przyjęcia/odrzucenia w modalach.
+
+## Mobile M4 F2d - schematy dostawców i walidacja argumentów
+
+Schemat wystawiany modelowi jest płaskim obiektem z `type: 'object'` i `properties`.
+Na najwyższym poziomie nie umieszczamy `oneOf`, `anyOf`, `allOf`, `not`, `if`,
+`then`, `else` ani `$ref`; `required` wskazuje wyłącznie istniejące pola.
+Ścisła walidacja zależności pozostaje wewnątrz narzędzia. Reguła dotyczy obu
+platform, ponieważ ten sam schemat trafia do dostawców z desktopu i telefonu.
+
+`subagent_changes` publikuje sześć pól, `additionalProperties:false` i wymagane
+`action`. Opis PL/EN wyjaśnia zależności akcji, a prywatny `oneOf` zachowuje odmowy
+`invalid_args`, wzorce identyfikatorów/kursora, zakres rewizji oraz zakaz dodatkowych
+pól. Pola obu schematów powstają ze wspólnych definicji. `delegate` przenosi tylko
+warunek `not(tasks + context_mode)` do istniejącego walidatora; dotychczasowy opis
+parametru już wyjaśnia to wykluczenie. Wykonanie obu narzędzi pozostaje bez zmian.
+
+Strażnik `F2d provider schema guard` w `src/main.mobile.test.ts` uruchamia produkcyjny
+start desktop/mobile z włączonymi modułami opcjonalnymi (komunikator i Obsidian App).
+Bada wszystkie definicje z `ToolRegistry.getToolDefinitions()`, bez własnej listy
+narzędzi. Osobny `F2d provider boundary` przepuszcza produkcyjne `subagent_changes`
+przez `buildRequest` wszystkich dziewięciu dostawców, w obu trybach strumienia;
+sprawdza także rzeczywiste `mapTools` Anthropic i deklarację Gemini. Weryfikuje typ,
+komplet sześciu pól oraz zachowanie całego schematu z opisami i ograniczeniami.
+Nie dodajemy napraw schematu w dostawcach. Obecny kod OpenAI-compatible oraz Ollama
+przekazuje parametry bez konwersji; repo nie implementuje konwersji OpenAI strict.
+
+`SubagentChangesTool.test.ts` zawiera tabelę 34 przypadków, sprawdzoną także przed
+zmianą: list/accept/reject, brakujące i nadmiarowe pola, zależne identyfikatory,
+typy i granice rewizji, scope/cursor. Asercje odmów sprawdzają pełny wynik wykonania,
+a poprawne decyzje także bajty pliku i stan kopii. Dotychczasowe asercje zależności
+schematów przeniesiono na wykonawców, ponieważ to oni nadal egzekwują te same
+odmowy. Pełna droga F2b pozostaje sprawdzana w `runnerDrafts.test.ts`.

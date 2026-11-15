@@ -8,26 +8,36 @@ import type { ToolDefinition, BuiltinToolExecutionContext } from './ToolRegistry
 
 type Input = { action: 'list'; scope?: 'session' | 'agent'; draft_id?: string; change_id?: string; cursor?: string }
     | { action: 'accept' | 'reject'; draft_id: string; change_id: string; revision: number };
-function schema(): Schema {
+function properties() {
     const id = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' } satisfies Schema;
-    const common = { draft_id: { ...id, description: t('mcp.subagent_changes.param.draft_id') },
-        change_id: { ...id, description: t('mcp.subagent_changes.param.change_id') } };
+    return {
+        action: { type: 'string', enum: ['list', 'accept', 'reject'], description: t('mcp.subagent_changes.param.action') },
+        draft_id: { ...id, description: t('mcp.subagent_changes.param.draft_id') },
+        change_id: { ...id, description: t('mcp.subagent_changes.param.change_id') },
+        revision: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: t('mcp.subagent_changes.param.revision') },
+        scope: { type: 'string', enum: ['session', 'agent'], description: t('mcp.subagent_changes.param.scope') },
+        cursor: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}/[A-Za-z0-9_-]{1,128}$', description: t('mcp.subagent_changes.param.cursor') },
+    } satisfies Record<string, Schema>;
+}
+function argumentSchema(fields: ReturnType<typeof properties>): Schema {
+    const common = { draft_id: fields.draft_id, change_id: fields.change_id };
     return { oneOf: [
         { type: 'object', additionalProperties: false, required: ['action'],
-            properties: { action: { const: 'list', description: t('mcp.subagent_changes.param.action') }, ...common,
-                scope: { enum: ['session', 'agent'], description: t('mcp.subagent_changes.param.scope') },
-                cursor: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}/[A-Za-z0-9_-]{1,128}$', description: t('mcp.subagent_changes.param.cursor') } },
+            properties: { action: { const: 'list', description: fields.action.description }, ...common,
+                scope: fields.scope, cursor: fields.cursor },
             if: { required: ['change_id'] }, then: { required: ['draft_id'] } },
         ...(['accept', 'reject'] as const).map(action => ({ type: 'object', additionalProperties: false,
             required: ['action', 'draft_id', 'change_id', 'revision'], properties: { ...common,
-                action: { const: action, description: t('mcp.subagent_changes.param.action') },
-                revision: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: t('mcp.subagent_changes.param.revision') } } } satisfies Schema)),
+                action: { const: action, description: fields.action.description },
+                revision: fields.revision } } satisfies Schema)),
     ] };
 }
 /** P4 exports the factory; P5 registers it only after store restore. Arguments are NEVER authority. */
 export function createSubagentChangesTool(review: DraftReview): ToolDefinition {
-    const inputSchema = schema();
-    const validator = new Validator(inputSchema);
+    const fields = properties();
+    // Providers receive a flat object; action-specific requirements stay private.
+    const inputSchema = { type: 'object', additionalProperties: false, required: ['action'], properties: fields } satisfies Schema;
+    const validator = new Validator(argumentSchema(fields));
     return {
         name: 'subagent_changes', source: 'built-in', description: t('mcp.subagent_changes.desc'), inputSchema,
         async execute(raw: unknown, _app?: unknown, _plugin?: unknown, context?: BuiltinToolExecutionContext) {
