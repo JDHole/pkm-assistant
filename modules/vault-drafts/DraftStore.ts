@@ -218,7 +218,9 @@ export class DraftStore {
     /** Call on a fresh store before admitting runs. Never resumes execution. */
     async restore(): Promise<{ drafts: readonly DraftManifest[]; issues: readonly RecoveryIssue[] }> {
         if (this.entries.size) throw new DraftError('draft-exists', 'Restore requires an empty store');
+        const temporaryIssues = await this.persistence.cleanupTemporary();
         const recovered = await this.persistence.loadAll();
+        recovered.issues.push(...temporaryIssues);
         this.recoveryIssues = recovered.issues.length > 0;
         const restored: DraftManifest[] = [];
         for (const input of recovered.manifests) {

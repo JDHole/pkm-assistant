@@ -72,13 +72,23 @@ export interface DraftStorageIO {
     list(path: string): Promise<readonly string[]>;
     /** Optional payload GC; never removes an unresolved manifest. */
     remove?(path: string): Promise<void>;
+    /** Before restore, with no active writers. Best-effort staging cleanup and diagnostics. */
+    cleanupTemporary?(): Promise<readonly RecoveryIssue[]>;
     read(path: string): Promise<Uint8Array>;
-    /** Creates parents; immutable blobs, durable before resolving. */
+    /** Creates parents; immutable blobs. Desktop flushes content; mobile verifies readback
+     * but cannot promise survival of process termination or power loss. */
     writeBlob(path: string, bytes: Uint8Array): Promise<void>;
     /**
      * Create-only, durable atomic publication. Evaluate mayPublish at the publication
      * linearization point, with no asynchronous gap. False leaves no visible manifest.
      * Rejection MUST mean no publication. A normal asynchronous write is NOT this port.
+     * Mobile exception (AdapterDraftStorage): create-only within one shared port instance;
+     * mayPublish gates the synchronous START of rename, not its asynchronous completion.
+     * Stop after that point cannot revoke it. No fsync, hard links, atomic rename or
+     * cross-process/device lock. Readback verifies completion, including a throwing rename.
+     * If target readback or removal fails, rejection can leave a target (even complete).
+     * Restore validates checksums and falls back from corrupt generations; it cannot
+     * identify a complete but unacknowledged publication or detect a vanished generation.
      */
     publish(path: string, bytes: Uint8Array, mayPublish: () => boolean): Promise<'published' | 'cancelled'>;
 }

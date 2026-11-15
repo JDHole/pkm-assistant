@@ -235,3 +235,8 @@ Memory scala odczyt indeksu w RAM, a jego przebudowa zachowuje obie strony i zap
 ## Mobile M2 D6 - diagnostyka śladów konfliktu pamięci
 
 Na obu platformach komenda diagnostyki przy zapisie lokalnego raportu zlicza ślady konfliktu przez ograniczony przegląd tylko do odczytu, bez pracy przy starcie; zamknięty słownik, limity i testy opisują `modules/memory/CLAUDE.md` oraz `modules/diagnostics/CLAUDE.md`.
+
+
+## Mobile M4 F2a - magazyn kopii roboczych na adapterze vaulta
+
+Nowy, jeszcze niepodłączony port `AdapterDraftStorage` zachowuje format kopii i sprawdza integralność przez adapter vaulta, z jawnie słabszą trwałością mobilną, sprzątaniem stagingu przy restore i wspólnymi testami kontraktu desktop/mobile; gwarancje i ograniczenia opisuje `modules/vault-drafts/CLAUDE.md`.

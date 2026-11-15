@@ -1,4 +1,6 @@
-import test from 'ava';
+import avaTest, { type ExecutionContext } from 'ava';
+import { AdapterDraftStorage } from './AdapterDraftStorage.js';
+import { MemoryAdapter } from './test-support/MemoryAdapter.js';
 import { createHash } from 'node:crypto';
 import { DraftStore, DraftPersistence, DraftError, DRAFT_ROOT, parseDraftId, parseVaultPath,
     parseChangeId, parseBlobId, parseContentHash, parseRevision, parseDraftManifest } from './index.js';
@@ -66,14 +68,34 @@ class Vault implements DraftVaultIO {
         return bytes;
     }
 }
+class AdapterStorage extends AdapterDraftStorage {
+    readonly files: Map<string, Uint8Array>;
+    failPublication = false;
+    beforePublish?: () => Promise<void>;
+    beforeBlob?: () => Promise<void>;
+    constructor(readonly adapterFixture = new MemoryAdapter()) {
+        super(adapterFixture);
+        this.files = adapterFixture.files;
+        adapterFixture.before = async (operation, path) => {
+            if (operation === 'writeBinary' && path.includes('/blobs/')) await this.beforeBlob?.();
+            if (operation === 'readBinary' && path.includes('/.staging/')) await this.beforePublish?.();
+            if (operation === 'rename' && this.failPublication) throw new Error('disk full');
+        };
+    }
+}
+for (const backend of ['memory', 'adapter'] as const) {
+function test(title: string, run: (t: ExecutionContext) => Promise<void>) {
+    avaTest(`${backend}: ${title}`, run);
+}
 async function fixture() {
-    const storage = new Storage(), vault = new Vault();
+    const storage = backend === 'adapter' ? new AdapterStorage() : new Storage(), vault = new Vault();
     const persistence = new DraftPersistence(storage, hasher);
     const clock = { now: () => 100 };
     const store = new DraftStore(persistence, vault, clock);
     await store.create(identity);
     return { storage, vault, persistence, clock, store,
-        restart: () => new DraftStore(new DraftPersistence(storage, hasher), vault, clock) };
+        restart: () => new DraftStore(new DraftPersistence(storage instanceof AdapterStorage
+            ? new AdapterDraftStorage(storage.adapterFixture) : storage, hasher), vault, clock) };
 }
 const write = (store: DraftStore, text: string, path = a) => store.mutate(id, { path, source, value: { kind: 'text', text } });
 async function proposal(persistence: DraftPersistence, manifest: DraftManifest, path = a): Promise<string> {
@@ -433,3 +455,5 @@ test('F8 active blob references and unknown orphan layout remain readable', asyn
     t.deepEqual(await f.storage.list(`${DRAFT_ROOT}/${id}/blobs`), []);
     t.is(decode(await f.storage.read(unknown)), 'NIEZNANY');
 });
+
+}

@@ -15,6 +15,11 @@ function parseJSON(bytes: Uint8Array): unknown {
 const generationName = /^(\d{6,16})\.json$/;
 export class DraftPersistence {
     constructor(private readonly io: DraftStorageIO, private readonly hasher: DraftHasher) {}
+    async cleanupTemporary(): Promise<readonly RecoveryIssue[]> {
+        if (!this.io.cleanupTemporary) return [];
+        try { return await this.io.cleanupTemporary(); }
+        catch (cause) { return [this.issue(DRAFT_ROOT, cause)]; }
+    }
     private directory(id: DraftId): string { return `${DRAFT_ROOT}/${parseDraftId(id)}`; }
     async hash(bytes: Uint8Array): Promise<ContentHash> { return parseContentHash(await this.hasher.sha256(bytes)); }
     async putBlob(id: DraftId, bytes: Uint8Array): Promise<{ blob: BlobId; hash: ContentHash; bytes: number }> {

@@ -1,7 +1,7 @@
 # modules/vault-drafts/
 
 P1–P5 wersji 2.4.7: trwały magazyn, warstwowy widok i przegląd kopii roboczych.
-Runtime odtwarza magazyn przed rejestracją delegacji. Nie importuje Obsidiana, runnera, czatu ani MCPClient.
+Runtime odtwarza magazyn przed rejestracją delegacji. Nie importuje runtime Obsidiana, runnera, czatu ani MCPClient; port adaptera używa wyłącznie typu DataAdapter.
 Jedyny port zapisu do bazowego vaulta należy do jawnego DraftReview; magazyn i widok pozostają odizolowane.
 
 Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), a od P3 runner tworzy widok/host wyłącznie po jawnym wstrzyknięciu
@@ -20,6 +20,8 @@ wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
   całego manifestu, `open → sealed`, odtworzenie po restarcie.
 - `DraftView.ts`: własna kopia → zamrożeni poprzednicy → vault; listing, tombstones,
   tekst/binary, pochodzenie i kolejka read-modify-write współdzielona przez hosty biegu.
+- `AdapterDraftStorage.ts`: port mobilny nad wąskim `Pick<DataAdapter, ...>`, bez Node,
+  z kontrolą bajtów, kolejkami i sprzątaniem stagingu przed restore (F2a, jeszcze bez podłączenia).
 - `DraftStore.test.ts`: AVA, odczyty faktycznie zapisanych bajtów przez nową instancję,
   awarie i bariery sterujące wyścigami; bez Obsidiana i rzeczywistych timerów.
 
@@ -55,7 +57,7 @@ Zapis wyłącznie pod `.pkm-assistant/subagent-drafts/v1/<draftId>/`:
 mutacji; generacja manifestu również przy seal/restore. Manifest jest opakowany jako
 `{payload: string, checksum: SHA256(payload)}`. Starsze generacje są zachowane.
 
-Port `DraftStorageIO.publish` jest **atomową, create-only publikacją**, nie zwykłym
+Desktopowy kontrakt `DraftStorageIO.publish` jest **atomową, create-only publikacją**, nie zwykłym
 `adapter.write`: musi ocenić `mayPublish` w punkcie publikacji bez asynchronicznej
 przerwy i zwrócić `cancelled` bez widocznej generacji, jeżeli zamknięto kopię.
 Odrzucenie oznacza brak publikacji, sukces — trwałe, odczytywalne bajty. Przygotowanie
@@ -64,7 +66,7 @@ Adapter desktopowy P5 realizuje ten kontrakt synchroniczną publikacją przez ha
 portu sekwencją „sprawdź flagę → await write”; zgubiłaby ochronę przed późnym zapisem.
 P1 testuje oba momenty Stopu: podczas bloba oraz przed atomową publikacją manifestu.
 Jeden aktywny store jest właścicielem namespace; równoległe procesy zapisujące ten sam
-DraftId wymagają blokady po stronie adaptera. `publish` nie nadpisuje istniejącej nazwy.
+DraftId wymagają blokady po stronie adaptera. `publish` nie nadpisuje istniejącej nazwy. Jawny wyjątek mobilny i jego ograniczenia opisuje sekcja F2a poniżej.
 
 Port magazynu/widoku vaulta ma tylko `stat/read` (widok dodatkowo list). Baza powstaje przy pierwszej mutacji przez
 stat → bajty → stat, maksymalnie trzy próby. Błąd odczytu daje `io-error`, nie pustą
@@ -239,3 +241,87 @@ Nierozpoznany układ/nazwa pozostaje nietknięty, a błąd odzyskiwania blokuje 
 Referencje wejść nadal blokują zwykły GC rozstrzygniętych kopii. Testy F8 w
 `DraftStore.test.ts` odtwarzają Stop przed manifestem, restart, aktywną referencję
 i nieznany format; test P5 w `tools/vaultDraftRuntime.test.ts` sprawdza referencję C.
+
+
+## Mobile M4 F2a - magazyn na adapterze vaulta
+
+Barrel eksportuje `AdapterDraftStorage(adapter)`. Konstruktor przyjmuje wyłącznie
+`Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>`.
+Nie wykrywa platformy i nie importuje Node ani runtime Obsidiana. F2a nie podłącza
+portu do pluginu; composition root, runner, narzędzia i DesktopDraftStorage pozostają
+bez zmian. F2b ma wybrać port przez istniejący `Platform.isMobile`, współdzielić jedną
+instancję na namespace i zakończyć restore przed dopuszczeniem pisarzy.
+
+Format i korzeń pozostają wspólne: `.pkm-assistant/subagent-drafts/v1`.
+Walidacja nazw zachowuje desktopowe ASCII, odrzuca `..`, `.`, puste segmenty,
+ścieżki absolutne i wyjście poza korzeń. Dodatkowo rezerwuje `.staging` bez dostępu
+przez publiczne read/write/list/remove. Rodzice korzenia są tylko tworzeni w razie
+braku. Adapter nie udostępnia lstat, więc nie obiecujemy wykrycia dowiązań symbolicznych.
+Listowanie normalizuje pełne ścieżki i same nazwy do bezpośrednich dzieci,
+bez ukrywania błędów I/O jako pustego magazynu. Brak katalogu daje pustą listę.
+
+`writeBlob` kopiuje wejściowe bajty, serializuje ścieżkę, czyta istniejący blob i
+akceptuje tylko identyczną zawartość bez ponownego zapisu. Nowy zapis jest odczytywany
+bajt w bajt; błąd powoduje próbę usunięcia. Gdy usunięcie nie działa, uszkodzony blob
+pozostaje do wykrycia przez SHA-256 i długość w DraftPersistence.
+
+`publish` najpierw odmawia istniejącego celu, następnie zapisuje unikalny plik w
+`.staging`, odczytuje bajty kontrolnie i w jednym synchronicznym kroku sprawdza
+wcześniejszy stat oraz rejestr publikacji, wywołuje `mayPublish`, rezerwuje nazwę i
+rozpoczyna rename. Kolejka per ścieżka uniemożliwia dwóm wywołaniom wygranie tej samej
+nazwy. Inne ścieżki nie czekają na tę publikację; tworzenie wspólnych rodziców ma
+osobną serializację. Błąd nie zatruwa kolejki. Rejestr zachowuje także niepewny cel,
+żeby brak potwierdzenia nie pozwolił nadpisać go w tym runtime.
+
+Po rename, także odrzuconym, odczyt celu rozstrzyga wynik: brak oznacza błąd,
+identyczne bajty oznaczają sukces, inne bajty powodują próbę usunięcia i błąd.
+Rename, który nic nie zrobił mimo resolve, również kończy się błędem.
+Staging jest sprzątany best-effort w finally; jego pozostałości nigdy nie są
+manifestami ani blobami. `cancelled` nie tworzy celu, choć awaria sprzątania może
+pozostawić ukryty staging.
+
+| Gwarancja | Desktop | Telefon |
+|---|---|---|
+| Integralność blobów i manifestów | SHA-256, długość, readback w persistence | Ten sam format i walidacja, dodatkowy readback portu |
+| Niezmienność bloba | Porównanie istniejących bajtów, publikacja hard link | Porównanie bajtów i kolejka jednej instancji |
+| Create-only manifestu | Synchroniczny linkSync nie nadpisuje celu | Wcześniejszy stat, rejestr i kolejka jednej instancji |
+| Stop przed publikacją | mayPublish bez przerwy przed linkSync | mayPublish bez przerwy przed rozpoczęciem rename |
+| Stop po rozpoczęciu rename | Nie dotyczy synchronicznego linkSync | Nie odwołuje operacji już dopuszczonej; może ona zakończyć się po Stop |
+| Trwałość zawartości | fsync stagingu, bez pełnej gwarancji metadanych po utracie zasilania | Brak fsync; nawet potwierdzona generacja może zniknąć po ubiciu procesu lub utracie zasilania |
+| Atomowość publikacji | Hard link | Brak udokumentowanej atomowości rename i brak hard linków |
+| Odrzucenie publikacji | Brak nowej publikacji | Niepewny cel może pozostać przy błędzie odczytu lub usunięcia |
+| Blokada procesów/urządzeń | Brak | Brak |
+| Dowiązania symboliczne | Odrzucane przez lstat | Brak takiej zdolności w wąskim API adaptera |
+| Restart po uszkodzeniu | Ostatnia kompletna generacja, issues | Ten sam skan, plus diagnostyka i sprzątanie stagingu |
+
+Opcjonalne `DraftStorageIO.cleanupTemporary()` zwraca `RecoveryIssue[]`.
+DraftStore.restore wywołuje je przez persistence wyłącznie przed odtwarzaniem,
+na pustym store, przed przyjęciem pracy. Zwykły skan/GC nie sprząta stagingu aktywnego
+pisarza. Desktop nie implementuje hooka, zatem nie dostaje dodatkowego I/O.
+Pozostałości są raportowane nawet po skutecznym usunięciu; błąd skanu lub sprzątania
+nie blokuje startu. Jak inne issues, blokują GC w tym store.
+
+Po przerwanym stagingu restore zwraca poprzednią kompletną generację i issue.
+Po uciętym manifeście zachowuje uszkodzony plik, zgłasza issue i wraca do poprzedniej
+kompletnej generacji. Nie stosuje zmian do vaulta. Pełna generacja pozostawiona po
+nieudanym potwierdzeniu jest nieodróżnialna od poprawnej publikacji i może być
+odtworzona. Całkowicie zaginionej generacji nie da się wykryć, więc powrót do starszej
+może nie mieć issue. To świadome ograniczenia mobilne, nie desktopowy kontrakt.
+
+Testy:
+- `DraftStorage.contract.test.ts`: jedna rejestracja kontraktu dla nowego portu i
+  niezmienionej klasy desktopowej na prawdziwym katalogu tymczasowym; pusty listing,
+  binaria, niezmienność, create-only, cancellation, odmowa, GC i walidacja ścieżek.
+- `AdapterDraftStorage.test.ts` oraz `test-support/MemoryAdapter.ts`: awarie przed i
+  po operacjach, ucięte zapisy, rename po wykonaniu/bez efektu/częściowy, błędy
+  readback i cleanup, obie postacie listingu, współbieżność i granice Stopu.
+  Snapshot plików na granicy I/O pozwala odtworzyć nowy store po symulowanym ubiciu.
+- `DraftStore.test.ts`: wszystkie dotychczasowe 26 scenariuszy uruchamiane dodatkowo
+  na nowym porcie, z tymi samymi asercjami i nową instancją portu przy restarcie.
+
+Testy pamięciowe nie dowodzą zachowania CapacitorAdapter na Androidzie/iOS:
+pozostają próby ukrytych katalogów, rename przy ubiciu procesu, zaniku zasilania,
+wydajności i pamięci dla dużych blobów oraz synchronizacji między urządzeniami.
+F2b musi uwzględnić te ograniczenia również przy dopuszczeniu review; dane pod
+wspólnym korzeniem mogą podlegać synchronizacji vaulta. F2a nie zmienia gitignore
+ani zasad współdzielenia danych między urządzeniami.
