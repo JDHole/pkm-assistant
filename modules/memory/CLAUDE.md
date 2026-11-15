@@ -53,7 +53,7 @@ modules/memory/
 ├── MigrationV3.ts            # backup-first migracja brain.md v2 -> v3
 ├── StateManager.ts           # .state.json: aktywne sesje + liczniki, kolejka RMW
 ├── gitConflict.ts            # splitGitConflict: tekst -> dwie pełne strony, dla D1 i kolejnych paczek M2
-├── brainConflict.ts          # M2 D3: scalanie w RAM i ochrona przykładów w obcych ogrodzeniach kodu
+├── brainConflict.ts          # M2 D3: scalanie w RAM, bezpiecznik ogrodzeń i dwie samokontrole
 ├── brainConflictWrite.ts     # M2 D3: zweryfikowana kopia oryginału przed zapisem naprawy
 ├── stateConflict.ts          # czyste mergeStateConflict, opcjonalny spis istniejących sesji
 ├── sessionOwnership.ts      # DeviceId, parseDeviceId, sessionOwnership, ForeignSessionError (publiczny barrel)
@@ -1726,51 +1726,62 @@ odczyt nadal ładuje całość dziennika do RAM i zachowuje dotychczasowy wstęp
 `brainConflict.ts` rozpoznaje kompletne, niezagnieżdżone bloki merge/diff3/zdiff3.
 `mergeBrainConflict` jest czysty: wynik `merged` z tekstem albo `not-applicable`
 (z `malformed:true` dla złej struktury lub niespełnionego niezmiennika).
-D3c zastępuje blokowe kotwice scalaniem dwóch pełnych stron:
+D3c scala dwie pełne strony, a D3d usuwa całą obsługę ogrodzeń kodu:
 
-- Po ochronie kompletnych przykładów w obcych ogrodzeniach odtwarzamy naszą i ich
-  wersję całego pliku; baza diff3/zdiff3 jest pomijana. Każdą stronę rozbieramy
-  niezależnie, z własnym kontekstem ogrodzeń kodu.
-- Sekcja to preambuła (wszystko przed pierwszym H2, razem z H1) albo H2 z treścią
-  do następnego H2 poza ogrodzeniem. Klucz H2 to cały wiersz nagłówka po `trimEnd`.
-  Powtórzone nagłówki mają wspólny zbiór wierszy, ale zachowują swoje wystąpienia.
-  Różne wiersze H1 poza ogrodzeniami, również brak H1 po jednej stronie, oznaczają
-  `malformed`: nie zgadujemy tytułu. Końcowe białe znaki H1 nie stanowią różnicy.
-- Nasza strona zachowuje wszystkie wiersze, bajty, kolejność i powtórzone nagłówki.
-  Do sekcji obecnej po obu stronach dopisujemy tylko brakujące niepuste wiersze
-  ich pełnej wersji tej sekcji. Porównanie po `trimEnd`, zbiór dla całej sekcji;
-  dopiski nie powtarzają się i zachowują ich kolejność. Trafiają za ostatni
-  niepusty wiersz ostatniego naszego wystąpienia sekcji, przed końcowe puste wiersze.
-  Preambuła jest scalana tą samą regułą.
-- Sekcje obecne tylko po ich stronie kopiujemy w całości, z białymi znakami,
-  duplikatami i kolejnymi wystąpieniami. Każde wystąpienie trafia za ostatnie
-  wystąpienie poprzedzającej je sekcji ich wersji, jeśli jest w wyniku, inaczej
-  na koniec. Preambuła może być poprzednikiem pierwszej nowej sekcji.
-- **Scalanie nigdy nie usuwa:** wiersz usunięty przez jedną stronę, a zachowany
-  przez drugą, pozostaje. Może to przywrócić świadomie skasowaną treść; bez historii
-  intencji bezpieczniejsza jest zachowana treść. Dotyczy to projekcji konfliktu,
-  nie późniejszych, istniejących reguł przebudowy indeksu i limitów "Na teraz".
-- Każdy dopisek zaczyna się w nowym wierszu. Brakujący EOL poprzednika uzupełniamy
-  CRLF, jeśli plik zawiera CRLF, inaczej LF. To jedyny wyjątek od zachowania
-  bajtów naszych wierszy; BOM i EOL chronionych ogrodzeń także pozostają nietknięte.
-- Liniowa samokontrola rozbiera rzeczywiście wyemitowane bajty i pełne projekcje
-  OBU stron, łącznie z wierszami wspólnymi. Każda para (sekcja, niepusty wiersz
-  po `trimEnd`) musi pozostać w wyniku. Sprawdzamy także brak znaczników poza
-  chronionymi ogrodzeniami po przywróceniu ich bajtów. Niespełnienie oznacza
-  `not-applicable` z `malformed:true`, oryginał i dotychczasowy pojedynczy warn
-  bez treści użytkownika. Na przykład niedomknięte ogrodzenie jednej strony
-  może zmienić przynależność dalszych nagłówków i wymusić tę odmowę.
-- Mapy zbiorów i ostatnich wystąpień oraz lista połączonych sekcji zapewniają
-  liniowy koszt bez przeszukiwania narastającego wyniku, kotwic i grupowania hunka.
-
-Zamknięte ogrodzenie kodu backtickami lub tyldami w obcej sekcji H2 chroni
-kompletny przykład konfliktu wewnątrz. Same takie przykłady dają `not-applicable`.
-Przy przebudowie pliku ze znacznikami `protectForeignBrainFences` ukrywa obce
-ogrodzenia przed starymi parserami indeksu (które rozpoznają H2 również w kodzie),
-a potem przywraca ich bajty. To chroni również drugą przebudowę po naprawie.
-Niekompletny lub zagnieżdżony konflikt nie jest scalany; `readBrainContent`
-oddaje oryginał i loguje jeden warn na wywołanie, bez treści użytkownika.
-Bez ciągu `<<<<<<<` odczyt kończy się na szybkim sprawdzeniu stringa.
+- Bez ciągu `<<<<<<<` kończymy na jednym `includes`. W przeciwnym razie jeden
+  liniowy przebieg szuka wiersza otwarcia według `isGitConflictStart` oraz
+  dowolnego wiersza z 0-3 spacjami i co najmniej trzema backtickami lub tyldami.
+  Ich kolejność, sekcja, poprawność informacji po ogrodzeniu i zamknięcie nie mają
+  znaczenia. Oba sygnały dają `not-applicable` BEZ `malformed` i bez warningu.
+  Również prawdziwy konflikt obok kodu NIE jest automatycznie naprawiany.
+- Plik z ogrodzeniem wraca do zachowania sprzed D3 (`5fe75ee`): odczyt granicy
+  tekstowej zwraca oryginalne bajty, przebudowa używa zwykłych parserów. Nie ma
+  dodatkowych kopii w `backups/`. Dotychczasowy `brain.md.bak`, dosztukowanie
+  nagłówków przez `getBrain` i interpretowanie H2 wewnątrz kodu zostają.
+  To nie jest gwarancja zachowania całego bloku kodu przy przebudowie: stary parser
+  może usunąć jego niewypunktowany tekst w sekcji "Na teraz". D3d świadomie nie
+  rozszerza ochrony tego wyjątkowego formatu indeksu.
+- Bez ogrodzeń odtwarzamy obie pełne projekcje konfliktu, pomijając bazę diff3.
+  Sekcja to preambuła (razem z H1) lub H2 z treścią do następnego H2. Rozpoznawanie
+  H2 korzysta z `isBrainSectionHeading` w `BrainIndex.ts`, tej samej funkcji co
+  `parseManualIndexLines` i `parseForeignSections`: pełny `trim()` i `##` z białym
+  znakiem oraz niepustym tytułem. Dawny wzorzec scalania ograniczony do trzech
+  spacji pomijał tabulatory, większe wcięcia i białe znaki Unicode; teraz je widzi.
+  Klucz sekcji nadal stanowi cały surowy nagłówek po `trimEnd`, bez zmiany bajtów.
+- Klasyfikacja zarządzanych/obcych i "Na teraz" w drugiej samokontroli należy
+  wyłącznie do istniejących parserów, z ich `sectionKeyOf` i `isNaTerazHeading`.
+  Zastana subtelność: `parseNaTerazSections` wymaga dopasowania całego tytułu przez
+  `(.+)`, więc U+2028/U+2029 wewnątrz H2 może nie zamknąć poprzedniej sekcji
+  "Na teraz", choć zamyka sekcję ręczną/obcą. Nie zmieniamy zdrowego parsera;
+  druga samokontrola odmawia, jeśli taka różnica spowodowałaby stratę.
+- Różne H1 (także brak po jednej stronie) dają `malformed`; końcowe białe znaki
+  H1 nie stanowią różnicy. Nasza strona zachowuje bajty, kolejność i powtórzenia.
+  Brakujące niepuste wiersze ich sekcji dopisujemy za ostatnim niepustym wierszem
+  ostatniego naszego wystąpienia tego nagłówka, przed końcowe puste wiersze.
+  Deduplikacja używa `trimEnd` w obrębie całej sekcji, także preambuły.
+- Całe sekcje obecne tylko po ich stronie, również puste i powtórzone, trafiają
+  za ostatnie wystąpienie poprzedzającej je sekcji ich wersji, albo na koniec.
+  Scalanie nigdy nie usuwa: może przywrócić wiersz skasowany po jednej stronie.
+  Każdy dopisek zaczyna się osobnym wierszem: brakujący EOL uzupełniamy CRLF,
+  jeśli występuje w pliku, inaczej LF. BOM pozostaje w projekcji odczytu.
+- Pierwsza samokontrola sprawdza brak znaczników oraz każdą parę (sekcja,
+  niepusty wiersz po `trimEnd`) z obu pełnych projekcji w wyemitowanym wyniku.
+- Druga samokontrola uruchamia rzeczywiste czyste `parseNaTerazSections`,
+  `parseManualIndexLines` i `parseForeignSections` na obu stronach i wyniku.
+  Każdy zachowywany element strony musi być zachowywany w wyniku: wypunktowanie
+  per klucz "Na teraz", ręczny wiersz per klucz zarządzany, obcy nagłówek nawet
+  pustej sekcji oraz jego niepuste wiersze. "Na teraz" porównujemy po normalizacji
+  parsera i bez rozróżniania wielkości liter; pozostałe wiersze po `trimEnd`.
+  Liczność duplikatów i puste separatory nie są nowym kontraktem zachowania.
+  Każde naruszenie daje `not-applicable` z `malformed`, oryginał i jeden istniejący
+  warning na odczyt, bez treści pliku.
+- Zwykły `rebuildBrainIndex` NIE ogranicza liczby wpisów "Na teraz", więc druga
+  samokontrola także nie przycina do dziesięciu. Limit należy do jawnej mutacji
+  `writeNaTeraz`/`applyNaTerazOps`; dopiero ona może usunąć najstarsze wpisy.
+  Deduplikacja parsera i normalizacji używa teraz zbiorów zamiast liniowych
+  wyszukiwań w rosnącej tablicy, zachowując pierwszą pisownię i kolejność.
+- Mapy zbiorów, ostatnich wystąpień i połączona lista sekcji zapewniają liniowy
+  koszt. Samokontrola nie powiela długiego nagłówka w kluczu każdego wiersza.
 
 Wspólna granica tekstowa `readBrainContent` jest eksportowana przez barrel dla
 profilu agenta. Korzystają z niej `getBrain`, `_parseBrainSections`, przebudowa,
@@ -1808,40 +1819,39 @@ Pozostałe ograniczenia: brak atomowego compare-and-swap i blokady synchronizato
 Nie zmieniamy nieoznaczonych splotów, notatek brain/, formatu danych,
 limitów "Na teraz", skryptów chmury ani starszego pluginu.
 
-Testy `brainConflict.test.ts`: literalne unie sekcji i nagłówków, wspólne wiersze,
-diff3, BOM/CRLF, ogrodzenia, błędna struktura i log bez treści oraz trzy rzeczywiste
-wywołania `git merge-file`. `brainConflict.integration.test.ts`: prompt, indeks
-zgodny z katalogiem, Na teraz, migracja, wyszukiwanie, kopie i ich kolizje, awarie
-I/O, pull podczas kopii, kolejka dwóch instancji, druga przebudowa oraz literalne
-bajty i uporządkowane I/O zdrowych ścieżek porównane z kodem sprzed D3, w tym
-`updateBrain` oraz bezpośrednie `applyPlan` bez oryginału.
-Testy `brainConflict.sections.test.ts` zachowują oba przypadki D3b i dodają
-bloker D3c: zmiana nagłówka zmienia sekcję wspólnego ogona po ich stronie.
-Wszystkie trzy style prawdziwego `git merge-file`, LF/CRLF, literalny pełny wynik,
-kopie i dwie przebudowy potwierdzają zachowanie ręcznego wiersza pod `## User`.
-Nowe testy sprawdzają ostatnie powtórzone H2, lokalną deduplikację, preambułę,
-całe nowe/puste/powtórzone sekcje, różnicę H1 (3 odmowy), niezależne konteksty
-ogrodzeń, BOM i dokładne EOL przykładów oraz odmowę po naruszeniu samokontroli.
+Testy `brainConflict.test.ts`: literalne unie, deduplikacja, błędne znaczniki,
+BOM/CRLF i prawdziwy git. Przykłady w kodzie, także obok prawdziwego konfliktu,
+wymagają teraz nienaruszonego oryginału i `not-applicable`.
+`brainConflict.integration.test.ts`: czytnicy/prompt, pisarze, migracja,
+wyszukiwanie, kopie, awarie I/O, kolejki i literalne zdrowe bajty oraz I/O.
+Usunięto test mechanizmu zastępczych znaczników; dawne oczekiwanie ochrony
+ogrodzonego H2 przy przebudowie zastępuje jawny kontrakt zgodności sprzed D3.
 
-Próba własnościowa ze stałym ziarnem: 720 par, 2160 wywołań gita, 2025 konfliktów,
-2025 `merged`, 0 `malformed` (H1: 0, składnia: 0, niezmiennik: 0).
-Niezależna projekcja testowa sprawdza pełne obie strony, także wspólne wiersze;
-wynik: 0 naruszeń przynależności, 0 sklejonych wierszy, 0 znaczników.
-Edycje obejmują dodawanie/usuwanie wierszy i sekcji, zmianę nagłówka, przenoszenie
-wiersza między sekcjami, zmianę kolejności sekcji, duplikaty, końcowe białe znaki,
-puste sekcje, brak końcowego EOL i CRLF. Generator nie zmienia H1; różne H1
-sprawdzają osobne testy prawdziwego gita.
+`brainConflict.fences.test.ts` (D3d): 36 rzeczywistych scaleń trzech syntetycznych
+reprodukcji (zamknięte/niedomknięte ogrodzenia oraz wspólny przykład po konflikcie
+nagłówka), merge/diff3/zdiff3, LF/CRLF, BOM; 8 zdrowych plików z kodem; patologiczne
+160 KiB; granice składni ogrodzeń; H2 z tabulatorem, większym wcięciem i Unicode;
+odmowa drugiej samokontroli dla U+2028; zachowanie 12 wpisów po zwykłej przebudowie
+oraz przycięcie po jawnej edycji. Oczekiwania bajtów i pełnego uporządkowanego I/O
+są literalne i zostały także uruchomione z `AgentMemory`/`BrainIndex` z `5fe75ee`.
+Dla ogrodzeń zero warningów i kopii naprawczych; istniejący `.bak` zgodny z bazą.
 
-Świadome zmiany oczekiwań D3b: przypadek nowej sekcji "Na teraz" umieszcza ją
-po preambule, przed `User`; przypadek EOF umieszcza `Dawna` za `User`.
-To tylko kolejność projekcji, oczekiwania obu przebudów pozostają identyczne.
-Dawny test odmowy dla przejętego wspólnego ogona wymaga teraz dokładnego
-bezstratnego scalenia, zgodnie z D3c. Testy zdrowych bajtów/I/O są nietknięte.
-Samokontrola mutacyjna na 80 testach D3: pominięcie wspólnych wierszy ich strony
-wywraca 12 testów, dopiski pod pierwszym zamiast właściwym nagłówkiem 43,
-usunięcie uzupełniania EOL 9. Po każdej próbie kod został przywrócony.
-Pomiar przed zmianą na syntetycznym pliku: prompt niósł 3 bloki konfliktu;
-rebuild zostawiał 2 bloki oraz dwie kopie ręcznego wiersza "Wspólny".
+`brainConflict.sections.test.ts` zachowuje reprodukcje D3b/D3c i rozszerza próbę
+własnościową: 720 par, 2160 wywołań gita, 2025 konfliktów i 2025 `merged`, zero
+`malformed` (H1/składnia/pierwsza samokontrola/druga samokontrola: 0/0/0/0), zero
+naruszeń. Edycje obejmują dodawanie/usuwanie/przenoszenie wierszy i sekcji, zmianę
+nagłówka i kolejności, powtórzenia, whitespace, puste sekcje, brak końcowego EOL,
+LF/CRLF. Oczekiwania zachowania liczymy przez prawdziwy `rebuildBrainIndex` każdej
+pełnej projekcji gita osobno na adapterze w pamięci. Wynik konfliktu przechodzi
+DWIE prawdziwe przebudowy: zachowuje unię elementów obu osobnych przebudów, druga
+jest bajtowo bez zmian. To kontrola scalania względem przebudowy, nie względem
+samego scalania. H1 i odmowę drugiej samokontroli sprawdzają osobne testy.
+
+Pomiar D3d na syntetycznym pliku 163977 bajtów z wieloma wierszami ogrodzeń:
+4,739 ms w Node (próg testu 100 ms). Mutacje na 138 testach D3: wyłączenie
+bezpiecznika ogrodzeń wywraca 57, drugiej samokontroli 1, zastąpienie wspólnego
+rozpoznawania H2 dawnym własnym regexem 4. Wszystkie mutacje cofnięto przed bramkami.
+Nie jest to pomiar na telefonie ani próba synchronizacji GitSync/obsidian-git.
 
 ## Mobile M2 D6 - przegląd śladów konfliktu na żądanie
 

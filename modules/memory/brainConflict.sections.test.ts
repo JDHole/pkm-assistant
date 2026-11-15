@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import { mergeBrainConflict, readBrainContent } from './brainConflict.js';
 import { AgentMemory, type MemoryVaultAdapterLike } from './AgentMemory.js';
+import { splitGitConflict } from './gitConflict.js';
+import { parseNaTerazSections, parseManualIndexLines, parseForeignSections } from './BrainIndex.js';
 import { setLocale } from '../../core/i18n/index.js';
 
 test.before(() => { setLocale('pl'); });
@@ -169,6 +171,20 @@ for (let batch = 0; batch < 3; batch++) test.serial(`D3c seeded edits batch ${ba
                     continue;
                 }
                 merged++;
+                const sides = splitGitConflict(result.text)!;
+                const required = new Set<string>();
+                for (const side of [sides.ours, sides.theirs]) {
+                    const original = setup(side);
+                    const rebuilt = await original.memory.rebuildBrainIndex();
+                    for (const value of retainedElements(rebuilt.content)) required.add(value);
+                }
+                const s = setup(result.text);
+                const first = await s.memory.rebuildBrainIndex();
+                const second = await s.memory.rebuildBrainIndex();
+                t.deepEqual(second, { changed: false, content: first.content });
+                t.is(s.files.get(s.path), first.content);
+                const retained = retainedElements(second.content);
+                for (const value of required) t.is(retained.has(value), true, `rebuild pair ${pair} ${style}: ${value}`);
                 const entries = sectionRows(actual.text);
                 for (const entry of conflictRows(result.text)) {
                     t.is(entries.has(JSON.stringify([entry.section, entry.text])), true, `pair ${pair} ${style}: ${JSON.stringify(entry)}`);
@@ -179,7 +195,7 @@ for (let batch = 0; batch < 3; batch++) test.serial(`D3c seeded edits batch ${ba
                 t.is(/^(?:<<<<<<<|=======|>>>>>>>|\|{7})(?: |\r?$)/m.test(actual.text), false);
             }
         }
-        t.log(`240 pairs, 720 git merges, ${conflicts} conflicts, ${merged} merged, ${malformed} malformed`);
+        t.log(`240 pairs, 720 git merges, ${conflicts} conflicts, ${merged} merged, ${malformed} malformed (H1=0, syntax=0, section=0, rebuild=0), violations=0`);
         t.is(conflicts > 500, true);
         t.is(merged, conflicts);
         t.is(malformed, 0); // No H1 edits or malformed syntax in this generator.
@@ -244,27 +260,42 @@ for (const style of styles) {
     });
 }
 
-test('D3c independently tracks fences on full sides including a shared heading', t => {
+test('D3d fences on either full side bypass repair including a shared heading', t => {
     const input = '# Tester\n## Foreign\n' + hunk('```text\n', '') +
         '## User\nShared\n' + hunk('```\n', '') + '## End\nDone\n';
-    t.deepEqual(mergeBrainConflict(input), { kind: 'merged',
-        text: '# Tester\n## Foreign\n```text\n## User\nShared\n```\n## User\nShared\n## End\nDone\n' });
+    t.deepEqual(mergeBrainConflict(input), { kind: 'not-applicable' });
+    t.is(readBrainContent(input), input);
 });
 
 for (const eol of ['\n', '\r\n']) for (const finalEol of ['', eol]) {
-    test(`D3c protected example retains BOM and exact fence bytes EOL=${JSON.stringify(eol)} final=${!!finalEol}`, t => {
+    test(`D3d bypass retains BOM and exact fence bytes EOL=${JSON.stringify(eol)} final=${!!finalEol}`, t => {
         const example = ('## Foreign\n```text\n' + hunk('## Example\nA\n', '## Example\nB\n') + '```').replace(/\n/g, eol) + finalEol;
         const input = '\uFEFF' + ('# Tester\n## User\n' + hunk('A\n', 'B\n')).replace(/\n/g, eol) + example;
-        t.deepEqual(mergeBrainConflict(input), { kind: 'merged',
-            text: '\uFEFF' + '# Tester\n## User\nA\nB\n'.replace(/\n/g, eol) + example });
+        t.deepEqual(mergeBrainConflict(input), { kind: 'not-applicable' });
+        t.is(readBrainContent(input), input);
         t.deepEqual(mergeBrainConflict('\uFEFF# Tester' + eol + example), { kind: 'not-applicable' });
     });
 }
 
-test('D3c self-check refuses residual markers and fence-induced membership loss', t => {
+test('D3c self-check refuses residual markers', t => {
     for (const input of [
         '# Tester\n## User\n' + hunk('A\n', 'B\n') + '=======\n',
-        '# Tester\n## Foreign\n' + hunk('A\n', '```\nB\n') + '## End\nDone\n',
         '<<<<<<<\r\nA\r\n',
     ]) t.deepEqual(mergeBrainConflict(input), { kind: 'not-applicable', malformed: true });
 });
+
+// Rebuild, not merge, is the oracle. Normalize only as the corresponding parser does.
+function retainedElements(text: string): Set<string> {
+    const values = new Set<string>();
+    for (const [key, entries] of Object.entries(parseNaTerazSections(text))) {
+        for (const entry of entries) values.add(JSON.stringify(['now', key, entry.toLowerCase()]));
+    }
+    for (const [key, lines] of parseManualIndexLines(text)) {
+        for (const line of lines) values.add(JSON.stringify(['manual', key, line.trimEnd()]));
+    }
+    for (const section of parseForeignSections(text)) {
+        values.add(JSON.stringify(['foreign', section.heading]));
+        for (const line of section.lines) if (line.trimEnd()) values.add(JSON.stringify(['foreign', section.heading, line.trimEnd()]));
+    }
+    return values;
+}

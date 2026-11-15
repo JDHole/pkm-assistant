@@ -30,12 +30,12 @@ for (const newline of ['\n', '\r\n']) for (const bom of ['', '\uFEFF']) {
     });
 }
 for (const fence of ['```', '~~~~']) for (const heading of ['## Przykład', '##\tPrzykład', '  ## Przykład']) {
-    test(`D3 foreign ${JSON.stringify(heading)} ${fence} example alone is opaque; mixed file repairs only outside`, t => {
+    test(`D3 foreign ${JSON.stringify(heading)} ${fence} example and mixed file bypass repair`, t => {
         const example = `${heading}\n${fence}text\n` + hunk('## User\n- A\n', '## User\n- B\n') + `${fence}\n`;
         t.deepEqual(mergeBrainConflict(example), { kind: 'not-applicable' });
-        t.deepEqual(mergeBrainConflict('# Tester\n## User\n' + hunk('- A\n', '- B\n') + example), {
-            kind: 'merged', text: '# Tester\n## User\n- A\n- B\n' + example,
-        });
+        const mixed = '# Tester\n## User\n' + hunk('- A\n', '- B\n') + example;
+        t.deepEqual(mergeBrainConflict(mixed), { kind: 'not-applicable' });
+        t.is(readBrainContent(mixed), mixed);
         t.is(readBrainContent(example), example);
     });
 }

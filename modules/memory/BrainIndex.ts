@@ -97,6 +97,11 @@ export interface ForeignSection {
     lines: string[];
 }
 
+/** Shared H2 boundary of the rebuild parsers, including arbitrary indentation. */
+export function isBrainSectionHeading(line: string): boolean {
+    return /^##\s+/.test(line.trim());
+}
+
 /**
  * DLACZEGO: bez tego ręcznie dopisana sekcja (np. `## AKTYWNY TEST`) znika przy każdej
  * przebudowie indeksu (rebuild odtwarza plik wyłącznie z „Na teraz" + metadanych brain/*.md,
@@ -112,7 +117,7 @@ export function parseForeignSections(content: string | null | undefined): Foreig
     let current: ForeignSection | null = null;
     for (const line of String(content).split(/\r?\n/)) {
         const trimmed = line.trim();
-        if (/^##\s+/.test(trimmed)) {
+        if (isBrainSectionHeading(line)) {
             const managed = isNaTerazHeading(trimmed) || sectionKeyOf(trimmed) !== null;
             current = managed ? null : { heading: trimmed, lines: [] };
             if (current) out.push(current);
@@ -154,7 +159,7 @@ export function parseManualIndexLines(content: string | null | undefined): Map<B
     let current: BrainSectionKey | null = null;
     for (const line of String(content).split(/\r?\n/)) {
         const trimmed = line.trim();
-        if (/^##\s+/.test(trimmed)) {
+        if (isBrainSectionHeading(line)) {
             current = sectionKeyOf(trimmed);
             continue;
         }
@@ -172,9 +177,13 @@ function normalizeNaTeraz(naTeraz: Partial<NaTerazSections> | null | undefined):
     const src = naTeraz || {};
     const clean = (arr: unknown): string[] => {
         const out: string[] = [];
+        const seen = new Set<string>();
         for (const raw of Array.isArray(arr) ? arr : []) {
             const text = cleanEntry(raw);
-            if (text && !out.some(e => e.toLowerCase() === text.toLowerCase())) out.push(text);
+            if (text && !seen.has(text.toLowerCase())) {
+                out.push(text);
+                seen.add(text.toLowerCase());
+            }
         }
         return out;
     };
@@ -188,6 +197,7 @@ function normalizeNaTeraz(naTeraz: Partial<NaTerazSections> | null | undefined):
 export function parseNaTerazSections(content: string | null | undefined): NaTerazSections {
     const result: NaTerazSections = { user: [], environment: [] };
     if (!content) return result;
+    const seen = { user: new Set<string>(), environment: new Set<string>() };
     let key: NaTerazKey | null = null;
     for (const line of String(content).split(/\r?\n/)) {
         const trimmed = line.trim();
@@ -200,8 +210,9 @@ export function parseNaTerazSections(content: string | null | undefined): NaTera
         const bullet = trimmed.match(/^-\s+(.+)$/);
         if (bullet) {
             const text = cleanEntry(bullet[1]);
-            if (text && !result[key].some(e => e.toLowerCase() === text.toLowerCase())) {
+            if (text && !seen[key].has(text.toLowerCase())) {
                 result[key].push(text);
+                seen[key].add(text.toLowerCase());
             }
         }
     }

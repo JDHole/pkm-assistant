@@ -257,16 +257,6 @@ test('D3 healthy direct applyPlan without original keeps previous bytes and orde
     t.is(s.files.get(statePath), '{}\n');
 });
 
-test('D3 rebuild preserves a foreign fenced example with fake managed headings byte for byte', async t => {
-    const example = '## Przykład\n```text\n<<<<<<< ours\n## User\n- Example A\n=======\n## User\n- Example B\n>>>>>>> theirs\n```\n';
-    const s = setup(conflict + '\n' + example);
-    const expected = rebuilt + '\n' + example;
-    t.deepEqual(await s.memory.rebuildBrainIndex(), { changed: true, content: expected });
-    t.is(s.files.get(path), expected);
-    t.deepEqual(await s.memory.rebuildBrainIndex(), { changed: false, content: expected });
-    t.is([...s.files.entries()].find(([p]) => p.startsWith('.pkm-assistant/backups/'))?.[1], conflict + '\n' + example);
-});
-
 test('D3 failure to restore still leaves the verified original backup', async t => {
     const s = setup(conflict);
     const write = s.adapter.write;
@@ -287,13 +277,4 @@ test('D3 legacy sections parser receives both sides without marker items', t => 
     t.deepEqual(result.sections.get('## Bieżące'), ['Ręczny wpis', 'Wspólny', 'Ręczny drugi']);
     t.deepEqual(result.sections.get('## Dodatki'), ['Opis A', 'Opis B']);
     t.deepEqual(result.sections.get('## Na teraz: User'), ['- Zadanie A', '- Zadanie B']);
-});
-
-test('D3 generated descriptions cannot be mistaken for protected code placeholders', async t => {
-    const example = '## Przykład\n```\n<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n```\n';
-    const s = setup(conflict + '\n' + example);
-    s.files.set(`${root}/brain/reference_example.md`, '---\nname: Example\ntype: reference\ndescription: PKM_BRAIN_FENCE_0\n---\nText\n');
-    const expected = rebuilt.replace('## Projekty i referencje\n', '## Projekty i referencje\n- [[brain/reference_example.md]] \u2014 PKM_BRAIN_FENCE_0\n') + '\n' + example;
-    t.deepEqual(await s.memory.rebuildBrainIndex(), { changed: true, content: expected });
-    t.is(s.files.get(path), expected);
 });

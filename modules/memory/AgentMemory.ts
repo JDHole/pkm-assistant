@@ -1,4 +1,4 @@
-import { readBrainContent, protectForeignBrainFences } from './brainConflict.js';
+import { readBrainContent } from './brainConflict.js';
 import { writeBrainContent } from './brainConflictWrite.js';
 import { mergeSessionConflict, readConflictAwareSession, SessionConflictError } from './sessionConflict.js';
 import { rememberSessionRead, sessionRemovalContext, safeRemovalRanges } from './sessionRemovals.js';
@@ -2010,28 +2010,26 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
             }
             const original = before;
             before = readBrainContent(before);
-            const protectedFences = original !== before || before.includes('<<<<<<<') ? protectForeignBrainFences(before) : null;
-            const parsedText = protectedFences?.text ?? before;
             // brain.md carries „Na teraz" short-term sections at the top. Parse
             // them out of the current file and re-emit them so a rebuild NEVER drops them —
             // otherwise these plain bullets would look like manual content and get shoved into
             // brain.md.bak.
-            let naTeraz = parseNaTerazSections(parsedText);
+            let naTeraz = parseNaTerazSections(before);
             if (typeof options.mutateNaTeraz === 'function') naTeraz = options.mutateNaTeraz(naTeraz);
             // Sekcje H2 spoza katalogu zarządzanych (ręczne, np. „## AKTYWNY
             // TEST") wracają do nowego pliku verbatim, na koniec — rebuild nie może ich wycinać.
-            const foreign = parseForeignSections(parsedText);
+            const foreign = parseForeignSections(before);
             // Ręcznie dopisane linie w sekcjach ZARZĄDZANYCH (np. kilka bulletów sesji Claude
             // Code w `## Bieżące`) - bez tego rebuild je bezpowrotnie kasuje (patrz gotcha
             // w modules/memory/CLAUDE.md). Index-like linki są tu odsiane - te regeneruje
             // `buildBrainIndex` z realnych notatek.
-            const manual = parseManualIndexLines(parsedText);
+            const manual = parseManualIndexLines(before);
             const notes = await this.listBrainNotes();
             // Język PLIKU wygrywa zawsze - istniejący plik PL pod EN UI zostaje PL po
             // rebuildzie (kontrakt „rodzi się i zostaje", `brainSections.ts`). `before` puste
             // (plik brakujący) = nic do wykrycia, więc `resolveBrainLocale` oddaje `uiBrainLocale()`.
             const locale = resolveBrainLocale(before || null, uiBrainLocale());
-            const built = buildBrainIndex({
+            const content = buildBrainIndex({
                 agentName: this.agentName,
                 header: this._brainHeaderFromContent(original !== before ? before.replace(/^\uFEFF/, '') : before),
                 notes,
@@ -2040,14 +2038,13 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 manual,
                 locale,
             });
-            const content = protectedFences?.restore(built) ?? built;
             if (content !== original) {
                 // Safety net: the rebuild still drops manual lines inside MANAGED sections
                 // (foreign sections and „Na teraz" survive). Back those up first.
                 // Przy niepewnym stanie pliku (`unknown` — `exists()` skłamało) backup idzie
                 // ZAWSZE, bo nie wiemy, czy przed chwilą widzieliśmy całą prawdę o pliku.
                 // `before` puste = nie ma czego backupować (i nie kasujemy starszego `.bak`).
-                if (before && (probe === 'unknown' || this._brainHasManualContent(parsedText))) {
+                if (before && (probe === 'unknown' || this._brainHasManualContent(before))) {
                     try {
                         await this.vault.adapter.write(`${this.paths.brain}.bak`, before);
                     } catch (e) {
