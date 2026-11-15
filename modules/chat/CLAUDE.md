@@ -2385,7 +2385,7 @@ Adaptery częściowego widoku w `chat_streaming.sendTab.test.ts`, `chatViewClose
 oraz jego początkowy stan, ponieważ omijają konstruktor.
 
 
-## Mobile M2 D2/D2b/D2c - cudza rozmowa i jawne przejęcie
+## Mobile M2 D2/D2b/D2c/D2d - cudza rozmowa i jawne przejęcie
 
 Restore pomija `foreign` i `ambiguous` przed ładowaniem okna i historii subów;
 po odczycie ponownie sprawdza własność. Sprzątanie pustego wpisu przy id wymaga
@@ -2429,6 +2429,15 @@ jest sprawdzany przez rzeczywiste `openChatView` z `src/main.ts`: powstaje nowa 
 widoczny modal przejęcia, brak komunikatów błędu (PL/EN, anulowanie i przejęcie).
 Test `/clear` zatrzymuje `handleNewSession` na kontrolowanej obietnicy, wymaga
 nierozstrzygniętej komendy i po odrzuceniu sprawdza obsłużony komunikat oraz szkic;
-mutacja `await` na `void` psuje asercję oczekiwania. Test wysyłki PL/EN z częściowym
-zapisem adopcji i awarią odtworzenia sprawdza przywrócenie szkicu, brak wywołania
-modelu, zachowaną historię w kopii i brak nowej wiadomości w uszkodzonym pliku.
+mutacja `await` na `void` psuje asercję oczekiwania. D2d zastępuje test awarii adopcji
+przy wiadomości testem wysyłki PL/EN: model odpowiada, pełna historia pozostaje
+czytelna, stary prefiks jest nietknięty, brak przepisywania nagłówka i kopii.
+
+D2d: wybór `AgentMemory.restoreActiveSession` jest wspólny z id i bez:
+`state.last_used`, `state.active_sessions`, lokalny `.active_session.json`;
+z id pomija cudze i niejednoznaczne sesje. Dopiski do starszej sesji bez `device`
+pozostawiają ją niczyją. Dopiero zastany zapis metadanych `saveSession` dodaje
+właściciela, także gdy wszystkie wiadomości już są w pliku. Ubicie aplikacji przed
+nim pozostawia możliwość dopisku z drugiego urządzenia. Ochrona z konstrukcji
+obejmuje nowe sesje D2 i starsze po pierwszym zapisie metadanych; zwykła wysyłka
+legacy nadal zachowuje kontrakt P3 (stare bajty nietknięte, epoka przez dopisek).

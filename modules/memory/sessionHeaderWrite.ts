@@ -11,7 +11,7 @@ export class SessionHeaderWriteError extends Error {
     }
 }
 
-/** Caller holds the session queue. False means the original is safe to append to.
+/** Caller holds the session queue. False means the original was preserved; refuse takeover.
  * Like D1/settingsArmor, keep a verbatim local copy, outside settings rotation. */
 export async function writeSessionHeader(
     adapter: MemoryVaultAdapterLike, agent: string, path: string, original: string, output: string,

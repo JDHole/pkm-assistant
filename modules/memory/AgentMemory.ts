@@ -137,8 +137,8 @@ function _nullishToString(value: unknown): string {
 class SessionFileMissingError extends Error {}
 
 /**
- * Z id: co N ciepłych dopisków pełny odczyt własności niezależnie od stat (max N-1
- * dopisków po niewidocznej zmianie właściciela). Bez id: odstęp między tanimi `exists()`. Natywny `adapter.append`
+ * Z id i właścicielem: co N ciepłych dopisków pełny odczyt własności niezależnie od stat (max N-1
+ * dopisków po niewidocznej zmianie właściciela). Bez id lub dla sesji niczyjej: odstęp między tanimi `exists()`. Natywny `adapter.append`
  * na brakującym pliku zwykle NIE rzuca — po prostu tworzy plik od nowa (jak `fs` z flagą `a`),
  * więc zewnętrzne skasowanie sesji między zdarzeniami zostałoby wykryte tylko przez ten
  * periodyczny, metadanowy `exists()` (bez odczytu treści — O(1) względem rozmiaru pliku,
@@ -606,7 +606,6 @@ export class AgentMemory {
      * Returns the path if restored, null otherwise.
      */
     async restoreActiveSession(): Promise<string | null> {
-        if (this.deviceId) return this._restoreDeviceSession();
         try {
             const state = await this.stateManager.read();
             const candidates = [
@@ -618,6 +617,7 @@ export class AgentMemory {
                 const path = name.includes('/') ? name : `${this.paths.sessionsActive}/${name}`;
                 if (await this.vault.adapter.exists(path)) {
                     const parsed = await this.loadActiveSession(path);
+                    if (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous') continue;
                     this.setActiveSessionIdentity(path, typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null);
                     await this._persistActiveSession();
                     return path;
@@ -634,6 +634,7 @@ export class AgentMemory {
                 const fileExists = await this.vault.adapter.exists(data.path);
                 if (fileExists) {
                     const parsed = await this.loadActiveSession(data.path);
+                    if (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous') return null;
                     this.setActiveSessionIdentity(data.path, typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null);
                     return data.path;
                 }
@@ -669,39 +670,6 @@ export class AgentMemory {
                 || stat.size !== this._sessionSizes.get(path)
                 || stat.mtime !== this._sessionMtimes.get(path);
         } catch { return true; }
-    }
-
-    private async _restoreDeviceSession(): Promise<string | null> {
-        const restore = async (path: string): Promise<string | null> => {
-            if (!(await this.vault.adapter.exists(path))) return null;
-            const parsed = await this.loadActiveSession(path);
-            if (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous') return null;
-            this.setActiveSessionIdentity(path, typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null);
-            return path;
-        };
-        try {
-            if (await this.vault.adapter.exists(this.paths.activeSessionMeta)) {
-                const data: unknown = JSON.parse(await this.vault.adapter.read(this.paths.activeSessionMeta));
-                if (data && typeof data === 'object' && 'path' in data && typeof data.path === 'string') {
-                    const path = await restore(data.path);
-                    if (path) return path;
-                }
-            }
-        } catch { /* Try shared candidates when the local pointer cannot be read. */ }
-        try {
-            const state = await this.stateManager.read();
-            for (const name of [state.last_used, ...(state.active_sessions || [])]) {
-                if (!name) continue;
-                try {
-                    const path = await restore(name.includes('/') ? name : `${this.paths.sessionsActive}/${name}`);
-                    if (path) {
-                        await this._persistActiveSession();
-                        return path;
-                    }
-                } catch { /* One unavailable candidate must not hide another local session. */ }
-            }
-        } catch { /* No readable candidates. */ }
-        return null;
     }
 
     /** Explicit user action. Only the header changes; event bytes are opaque and preserved. */
@@ -1061,7 +1029,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
 
     /**
      * Pisarz nowych danych sesji. Każdy payload przechodzi przez `maskSensitiveData`.
-     * Wyjątek D2/D2b: przejęcie i adopcja zmieniają wyłącznie znacznik właściciela,
+     * Wyjątek D2: jawne przejęcie zmienia wyłącznie nagłówek właściciela,
      * zachowując istniejące zdarzenia bajt w bajt.
      *
      * DLACZEGO: transkrypt potrafi nieść sekret wpleciony w treść błędu (padnięty strumień
@@ -1226,11 +1194,13 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 // 1,1 MB). Odczyt CAŁOŚCI inicjalizuje numerację i stan końcowego newline
                 // przy zimnym cache. Z id D2b wymusza go też po zmianie metadanych albo
                 // przy ich braku, aby sprawdzić właściciela i odświeżyć cache. Niezmieniony
-                // ciepły plik przy wiarygodnym stat czytamy też co N zdarzeń (własność).
+                // ciepły plik z właścicielem przy wiarygodnym stat czytamy też co N zdarzeń.
+                // Niczyja sesja pozostaje append-only aż do zapisu metadanych.
                 let input: ObservedWriterInput = { kind: 'cached' };
                 // A repaired target is cold and read below; do not charge a second stat.
                 const changed = this.deviceId && attemptsLeft > 0 ? await this._deviceWriterChanged(path) : false;
-                const verifyDevice = this.deviceId !== null
+                const marker = this._sessionDevices.get(path);
+                const verifyDevice = this.deviceId !== null && marker?.kind === 'marker' && marker.device !== undefined
                     && (this._appendsSinceVerify.get(path) || 0) + 1 >= APPEND_VERIFY_EVERY_N;
                 const cacheWasCold = !this._sessionSeqCache.has(path) || !this._sessionEndsWithNewline.has(path)
                     || (this.deviceId !== null && (!this._sessionDevices.has(path) || changed || verifyDevice));
@@ -1254,7 +1224,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                     // zdarzenie — ale natywny `adapter.append` na brakującym pliku zwykle NIE
                     // rzuca (po prostu go zakłada od nowa, jak `fs` z flagą `a`), więc zewnętrzne
                     // skasowanie sesji MIĘDZY zdarzeniami byłoby inaczej niewidoczne. Co
-                    // `APPEND_VERIFY_EVERY_N` zdarzeń BEZ ID płacimy JEDEN tani `exists()` (metadane,
+                    // `APPEND_VERIFY_EVERY_N` zdarzeń bez id lub dla niczyjej sesji płacimy JEDEN tani `exists()` (metadane,
                     // bez odczytu treści — O(1) względem rozmiaru pliku, nie O(n) jak `read()`).
                     const seen = (this._appendsSinceVerify.get(path) || 0) + 1;
                     if (seen >= APPEND_VERIFY_EVERY_N) {
@@ -1305,20 +1275,6 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 throw new Error('Session epoch: native append unavailable');
             }
             const timestamp = event.timestamp || new Date().toISOString();
-            // Adoption is a separate one-time header rewrite, never part of P3.
-            const marker = this._sessionDevices.get(path);
-            if (this.deviceId && marker?.kind === 'marker' && marker.device === undefined
-                && marker.header && parseActiveSession(formatSessionEvent(event.type || 'event', { ...event, seq: 0 }, timestamp)).messages.length > 0) {
-                const content = input.kind === 'observed' ? input.content : await this.vault.adapter.read(path);
-                this._refreshSessionWriterState(path, content);
-                const fresh = this._sessionDevices.get(path);
-                if (fresh?.kind === 'marker' && fresh.device === undefined && fresh.header) {
-                    const output = this._setFrontmatterField(fresh.header, 'device', this.deviceId) + content.slice(fresh.header.length);
-                    if (await writeSessionHeader(this.vault.adapter, this.safeName, path, content, output)) {
-                        this._refreshSessionWriterState(path, output);
-                    }
-                }
-            }
             const seq = this._nextSeq(path, '');
             const body = formatSessionEvent(event.type || 'event', { ...event, seq }, timestamp);
             const separator = isEpoch || !this._sessionEndsWithNewline.get(path) ? '\n' : '';
@@ -1742,7 +1698,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
 
             // Adoption piggybacks on the existing metadata rewrite, never on P3's epoch append.
             if (this.deviceId && this.getSessionOwnership(existing) === 'unowned'
-                && readSessionDevice(existing).kind === 'marker' && /^\uFEFF?---\r?\n/.test(existing) && tail.length > 0) {
+                && readSessionDevice(existing).kind === 'marker' && /^\uFEFF?---\r?\n/.test(existing)) {
                 content = this._setFrontmatterField(content, 'device', this.deviceId);
             }
             content = this._setFrontmatterField(content, 'updated', now);

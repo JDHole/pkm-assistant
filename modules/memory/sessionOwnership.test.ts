@@ -94,53 +94,62 @@ test.serial('two devices: foreign writers refuse every mutation, explicit takeov
     t.deepEqual((await a.listActiveSessions()).map(s => s.ownership), ['foreign']);
 });
 
-test.serial('unowned restore is read-only; P3 appends epoch without adoption; first message adopts before metadata save', async t => {
+test.serial('D2d scenario 74: shared legacy wins over local pointer, append and epoch preserve bytes until metadata save', async t => {
     const d = disk(), a = d.memory(A), b = new AgentMemory({ adapter: { ...d.adapter } }, 'Mira', {}, B);
     await a.initialize(); await b.initialize();
     const path = `${a.paths.sessionsActive}/legacy.md`;
-    const original = '---\nagent: Mira\ncreated: 2020-01-01\n---\n\n## User\n\nStara wiadomość\n';
+    const local = `${a.paths.sessionsActive}/local.md`;
+    const original = '---\ntype: active_session\nagent: Mira\n---\n\nHistoria legacy\n';
     d.files.set(path, original);
+    d.files.set(local, '---\nagent: Mira\ndevice: aaaaaaaaaaaaaaaa\n---\n\n## User\n\nLokalna rozmowa\n');
+    await a.stateManager.addActiveSession('local.md');
     await a.stateManager.addActiveSession('legacy.md');
-    d.files.set(a.paths.activeSessionMeta, JSON.stringify({ path }));
-    const before = [...d.files]; d.reset();
+    d.files.set(a.paths.activeSessionMeta, JSON.stringify({ path: local }));
     t.is(await a.restoreActiveSession(), path);
-    t.is(await b.restoreActiveSession(), path);
-    t.deepEqual((await a.listActiveSessions()).map(s => s.ownership), ['unowned']);
-    t.deepEqual([...d.files], before); t.is(d.counts.write, 0);
-    await a.ensureActiveSessionEpoch(path, () => true);
-    t.true(d.files.get(path)!.startsWith(original));
-    t.false(d.files.get(path)!.includes('\ndevice:'));
-    t.is(d.counts.write, 0); t.is(d.counts.append, 1);
-    await a.appendToActiveSession({ type: 'agent_message', content: 'Nowa wiadomość' });
-    t.is(parseFrontmatter(d.files.get(path)!).device, 'aaaaaaaaaaaaaaaa');
-    t.is(d.counts.write, 2);
+    t.is(a.sessionEpoch, null);
+    t.is(d.files.get(path), original);
+    d.reset();
+    await a.appendToActiveSession({ type: 'user_message', content: 'Nowa wiadomość', timestamp: '2026-11-15T10:00:00.000Z' });
+    t.is(d.files.get(path), original + '## 2026-11-15T10:00:00.000Z — user message\n\n**content:**\n\nNowa wiadomość\n\n**seq:**\n\n1\n\n');
+    t.deepEqual([d.counts.write, d.counts.append, d.counts.mkdir], [0, 1, 0]);
+    t.is(await a.ensureActiveSessionEpoch(path, () => true), epoch);
+    const bytes = d.files.get(path)!;
+    t.true(bytes.startsWith(original));
+    t.is(parseFrontmatter(bytes).epoch, null);
+    t.false(Object.hasOwn(parseFrontmatter(bytes), 'device'));
+    t.is((bytes.match(/— session epoch/g) ?? []).length, 1);
+    t.deepEqual([d.counts.write, d.counts.append, d.counts.mkdir], [0, 2, 0]);
+    t.deepEqual((await d.adapter.list(a.paths.sessionsActive)).files.sort(), [path, local].sort());
+    t.is((await b.loadActiveSession(path)).metadata.epoch, epoch);
+    t.is((await b.loadActiveSession(path)).ownership, 'unowned');
+    // Metadata-only save: the complete message is already on disk, so no tail is needed.
     const messages = (await a.loadActiveSession(path)).messages;
     d.reset(); await a.saveSession(messages);
-    t.is(d.counts.write, 1); t.is(d.counts.read, 1); t.is(d.counts.append, 0);
+    t.deepEqual(d.counts, { read: 1, write: 1, exists: 0, mkdir: 0, list: 0, append: 0, stat: 0, remove: 0 });
     t.is(parseFrontmatter(d.files.get(path)!).device, 'aaaaaaaaaaaaaaaa');
-    t.deepEqual((await b.listActiveSessions()).map(s => s.ownership), ['foreign']);
-    t.deepEqual((await a.loadActiveSession(path)).messages.map(m => m.content), ['Stara wiadomość', 'Nowa wiadomość']);
+    t.is((await b.loadActiveSession(path)).ownership, 'foreign');
+    t.deepEqual((await a.loadActiveSession(path)).messages.map(m => m.content), ['Nowa wiadomość']);
 });
 
-test.serial('restore prefers local mine/unowned, filters all foreign shared candidates and preserves their state entries', async t => {
-    const d = disk(), memory = d.memory(A); await memory.initialize();
+for (const id of [A, null]) test.serial(`D2d restore precedence: last_used, active_sessions, local pointer; id=${id}`, async t => {
+    const d = disk(), memory = d.memory(id); await memory.initialize();
     const root = memory.paths.sessionsActive;
     d.files.set(`${root}/mine.md`, '---\ndevice: aaaaaaaaaaaaaaaa\n---\n## User\nMine');
     d.files.set(`${root}/foreign.md`, '---\ndevice: bbbbbbbbbbbbbbbb\n---\n## User\nForeign');
+    d.files.set(`${root}/ambiguous.md`, '---\ndevice: aaaaaaaaaaaaaaaa\ndevice: bbbbbbbbbbbbbbbb\n---\n## User\nAmbiguous');
     d.files.set(`${root}/legacy.md`, '---\nagent: Mira\n---\n## User\nLegacy');
-    const state = '{"active_sessions":["foreign.md","mine.md","legacy.md"],"last_used":"foreign.md"}';
-    d.files.set(memory.paths.state, state);
-    for (const local of ['mine', 'legacy']) {
-        d.files.set(memory.paths.activeSessionMeta, JSON.stringify({ path: `${root}/${local}.md` }));
-        t.is(await memory.restoreActiveSession(), `${root}/${local}.md`);
+    for (const [state, expected] of [
+        ['{"active_sessions":["mine.md"],"last_used":"legacy.md"}', 'legacy'],
+        ['{"active_sessions":["foreign.md","ambiguous.md","mine.md"],"last_used":"foreign.md"}', id ? 'mine' : 'foreign'],
+        ['{"active_sessions":["ambiguous.md","mine.md"],"last_used":"missing.md"}', id ? 'mine' : 'ambiguous'],
+        ['{"active_sessions":["missing.md"],"last_used":"missing.md"}', 'legacy'],
+    ]) {
+        d.files.set(memory.paths.state, state);
+        d.files.set(memory.paths.activeSessionMeta, JSON.stringify({ path: `${root}/legacy.md` }));
+        t.is(await memory.restoreActiveSession(), `${root}/${expected}.md`);
+        t.is(d.files.get(memory.paths.state), state);
     }
-    d.files.set(memory.paths.activeSessionMeta, JSON.stringify({ path: `${root}/foreign.md` }));
-    t.is(await memory.restoreActiveSession(), `${root}/mine.md`);
-    t.is(d.files.get(memory.paths.state), state);
-    // No device retains the old precedence and shape, including a foreign marker.
-    const old = d.memory(null);
-    t.is(await old.restoreActiveSession(), `${root}/foreign.md`);
-    t.true((await old.listActiveSessions()).every(s => !('ownership' in s)));
+    if (!id) t.true((await memory.listActiveSessions()).every(s => !('ownership' in s)));
 });
 
 for (const mode of ['save', 'repair'] as const) test.serial(`new device header via ${mode}, old parser/editor compatibility and shared archive`, async t => {
@@ -208,20 +217,17 @@ test.serial('cold device writer cannot trust a cache warmed by a legacy instance
 });
 
 for (const type of ['tool_call', 'mcp_call', 'subagent_call', 'subagent_error'])
-test.serial(`adoption follows actual message events: ${type}`, async t => {
+test.serial(`D2d events stay unowned until metadata save: ${type}`, async t => {
     const d = disk(), old = d.memory(null); await old.initialize();
     const path = await old.startActiveSession();
     const memory = d.memory(A); memory.setActiveSessionIdentity(path, epoch);
     await memory.appendToActiveSession({ type, content: 'Wynik operacji' });
-    const adopted = parseFrontmatter(d.files.get(path)!);
-    if (type === 'tool_call') t.false(Object.hasOwn(adopted, 'device'));
-    else t.is(adopted.device, 'aaaaaaaaaaaaaaaa');
+    t.is((await memory.loadActiveSession(path)).ownership, 'unowned');
     const parsed = await memory.loadActiveSession(path);
     t.is(parsed.messages.length, type === 'tool_call' ? 0 : 1);
     d.reset(); await memory.saveSession(parsed.messages);
     const metadata = parseFrontmatter(d.files.get(path)!);
-    if (type === 'tool_call') t.false(Object.hasOwn(metadata, 'device'));
-    else t.is(metadata.device, 'aaaaaaaaaaaaaaaa');
+    t.is(metadata.device, 'aaaaaaaaaaaaaaaa');
     t.is(d.counts.write, 1); t.is(d.counts.read, 1); t.is(d.counts.append, 0);
 });
 

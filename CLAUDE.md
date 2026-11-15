@@ -210,7 +210,7 @@ Na obu platformach memory scala pełne strony konfliktu `.state.json` po kopii o
 
 ## Mobile M2 D2 - aktywna rozmowa należy do urządzenia
 
-Lokalny identyfikator z API Obsidiana wyznacza własność `device` aktywnej sesji na obu platformach, z jawnym przejęciem w czacie i dawnym zachowaniem przy braku id; kontrakty adopcji, odmów, P3 i zgodności I/O opisują `modules/memory/CLAUDE.md`, `modules/chat/CLAUDE.md` i `modules/agents/CLAUDE.md`.
+Lokalny identyfikator z API Obsidiana wyznacza własność `device` aktywnej sesji na obu platformach, z jawnym przejęciem w czacie i dawnym zachowaniem przy braku id. D2d przywraca wybór `last_used` -> `active_sessions` -> lokalny wskaźnik oraz adopcję starszych sesji dopiero przy zapisie metadanych; dopiski zachowują stare bajty. Kontrakty adopcji, odmów, P3 i zgodności I/O opisują `modules/memory/CLAUDE.md`, `modules/chat/CLAUDE.md` i `modules/agents/CLAUDE.md`.
 
 ## Mobile M4 F1 - załączniki na telefonie
 

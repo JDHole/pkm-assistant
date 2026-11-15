@@ -404,9 +404,9 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     }
 
     /**
-     * Natywne powiadomienie Obsidiana. `Notice` jest WARTOŚCIĄ z modułu `obsidian`, więc
-     * nie wolno go importować statycznie — ten plik musi wstawać w gołym Node (testy,
-     * harness). Konstruktor dojeżdża leniwie, a poza Obsidianem zostaje uchwyt-atrapa.
+     * Natywne powiadomienie Obsidiana. Runtime zależy statycznie od hosta (`Notice`).
+     * Kontrakt ładowania w czystym Node dotyczy barrela `core/index.ts`, który nie
+     * eksportuje tego pliku; testy runtime i harness dostarczają atrapę hosta.
      */
     private _pokazNatywne(content: string | DocumentFragment, timeout: number): NoticeHandle {
         if (!this._noticeCtor) {

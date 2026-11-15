@@ -137,7 +137,7 @@ for (const fields of [
 });
 
 for (const mode of ['live', 'frozen', 'headerless'] as const)
-test.serial(`D2b first message adopts once with opaque body preserved: ${mode}`, async t => {
+test.serial(`D2d live and frozen messages preserve unowned header and opaque body: ${mode}`, async t => {
     const d = sharedDisk(), a = d.device(A);
     const oldHeader = '\uFEFF---\r\nagent: Mira\r\nepoch: 0123456789abcdef0123456789abcdef\r\n---\r\n';
     const body = '\r\nOpaque sk-abcdefghijklmnopqrstuvwxyz0123456789\r\n';
@@ -147,9 +147,10 @@ test.serial(`D2b first message adopts once with opaque body preserved: ${mode}`,
         ? a.memory.appendSessionEvent.bind(a.memory, a.path)
         : a.memory.appendToActiveSession.bind(a.memory);
     await append({ type: 'user_message', content: 'Zażółć 🐈', timestamp });
-    const expected = (mode === 'headerless' ? '' : header) + body + firstEvent;
+    const expected = original + firstEvent;
     t.is(d.files.get(a.path), expected);
-    t.is(a.calls.filter(([op]) => op === 'write').length, mode === 'headerless' ? 0 : 2);
+    t.deepEqual(a.calls.filter(([op]) => ['write', 'mkdir', 'remove'].includes(op)), []);
+    t.is((await a.memory.loadActiveSession(a.path)).ownership, 'unowned');
     a.reset();
     await append({ type: 'agent_message', content: 'Odpowiedź', timestamp });
     t.is(d.files.get(a.path), expected + secondEvent);
@@ -173,6 +174,42 @@ for (const id of [A, null]) test.serial(`D2c periodic verification: exact bytes 
     t.is(a.calls.filter(([op]) => op === 'stat').length, id ? 40 : 0);
     t.is(a.calls.filter(([op]) => op === 'append').length, 40);
     t.deepEqual(a.calls.filter(([op]) => op === 'exists'), id ? [] : [['exists', a.path], ['exists', a.path]]);
+});
+
+for (const id of [A, null]) test.serial(`D2d unowned: 20 warm events keep bytes and pre-D2 I/O plus stat, id=${id}`, async t => {
+    const d = sharedDisk(), a = d.device(id);
+    const original = '\uFEFF---\r\nagent: Mira\r\n---\r\n\r\nHistoria legacy\r\n';
+    d.files.set(a.path, original);
+    await a.memory.appendToActiveSession({ type: 'user_message', content: 'Zażółć 🐈', timestamp });
+    a.reset();
+    let expected = original + firstEvent;
+    for (let i = 2; i <= 21; i++) {
+        await a.memory.appendToActiveSession({ type: 'agent_message', content: 'Odpowiedź', timestamp });
+        expected += `## 2026-11-15T10:00:00.000Z — agent message\n\n**content:**\n\nOdpowiedź\n\n**seq:**\n\n${i}\n\n`;
+    }
+    t.is(d.files.get(a.path), expected);
+    t.deepEqual(a.calls.reduce<Record<string, number>>((counts, [op]) => {
+        counts[op] = (counts[op] ?? 0) + 1; return counts;
+    }, {}), id ? { stat: 20, append: 20, exists: 1 } : { append: 20, exists: 1 });
+    t.is((await a.memory.loadActiveSession(a.path)).ownership, id ? 'unowned' : undefined);
+});
+
+test.serial('D2d unowned writer detects adoption by another device at metadata save', async t => {
+    const d = sharedDisk(), a = d.device(A), b = d.device(B);
+    const original = '---\nagent: Mira\n---\n';
+    d.files.set(a.path, original);
+    await a.memory.appendToActiveSession({ type: 'user_message', content: 'Zażółć 🐈', timestamp });
+    // Simulates the first app being killed before metadata save: B can still append.
+    await b.memory.appendToActiveSession({ type: 'agent_message', content: 'Odpowiedź', timestamp });
+    t.is(d.files.get(a.path), original + firstEvent + secondEvent);
+    await b.memory.saveSession((await b.memory.loadActiveSession(a.path)).messages);
+    const saved = d.files.get(a.path)!;
+    t.is((await b.memory.loadActiveSession(a.path)).ownership, 'mine');
+    a.reset();
+    await t.throwsAsync(() => a.memory.appendToActiveSession({ type: 'user_message', content: 'Za późno', timestamp }), { instanceOf: ForeignSessionError });
+    t.deepEqual(a.calls, [['stat', a.path], ['read', a.path]]);
+    t.is(d.files.get(a.path), saved);
+    t.deepEqual((await b.memory.loadActiveSession(a.path)).messages.map(m => m.content), ['Zażółć 🐈', 'Odpowiedź']);
 });
 
 for (const owner of ['foreign', 'ambiguous'] as const)
@@ -240,15 +277,12 @@ test.serial('D2c takeover A -> B -> A -> B grows every time with frozen mtime, b
     t.is(d.files.get(archive!), '---\nagent: Mira\nepoch: 0123456789abcdef0123456789abcdef\nupdated: 2026-11-15T10:00:00.000Z\nmessageCount: 1\n---\n## User\nZażółć 🐈');
 });
 
-for (const operation of ['adoption', 'takeover'] as const)
 for (const failure of ['none', 'backup-write', 'backup-mismatch', 'partial-throw', 'partial-silent', 'readback', 'restore-throw', 'restore-mismatch'] as const)
-test.serial(`D2c verified backup and header recovery: ${operation}/${failure}`, async t => {
+test.serial(`D2c verified backup and header recovery: takeover/${failure}`, async t => {
     mock.timers.enable({ apis: ['Date'], now: Date.parse(timestamp) });
     t.teardown(() => { mock.timers.reset(); mock.restoreAll(); });
     const d = sharedDisk(), a = d.device(A);
-    const original = (operation === 'adoption'
-        ? '\uFEFF---\r\nagent: Mira\r\nepoch: 0123456789abcdef0123456789abcdef\r\n---\r\n'
-        : header.replace('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb'))
+    const original = header.replace('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb')
         + '\r\nOpaque sk-abcdefghijklmnopqrstuvwxyz0123456789\r\n\r\n## User\r\n\r\nHistoria\r\n';
     const backup = '.pkm-assistant/backups/session-mira-legacy-1794736800000.md.bak';
     d.files.set(a.path, original);
@@ -277,19 +311,13 @@ test.serial(`D2c verified backup and header recovery: ${operation}/${failure}`, 
         if (path === a.path && failReadback) { failReadback = false; throw new Error('readback failed'); }
         return read(path);
     };
-    const run = () => operation === 'adoption'
-        ? a.memory.appendToActiveSession({ type: 'user_message', content: 'Zażółć 🐈', timestamp })
-        : a.memory.takeOverActiveSession(a.path);
+    const run = () => a.memory.takeOverActiveSession(a.path);
     const broken = failure === 'restore-throw' || failure === 'restore-mismatch';
-    if (broken || operation === 'takeover' && failure !== 'none') {
-        await t.throwsAsync(run, { instanceOf: SessionHeaderWriteError });
-    } else await run();
-    const body = original.slice(original.indexOf(operation === 'adoption' ? '\r\n---\r\n' : '\n---\n') + (operation === 'adoption' ? 7 : 5));
-    const adopted = header + body;
-    const taken = header.replace('device: aaaaaaaaaaaaaaaa\n', 'device: aaaaaaaaaaaaaaaa\ntaken_over: 2026-11-15T10:00:00.000Z\n') + body;
-    const output = operation === 'adoption' ? adopted : taken;
-    t.is(d.files.get(a.path), broken ? (operation === 'adoption' && failure === 'restore-mismatch' ? '\uFEFF---\r\nagent: Mira\r' : '---\nagent: Mira\nepoc')
-        : (failure === 'none' ? output : original) + (operation === 'adoption' ? firstEvent : ''));
+    if (failure !== 'none') await t.throwsAsync(run, { instanceOf: SessionHeaderWriteError });
+    else await run();
+    const body = original.slice(original.indexOf('\n---\n') + 5);
+    const output = header.replace('device: aaaaaaaaaaaaaaaa\n', 'device: aaaaaaaaaaaaaaaa\ntaken_over: 2026-11-15T10:00:00.000Z\n') + body;
+    t.is(d.files.get(a.path), broken ? '---\nagent: Mira\nepoc' : failure === 'none' ? output : original);
     const noBackup = failure === 'backup-write' || failure === 'backup-mismatch';
     t.is(attempts, noBackup ? 0 : failure === 'none' ? 1 : 2);
     if (!noBackup) t.is(d.files.get(backup), original);
@@ -298,14 +326,6 @@ test.serial(`D2c verified backup and header recovery: ${operation}/${failure}`, 
     if (broken) {
         t.deepEqual(errors[0], ['AgentMemory', 'Session header restoration failed; recover from backup', { path: a.path, backupPath: backup }]);
         t.is(a.calls.filter(([op]) => op === 'append').length, 0);
-    }
-    if (operation === 'adoption' && !broken && failure !== 'none') {
-        t.is((await a.memory.loadActiveSession(a.path)).ownership, 'unowned');
-        a.adapter.write = write;
-        await a.memory.appendToActiveSession({ type: 'agent_message', content: 'Odpowiedź', timestamp });
-        t.is(d.files.get(a.path), adopted + firstEvent + secondEvent);
-        t.is(d.files.get(noBackup && failure === 'backup-write' ? backup : backup.replace('.md.bak', '-1.md.bak')), original + firstEvent);
-        if (!noBackup) t.is(d.files.get(backup), original, 'retry must not overwrite the first copy');
     }
 });
 
