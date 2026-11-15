@@ -137,8 +137,9 @@ function _nullishToString(value: unknown): string {
 class SessionFileMissingError extends Error {}
 
 /**
- * Z id i właścicielem: co N ciepłych dopisków pełny odczyt własności niezależnie od stat (max N-1
- * dopisków po niewidocznej zmianie właściciela). Bez id lub dla sesji niczyjej: odstęp między tanimi `exists()`. Natywny `adapter.append`
+ * Z id: co N ciepłych dopisków pełny odczyt własności niezależnie od stat, także dla
+ * sesji niczyjej (max N-1 dopisków po niewidocznej adopcji/zmianie właściciela).
+ * Bez id: odstęp między tanimi `exists()`. Natywny `adapter.append`
  * na brakującym pliku zwykle NIE rzuca — po prostu tworzy plik od nowa (jak `fs` z flagą `a`),
  * więc zewnętrzne skasowanie sesji między zdarzeniami zostałoby wykryte tylko przez ten
  * periodyczny, metadanowy `exists()` (bez odczytu treści — O(1) względem rozmiaru pliku,
@@ -400,7 +401,7 @@ export class AgentMemory {
     /** Czy plik pod ścieżką kończy się `\n` — cache, żeby append nie musiał
      * czytać całego pliku na każde zdarzenie tylko po to, żeby dobrać separator. */
     declare _sessionEndsWithNewline: Map<string, boolean>;
-    /** Licznik appendów od ostatniego periodycznego `exists()`
+    /** Licznik appendów od ostatniej weryfikacji (odczyt z id, `exists()` bez id)
      * na ciepłym cache — patrz `APPEND_VERIFY_EVERY_N`. */
     declare _appendsSinceVerify: Map<string, number>;
     declare paths: MemoryPaths;
@@ -463,7 +464,7 @@ export class AgentMemory {
         // Stan „plik kończy się \n" per ścieżka — patrz deklaracja pola.
         this._sessionEndsWithNewline = writer.newlines;
 
-        // Licznik do periodycznego exists() na ciepłym cache.
+        // Licznik do periodycznej weryfikacji na ciepłym cache.
         this._appendsSinceVerify = writer.appends;
 
         // Paths
@@ -1194,13 +1195,12 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 // 1,1 MB). Odczyt CAŁOŚCI inicjalizuje numerację i stan końcowego newline
                 // przy zimnym cache. Z id D2b wymusza go też po zmianie metadanych albo
                 // przy ich braku, aby sprawdzić właściciela i odświeżyć cache. Niezmieniony
-                // ciepły plik z właścicielem przy wiarygodnym stat czytamy też co N zdarzeń.
+                // ciepły plik przy wiarygodnym stat czytamy też co N zdarzeń, także niczyj.
                 // Niczyja sesja pozostaje append-only aż do zapisu metadanych.
                 let input: ObservedWriterInput = { kind: 'cached' };
                 // A repaired target is cold and read below; do not charge a second stat.
                 const changed = this.deviceId && attemptsLeft > 0 ? await this._deviceWriterChanged(path) : false;
-                const marker = this._sessionDevices.get(path);
-                const verifyDevice = this.deviceId !== null && marker?.kind === 'marker' && marker.device !== undefined
+                const verifyDevice = this.deviceId !== null
                     && (this._appendsSinceVerify.get(path) || 0) + 1 >= APPEND_VERIFY_EVERY_N;
                 const cacheWasCold = !this._sessionSeqCache.has(path) || !this._sessionEndsWithNewline.has(path)
                     || (this.deviceId !== null && (!this._sessionDevices.has(path) || changed || verifyDevice));
@@ -1224,7 +1224,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                     // zdarzenie — ale natywny `adapter.append` na brakującym pliku zwykle NIE
                     // rzuca (po prostu go zakłada od nowa, jak `fs` z flagą `a`), więc zewnętrzne
                     // skasowanie sesji MIĘDZY zdarzeniami byłoby inaczej niewidoczne. Co
-                    // `APPEND_VERIFY_EVERY_N` zdarzeń bez id lub dla niczyjej sesji płacimy JEDEN tani `exists()` (metadane,
+                    // `APPEND_VERIFY_EVERY_N` zdarzeń bez id płacimy JEDEN tani `exists()` (metadane,
                     // bez odczytu treści — O(1) względem rozmiaru pliku, nie O(n) jak `read()`).
                     const seen = (this._appendsSinceVerify.get(path) || 0) + 1;
                     if (seen >= APPEND_VERIFY_EVERY_N) {

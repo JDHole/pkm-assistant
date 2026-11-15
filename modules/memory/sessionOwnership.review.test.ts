@@ -176,7 +176,7 @@ for (const id of [A, null]) test.serial(`D2c periodic verification: exact bytes 
     t.deepEqual(a.calls.filter(([op]) => op === 'exists'), id ? [] : [['exists', a.path], ['exists', a.path]]);
 });
 
-for (const id of [A, null]) test.serial(`D2d unowned: 20 warm events keep bytes and pre-D2 I/O plus stat, id=${id}`, async t => {
+for (const id of [A, null]) test.serial(`D2e unowned: 20 warm events keep bytes with one read for id or legacy exists without id, id=${id}`, async t => {
     const d = sharedDisk(), a = d.device(id);
     const original = '\uFEFF---\r\nagent: Mira\r\n---\r\n\r\nHistoria legacy\r\n';
     d.files.set(a.path, original);
@@ -190,8 +190,68 @@ for (const id of [A, null]) test.serial(`D2d unowned: 20 warm events keep bytes 
     t.is(d.files.get(a.path), expected);
     t.deepEqual(a.calls.reduce<Record<string, number>>((counts, [op]) => {
         counts[op] = (counts[op] ?? 0) + 1; return counts;
-    }, {}), id ? { stat: 20, append: 20, exists: 1 } : { append: 20, exists: 1 });
+    }, {}), id ? { stat: 20, append: 20, read: 1 } : { append: 20, exists: 1 });
     t.is((await a.memory.loadActiveSession(a.path)).ownership, id ? 'unowned' : undefined);
+});
+
+test.serial('D2e unowned writer detects real metadata adoption with colliding size/mtime on event 20', async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse(timestamp) });
+    t.teardown(() => mock.timers.reset());
+    const d = sharedDisk(), a = d.device(A), b = d.device(B);
+    // BOM (3 bytes) + 22 CRLFs lose exactly the 25 bytes added by device at save.
+    const fields = Array.from({ length: 17 }, (_, i) => `opaque${i}: x`);
+    const original = '\uFEFF---\r\nagent: Mira\r\nupdated: 2026-11-15T10:00:00.000Z\r\nmessageCount: 1\r\n'
+        + fields.join('\r\n') + '\r\n---\r\n';
+    d.files.set(a.path, original);
+    await a.memory.appendToActiveSession({ type: 'user_message', content: 'Zażółć 🐈', timestamp });
+    t.is(d.files.get(a.path), original + firstEvent);
+    const beforeStat = await a.adapter.stat!(a.path);
+    await b.memory.saveSession((await b.memory.loadActiveSession(a.path)).messages);
+    const adopted = '---\nagent: Mira\nupdated: 2026-11-15T10:00:00.000Z\nmessageCount: 1\n'
+        + fields.join('\n') + '\ndevice: bbbbbbbbbbbbbbbb\n---\n' + firstEvent;
+    t.is(d.files.get(a.path), adopted);
+    t.deepEqual(await b.adapter.stat!(a.path), beforeStat);
+    t.is((await b.memory.loadActiveSession(a.path)).ownership, 'mine');
+    a.reset();
+    let expected = adopted;
+    for (let i = 2; i <= 20; i++) {
+        mock.timers.tick(17);
+        await a.memory.appendToActiveSession({ type: 'agent_message', content: 'Odpowiedź', timestamp });
+        expected += `## 2026-11-15T10:00:00.000Z — agent message\n\n**content:**\n\nOdpowiedź\n\n**seq:**\n\n${i}\n\n`;
+    }
+    t.is(d.files.get(a.path), expected);
+    await t.throwsAsync(() => a.memory.appendToActiveSession({ type: 'agent_message', content: 'Zablokowane', timestamp }), { instanceOf: ForeignSessionError });
+    t.is(d.files.get(a.path), expected);
+    t.deepEqual(a.calls.map(([op]) => op), [
+        ...Array.from({ length: 19 }, () => ['stat', 'append']).flat(), 'stat', 'read',
+    ]);
+    const fresh = await d.device(A).memory.loadActiveSession(a.path);
+    t.is(fresh.ownership, 'foreign');
+    t.deepEqual(fresh.messages.map(m => m.content), ['Zażółć 🐈', ...Array<string>(19).fill('Odpowiedź')]);
+});
+
+test.serial('D2e unowned writer refuses an ambiguous header with colliding size/mtime on event 20', async t => {
+    mock.timers.enable({ apis: ['Date'], now: Date.parse(timestamp) });
+    t.teardown(() => mock.timers.reset());
+    const d = sharedDisk(), a = d.device(A), b = d.device(B);
+    const original = '---\nagent: Mira\npadding: 12345678901234567\npadding: 12345678901234567\n---\n';
+    d.files.set(a.path, original);
+    await a.memory.appendToActiveSession({ type: 'user_message', content: 'Zażółć 🐈', timestamp });
+    const beforeStat = await a.adapter.stat!(a.path);
+    const ambiguous = '---\nagent: Mira\ndevice: aaaaaaaaaaaaaaaa  \ndevice: bbbbbbbbbbbbbbbb  \n---\n' + firstEvent;
+    await b.adapter.write(a.path, ambiguous);
+    t.deepEqual(await b.adapter.stat!(a.path), beforeStat);
+    a.reset();
+    let expected = ambiguous;
+    for (let i = 2; i <= 20; i++) {
+        await a.memory.appendToActiveSession({ type: 'agent_message', content: 'Odpowiedź', timestamp });
+        expected += `## 2026-11-15T10:00:00.000Z — agent message\n\n**content:**\n\nOdpowiedź\n\n**seq:**\n\n${i}\n\n`;
+    }
+    await t.throwsAsync(() => a.memory.appendToActiveSession({ type: 'agent_message', content: 'Zablokowane', timestamp }), { instanceOf: ForeignSessionError });
+    t.is(d.files.get(a.path), expected);
+    t.deepEqual(a.calls.map(([op]) => op), [
+        ...Array.from({ length: 19 }, () => ['stat', 'append']).flat(), 'stat', 'read',
+    ]);
 });
 
 test.serial('D2d unowned writer detects adoption by another device at metadata save', async t => {

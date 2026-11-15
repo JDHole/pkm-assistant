@@ -771,7 +771,7 @@ Flow:
 - ⚠️ **`appendToActiveSession` dokleja ogon, nie przepisuje pliku.** Pisze przez
   `_appendSessionFile` (`adapter.append`), a pełny odczyt płaci się RAZ na ścieżkę
   (bez id; z id dodatkowo po zmianie metadanych, przy braku wiarygodnego `stat`,
-  a dla sesji z właścicielem także co 20 ciepłych zdarzeń).
+  oraz co 20 ciepłych zdarzeń, także dla sesji niczyjej).
   Cache (`_sessionSeqCache`/`_sessionEndsWithNewline`, inicjalizowane na pierwszym zdarzeniu sesji
   albo pierwszym po restarcie Obsidiana) unika czytania każdego zdarzenia - naiwny read+write całego
   pliku na każde zdarzenie tury jest kwadratowy względem długości sesji i przy każdym zapisie to
@@ -781,8 +781,8 @@ Flow:
   zapisów. Adapter bez natywnego `append` dostaje fallback przez `readIfExists` (nie goły
   `exists()+read()`). Dla `session_epoch` fallback jest zabroniony: wymagany natywny append.
   - Dopisek do niczyjej sesji nie adoptuje jej i nie przepisuje nagłówka. Z id przed
-    dopiskiem jest `stat`; co 20 ciepłych zdarzeń sesji z właścicielem dodatkowo pełny
-    odczyt, a sesji niczyjej tylko dotychczasowe `exists` (D2d).
+    dopiskiem jest `stat`; co 20 ciepłych zdarzeń dodatkowo pełny odczyt, także dla
+    sesji niczyjej (D2e). Bez id pozostaje dotychczasowe `exists`.
   - **Plik skasowany Z ZEWNĄTRZ między zdarzeniami, na ciepłym cache, jest realnym ryzykiem** -
     natywny `adapter.append` na brakującym pliku wg wielu implementacji nie rzuca, tylko cicho
     zakłada plik OD NOWA (jak `fs` z flagą `a`), więc bez dodatkowej ochrony taki plik wracał
@@ -837,8 +837,8 @@ Flow:
   okresowej weryfikacji z odczytanego tekstu, nawet na ciepłym cache. Ensure robi to także
   po readbacku. Błąd dopisku/ensure unieważnia te trzy cache, zachowując licznik autosave
   `_sessionSavedCounts`. Bez id ciepły `appendToActiveSession` nadal nie czyta treści.
-  Z id jeden `stat` wykrywa zmianę rozmiaru/mtime i wymusza odczyt; dla sesji
-  z właścicielem także co 20 ciepłych zdarzeń pełny odczyt wymusza
+  Z id jeden `stat` wykrywa zmianę rozmiaru/mtime i wymusza odczyt; także dla sesji
+  niczyjej co 20 ciepłych zdarzeń pełny odczyt wymusza
   odświeżenie seq/newline oraz sprawdzenie własności przed dopiskiem (szczegóły niżej).
   Event epoki zawsze zaczyna się dodatkowym newline, także przy ciepłym cache.
 - ⚠️ **Znacznikiem pokrycia na szczeblach L1→L2 i L2→L3 jest PLIK NADRZĘDNY, nie stempel w
@@ -1250,7 +1250,7 @@ błędu, jeden świeży odczyt, nietknięte bajty źródła, zero zapisów źró
 Istniejące testy D1b nadal sprawdzają sukces mutacji na świeżym poprawnym obiekcie.
 
 
-## Mobile M2 D2/D2b/D2c/D2d - własność aktywnej rozmowy
+## Mobile M2 D2/D2b/D2c/D2d/D2e - własność aktywnej rozmowy
 
 `src/main.ts` przed budową `AgentManager` odczytuje raz identyfikator z publicznego
 `app.loadLocalStorage('pkm-assistant.device-id')`; brak/zła wartość oznacza wygenerowanie
@@ -1291,12 +1291,15 @@ UTF-8 (po maskowaniu nowych bajtów) ORAZ `mtime`: rozmiar wykrywa dopisek takż
 przy niezmienionym czasie, czas wykrywa zamianę identyfikatora tej samej długości.
 Natywny `append` otrzymuje publiczne `DataWriteOptions.mtime`; dzięki temu znany
 jest oczekiwany czas własnego zapisu bez drugiego `stat`. Niezmieniony ciepły plik:
-jeden `stat` na zdarzenie, a dla sesji z właścicielem pełny odczyt co
+jeden `stat` na zdarzenie i pełny odczyt co
 `APPEND_VERIFY_EVERY_N` (=20) ciepłych zdarzeń, niezależnie od wyniku `stat`.
-Niczyja sesja nie ma właściciela do okresowego potwierdzania: 20 ciepłych zdarzeń
-przy wiarygodnym, niezmienionym `stat` to 20 appendów, 20 statów, 1 exists,
-0 odczytów treści, 0 write i 0 kopii. To koszt sprzed D2 plus stat. Zewnętrzna
-zmiana metadanych nadal wymusza odczyt, również po adopcji przez drugie urządzenie. Cudza albo niejednoznaczna własność odmawia
+D2e obejmuje tym odczytem również cache `unowned`: drugie urządzenie mogło już
+adoptować sesję bez zmiany rozmiaru/mtime (normalizacja BOM/CRLF przy zapisie
+metadanych może zrównoważyć dodanie pola `device`). 20 ciepłych zdarzeń niczyjej
+sesji przy wiarygodnym, niezmienionym `stat` to 20 appendów, 20 statów, 1 odczyt
+treści, 0 exists, 0 write i 0 kopii. Koszt ochrony to jeden pełny odczyt na 20
+zdarzeń zamiast dotychczasowego exists. Wynik `mine` lub `unowned` odświeża cache
+i pozwala dopisać. Cudza albo niejednoznaczna własność odmawia
 przed dopiskiem. Zmiana metadanych wymusza wcześniejszy odczyt i odświeżenie właściciela,
 seq oraz newline przed appendem. Brak `stat`, wyjątek, brak pełnych metadanych lub
 adapter ignorujący/zaokrąglający przekazany czas powoduje świeży odczyt. Zdrowa
@@ -1330,8 +1333,9 @@ metadanych, sesja pozostaje niczyja i drugie urządzenie nadal może do niej dop
 Ochrona z konstrukcji dotyczy sesji utworzonych po D2 oraz starszych po pierwszym
 zapisie metadanych. D2d świadomie przywraca tę granicę, aby zachować kontrakt P3.
 Zmiana w starym formacie zachowująca rozmiar i dokładnie ten sam `mtime` jest
-niewidoczna dla `stat`, ale dla sesji z właścicielem okresowy odczyt ogranicza okno do najwyżej 19 dopisków
-po przejęciu (zwykle zero dzięki metadanym). Pozostaje wyścig między sprawdzeniem
+niewidoczna dla `stat`, ale z id okresowy odczyt ogranicza okno do najwyżej 19 dopisków
+po przejęciu lub adopcji, także dla cache sesji niczyjej (zwykle zero dzięki metadanym).
+Pozostaje wyścig między sprawdzeniem
 a zapisem/odtworzeniem: adapter nie oferuje atomowego porównania i zapisu. Rzeczywiste zachowanie
 mtime/rozdzielczość na Capacitorze i desktopie wymaga próby na urządzeniach.
 
@@ -1349,8 +1353,14 @@ oraz adopcję przy metadanych po różnych typach zdarzeń.
 pierwszy dopisek po przejęciu, zewnętrzny własny dopisek bez newline, UTF-8 i koszt
 ciepłego zapisu, brak/błąd/niewiarygodny stat oraz odmowy wszystkich pisarzy dla
 konfliktów i duplikatów. D2d sprawdza dokładne bajty dopisków live/frozen/bezgłowych,
-liczniki 20 zdarzeń niczyjej sesji z id i bez oraz możliwość dopisku drugiego
+możliwość dopisku drugiego
 urządzenia przed zapisem metadanych i odmowę pierwszego po tym zapisie.
+D2e aktualizuje dokładne liczniki i zachowanie bajtów dla 20 zdarzeń niczyjej sesji
+z id (jeden read) i bez (zastany exists). Sonda na osobnych adapterach odtwarza
+adopcję przez `saveSession` B przy BOM, CRLF, istniejących updated/messageCount
+i równych rozmiarze/mtime: 19 dopisków A, odmowa dwudziestego przez
+`ForeignSessionError`, nietknięte bajty po odmowie i historia ze świeżego czytnika.
+Osobny test sprawdza tę samą granicę dla niejednoznacznego nagłówka.
 D2c nadal sprawdza 40 dopisków własnej sesji, kolizje rozmiaru/mtime (odmowa zdarzenia
 20), A -> B -> A -> B, archiwum, BOM/CRLF i szerokie identyfikatory. Macierz kopii
 została wyłącznie dla przejęcia: sukces, brak/błędna kopia, wyjątek po 20 bajtach,
