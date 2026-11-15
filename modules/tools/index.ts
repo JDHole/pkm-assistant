@@ -157,3 +157,5 @@ export type { VaultExecution } from './subToolExecution.js';
 export { createSubagentChangesTool } from './SubagentChangesTool.js';
 export { createDraftReviewHost } from './draftReviewHost.js';
 export { initializeVaultDrafts, desktopDraftPorts, mobileDraftPorts } from './vaultDraftRuntime.js';
+
+export type { DraftStartupProgress } from './vaultDraftRuntime.js';

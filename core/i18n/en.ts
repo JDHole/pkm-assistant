@@ -3,6 +3,8 @@
  * Flat key-value map. Keys use dot notation by component.
  * {{param}} for interpolation.
  */
+const deviceDiagnosticsCommand = "Run device diagnostics";
+
 export const en: Record<string, string> = {
   "session.needs_repair": "needs repair after sync",
   "session.on_other_device": "on another device",
@@ -30,9 +32,12 @@ export const en: Record<string, string> = {
   "diagnostics.connection.empty_stream": "No stream chunks received",
   "diagnostics.connection.invalid_stream": "The response is not a model stream",
   "diagnostics.no_abort_controller": "Connection test unavailable: AbortController is missing or the run was cancelled.",
+  "diagnostics.drafts.title": "Sub-agent draft storage",
+  "diagnostics.drafts.ready": "The sub-agent writes through drafts on this device.",
+  "diagnostics.drafts.disabled": "Sub-agent writes have been disabled since startup. Stage: {{stage}}.",
   "diagnostics.title": "Device diagnostics",
   "diagnostics.startup_explanation": "startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself.",
-  "diagnostics.run": "Run device diagnostics",
+  "diagnostics.run": deviceDiagnosticsCommand,
   "diagnostics.settings_desc": "Save a private device report in your vault. A model connection test requires separate consent.",
   "diagnostics.consent": "Include a connection test? This sends one short test message to your default model provider and may incur a small charge. No notes or conversations are sent. You can save the local report without this test.",
   "diagnostics.memory_notice": "The local report also includes the number of memory files with synchronization conflict traces (counts only).",
@@ -74,7 +79,7 @@ export const en: Record<string, string> = {
 
   'mcp.obsidian_app.screenshot_mobile': 'Screenshots are not available on mobile. Use workspace state or open a note instead.',
   'chat.open_failed': 'Could not open chat. Please try again.',
-  'subagent.draft.unavailable_mobile': 'Draft storage is unavailable on this mobile device. You can continue chatting and run read-only tasks.',
+  'subagent.draft.unavailable_mobile': `Sub-agent writes through drafts did not start on this device. Run "${deviceDiagnosticsCommand}". You can continue chatting and run read-only tasks.`,
   'settings.mcp_stdio_mobile': 'Local MCP servers (stdio) are available only on desktop. On mobile, use an HTTP server.',
   'tools.label.subagent_changes': 'Sub-agent changes',
   'tool.subagent_changes': 'Sub-agent changes',

@@ -246,3 +246,7 @@ Port `AdapterDraftStorage` (podłączony w F2b) zachowuje format kopii i sprawdz
 ## Mobile M4 F2 - sub-agent z zapisem na telefonie
 
 `Platform.isMobile` wybiera magazyn na adapterze vaulta z przeglądem i odtwarzaniem po restarcie, pusty magazyn wymaga jednego `stat` bez zapisu, a lokalny namespace kopii jest pomijany przez git na obu platformach; desktop zachowuje port Node, szczegóły i ograniczenia są w `modules/tools/CLAUDE.md` i `modules/vault-drafts/CLAUDE.md`.
+
+## Mobile M4 F2e - diagnostyka magazynu kopii
+
+Raport urządzenia pokazuje etap startu magazynu, zwalidowane name/code błędu i liczbę problemów odzyskiwania, a próby adaptera obejmują binaria oraz przenoszenie między folderami bez dodatkowego I/O przy starcie. Kontrakt raportu i ograniczenia prób opisuje `modules/diagnostics/CLAUDE.md`, etapy oraz odmowę mobile `modules/tools/CLAUDE.md`.

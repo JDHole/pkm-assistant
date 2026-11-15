@@ -16,7 +16,7 @@ const {
   apiVersion,
 } = Obsidian;
 
-import { BUILD_MARKER, runDeviceDiagnostics, probeConnection, DiagnosticsConsentModal, showDiagnosticReport, StartupTimer } from '../modules/diagnostics/index.js';
+import { BUILD_MARKER, runDeviceDiagnostics, probeConnection, DiagnosticsConsentModal, showDiagnosticReport, StartupTimer, localErrorFields } from '../modules/diagnostics/index.js';
 import { createModelForRole, getModelsForRole } from '../modules/models/index.js';
 import type { ChatProvider, PkmModelSettings, ResolverPluginLike } from '../modules/models/index.js';
 import { PluginRuntime } from '../core/runtime/PluginRuntime.js';
@@ -97,7 +97,7 @@ import {
   createGenerateImageTool,
   createAddTextToImageTool,
 } from "../modules/tools/index.js";
-import type { AskUserChannels, ServerVisibilityAgent } from "../modules/tools/index.js";
+import type { AskUserChannels, ServerVisibilityAgent, DraftStartupProgress } from "../modules/tools/index.js";
 import { ArtifactStore, registerArtifactBlocks, migrateJsonArtifactsToNotes, DEFAULT_ARTIFACTS_FOLDER, buildArtifactsBaseContent, buildArtifactsBasePath } from "../modules/artifacts/index.js";
 // Księga biegów sub-agentów. Stoi obok traceLog, bo trace.log jest jej pierwszym konsumentem
 // (patrz modules/sub-agents/CLAUDE.md).
@@ -212,6 +212,10 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare vaultIndexer: VaultIndexer | undefined;
   // Nullowane w `onunload()` - patrz tam.
   private vaultDraftRuntime?: Awaited<ReturnType<typeof initializeVaultDrafts>>;
+  private draftStartup: DraftStartupProgress
+    | { stage: 'not-started' | 'registry' | 'ports' }
+    | { stage: 'ready'; present: boolean | undefined; recoveryIssues: number } = { stage: 'not-started' };
+  private draftStartupError: ReturnType<typeof localErrorFields> | undefined;
   declare subTaskRegistry: SubTaskRegistry | null;
   declare _askUserChannels: AskUserChannels | null;
   declare subTaskNotifier: SubTaskNotifier | null;
@@ -983,6 +987,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // Raw engine identification only; all platform decisions use Platform above.
       const { userAgent } = navigator;
       const startup = this.diagnosticStartupPhases?.snapshot();
+      const drafts = this.draftStartup ?? { stage: 'not-started' };
       const report = await runDeviceDiagnostics({
         adapter: this.app.vault.adapter, settings,
         platform: flags.isAndroidApp ? 'android' : flags.isIosApp ? 'ios' : flags.isMobile ? 'mobile' : 'desktop',
@@ -1000,6 +1005,11 @@ export default class PkmAssistantPlugin extends PluginBase {
           'mcp.http': servers?.filter(server => server.transport === 'http').length ?? null,
           'embedding.status': this.vaultIndexer?.getStatus().status ?? null,
           'drafts.available': !!this.vaultDraftRuntime,
+          'drafts.stage': drafts.stage,
+          'drafts.error.name': this.draftStartupError?.name,
+          'drafts.error.code': this.draftStartupError?.code,
+          'drafts.present': 'present' in drafts ? drafts.present : undefined,
+          'drafts.recoveryIssues': 'recoveryIssues' in drafts ? drafts.recoveryIssues : undefined,
           'vault.markdownCount': this.app.vault.getMarkdownFiles().length,
           'model.default': providerId && modelId ? `${providerId}/${modelId}` : null,
           'model.useDeviceModels': pkm?.useDeviceModels === true,
@@ -1069,11 +1079,19 @@ export default class PkmAssistantPlugin extends PluginBase {
 
   /** Restore the platform's private draft storage before admitting delegation. */
   async initializeVaultDraftRuntime(toolRegistry: ToolRegistry) {
+    this.draftStartup = { stage: 'registry' };
+    this.draftStartupError = undefined;
     try {
       if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
+      this.draftStartup = { stage: 'ports' };
       const ports = Platform.isMobile ? mobileDraftPorts(this.app) : desktopDraftPorts(this.app);
-      this.vaultDraftRuntime = await initializeVaultDrafts({ ...ports, registry: this.subTaskRegistry });
+      this.vaultDraftRuntime = await initializeVaultDrafts({ ...ports, registry: this.subTaskRegistry,
+        onProgress: progress => { this.draftStartup = progress; },
+      });
+      this.draftStartup = { stage: 'ready', present: this.vaultDraftRuntime.present,
+        recoveryIssues: this.vaultDraftRuntime.issues.length };
     } catch (error) {
+      this.draftStartupError = localErrorFields(error);
       log.error('VaultDrafts', 'Draft runtime unavailable:', error);
       if (!Platform.isMobile) new Notice(t('subagent.draft.unavailable'), 10000);
     }

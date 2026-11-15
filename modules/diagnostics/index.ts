@@ -6,3 +6,4 @@ export { DiagnosticsConsentModal, showDiagnosticReport } from './ui.js';
 export type { ConnectionResult } from './connection.js';
 export { StartupTimer } from './StartupTimer.js';
 export type { StartupPhase } from './StartupTimer.js';
+export { localErrorFields } from './values.js';

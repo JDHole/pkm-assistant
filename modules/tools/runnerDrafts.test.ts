@@ -688,8 +688,8 @@ for (const locale of ['pl', 'en']) test.serial(`F2b mobile with unavailable runt
     const args = { task: 'Write', aspect: 'child', background: false, _invocationDelegationDepth: 1,
         _invocationOrigin: origin, _invocationAgentName: 'Tester' };
     const expected = locale === 'pl'
-        ? 'Błąd sub-agenta child: Magazyn kopii roboczych jest niedostępny na tym urządzeniu mobilnym. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.'
-        : 'Sub-agent child error: Draft storage is unavailable on this mobile device. You can continue chatting and run read-only tasks.';
+        ? 'Błąd sub-agenta child: Zapisy sub-agenta przez kopie robocze nie uruchomiły się na tym urządzeniu. Uruchom komendę "Uruchom diagnostykę urządzenia". Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.'
+        : 'Sub-agent child error: Sub-agent writes through drafts did not start on this device. Run "Run device diagnostics". You can continue chatting and run read-only tasks.';
     t.like(await delegate.execute(args, f.app, f.plugin as never), { success: false, error: expected, tools_used: [] });
     t.is(decode(f.files.get('a.md')!), 'Baza');
 

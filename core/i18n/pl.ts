@@ -3,6 +3,8 @@
  * Flat key-value map. Keys use dot notation by component.
  * {{param}} for interpolation.
  */
+const deviceDiagnosticsCommand = "Uruchom diagnostykę urządzenia";
+
 export const pl: Record<string, string> = {
   "session.needs_repair": "wymaga naprawy po synchronizacji",
   "session.on_other_device": "na innym urządzeniu",
@@ -30,9 +32,12 @@ export const pl: Record<string, string> = {
   "diagnostics.connection.empty_stream": "Nie odebrano żadnej porcji strumienia",
   "diagnostics.connection.invalid_stream": "Odpowiedź nie jest strumieniem modelu",
   "diagnostics.no_abort_controller": "Test połączenia niedostępny: brak AbortController lub przebieg anulowano.",
+  "diagnostics.drafts.title": "Magazyn kopii roboczych sub-agenta",
+  "diagnostics.drafts.ready": "Sub-agent zapisuje przez kopie robocze na tym urządzeniu.",
+  "diagnostics.drafts.disabled": "Zapisy sub-agenta są wyłączone od startu. Etap: {{stage}}.",
   "diagnostics.title": "Diagnostyka urządzenia",
   "diagnostics.startup_explanation": "startup.layoutWaitMs to oczekiwanie na Obsidiana przed inicjalizacją pluginu; pozostałe fazy startu mierzą sam plugin.",
-  "diagnostics.run": "Uruchom diagnostykę urządzenia",
+  "diagnostics.run": deviceDiagnosticsCommand,
   "diagnostics.settings_desc": "Zapisz prywatny raport urządzenia w vaulcie. Test połączenia z modelem wymaga osobnej zgody.",
   "diagnostics.consent": "Dodać test połączenia? Wyśle on jedną krótką wiadomość testową do dostawcy domyślnego modelu i może naliczyć małą opłatę. Nie wysyła notatek ani rozmów. Możesz zapisać raport lokalny bez tego testu.",
   "diagnostics.memory_notice": "Raport lokalny zawiera też liczbę plików pamięci ze śladami konfliktu synchronizacji (same liczby).",
@@ -74,7 +79,7 @@ export const pl: Record<string, string> = {
 
   'mcp.obsidian_app.screenshot_mobile': 'Zrzuty ekranu nie są dostępne na telefonie. Możesz sprawdzić stan obszaru roboczego lub otworzyć notatkę.',
   'chat.open_failed': 'Nie udało się otworzyć czatu. Spróbuj ponownie.',
-  'subagent.draft.unavailable_mobile': 'Magazyn kopii roboczych jest niedostępny na tym urządzeniu mobilnym. Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.',
+  'subagent.draft.unavailable_mobile': `Zapisy sub-agenta przez kopie robocze nie uruchomiły się na tym urządzeniu. Uruchom komendę "${deviceDiagnosticsCommand}". Możesz dalej rozmawiać i zlecać zadania tylko do odczytu.`,
   'settings.mcp_stdio_mobile': 'Lokalne serwery MCP (stdio) działają tylko na desktopie. Na telefonie użyj serwera HTTP.',
   'tools.label.subagent_changes': 'Zmiany suba',
   'tool.subagent_changes': 'Zmiany suba',

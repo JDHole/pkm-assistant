@@ -57,6 +57,12 @@ export function connectionDetail(result: ConnectionResult): string {
 /** Called only after constructing rows from fixed labels and validated values. */
 export function renderDiagnosticMarkdown(checks: DiagnosticCheck[], redact: (text: string) => string): string {
     const cell = (value: string) => value.replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ').replace(/[<>]/g, '');
+    const isDraftDetail = (c: DiagnosticCheck) => c.name.startsWith('drafts.') && c.name !== 'drafts.available';
+    const drafts = checks.filter(isDraftDetail);
+    const stage = drafts.find(c => c.name === 'drafts.stage');
+    const draftSummary = stage?.status === 'ok' && stage.detail === 'ready'
+        ? t('diagnostics.drafts.ready')
+        : t('diagnostics.drafts.disabled', { stage: stage?.status === 'ok' ? stage.detail : t('diagnostics.unavailable') });
     const memory = checks.filter(c => c.name.startsWith('memory.conflict.'));
     const memoryCount = (group: string): number | null => {
         const row = memory.find(c => c.name === `memory.conflict.${group}`);
@@ -74,8 +80,9 @@ export function renderDiagnosticMarkdown(checks: DiagnosticCheck[], redact: (tex
     // Filter before Markdown escaping too, so escaping cannot split a known secret.
     return redact([
         `# ${t('diagnostics.title')}`, '', t('diagnostics.privacy'), '', t('diagnostics.startup_explanation'), '',
-        ...table(checks.filter(c => !c.name.startsWith('memory.conflict.'))),
+        ...table(checks.filter(c => !c.name.startsWith('memory.conflict.') && !isDraftDetail(c))),
         `## ${t('diagnostics.memory.title')}`, '', summary, '', t('diagnostics.memory.scope'), '',
         ...(memory.length ? table(memory) : []),
+        ...(drafts.length ? [`## ${t('diagnostics.drafts.title')}`, '', draftSummary, '', ...table(drafts)] : []),
     ].join('\n'));
 }

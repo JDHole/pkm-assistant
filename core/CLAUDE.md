@@ -547,3 +547,7 @@ Testy listy i rzeczywistego `git check-ignore` rozszerzono w keySanitizer.test.t
 PluginBase.test.ts obejmuje append/fallback, a main.mobile.test.ts pełny start
 obu platform. I18n odmowy mobile mówi teraz o niedostępności magazynu na tym
 urządzeniu, zamiast o niewdrożonej funkcji; oba języki sprawdza runnerDrafts.test.ts.
+
+M4 F2e dodaje PL/EN sekcji diagnostyki magazynu kopii. Nazwa istniejącej komendy
+`diagnostics.run` jest współdzielona w słowniku z nową odmową mobile, żeby wskazanie
+komendy nie rozjechało się z paletą. Tekst odmowy desktopowej pozostaje bez zmian.

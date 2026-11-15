@@ -10,26 +10,30 @@ import { probeConnection } from './connection.js';
 /** Enforces parent existence and file/folder separation, like a vault adapter. */
 function memoryAdapter() {
     const files = new Map<string, string>();
+    const binaries = new Map<string, ArrayBuffer>();
     const folders = new Set<string>(['']);
     const parent = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/')));
     function requireParent(path: string) { if (!folders.has(parent(path))) throw new Error('Parent missing'); }
     const adapter: DiagnosticAdapter = {
-        exists: async path => files.has(path) || folders.has(path),
+        exists: async path => files.has(path) || binaries.has(path) || folders.has(path),
         mkdir: async path => { requireParent(path); folders.add(path); },
         write: async (path, value) => { requireParent(path); files.set(path, value); },
         read: async path => { const value = files.get(path); if (value === undefined) throw new Error('File missing'); return value; },
         append: async (path, text) => { if (!files.has(path)) throw new Error('File missing'); files.set(path, files.get(path) + text); },
-        stat: async path => files.has(path) ? { type: 'file', size: files.get(path)!.length, mtime: 0, ctime: 0 } : null,
-        rename: async (from, to) => { requireParent(to); const value = await adapter.read(from); files.delete(from); files.set(to, value); },
-        list: async path => ({ files: [...files.keys()].filter(p => parent(p) === path), folders: [...folders].filter(p => p !== path && parent(p) === path) }),
-        remove: async path => { if (!files.delete(path)) throw new Error('File missing'); },
+        writeBinary: async (path, data) => { requireParent(path); binaries.set(path, data.slice(0)); },
+        readBinary: async path => { const data = binaries.get(path); if (!data) throw new Error('File missing'); return data.slice(0); },
+        stat: async path => files.has(path) ? { type: 'file', size: files.get(path)!.length, mtime: 0, ctime: 0 } : binaries.has(path) ? { type: 'file', size: binaries.get(path)!.byteLength, mtime: 0, ctime: 0 } : folders.has(path) ? { type: 'folder', size: 0, mtime: 0, ctime: 0 } : null,
+        rename: async (from, to) => { requireParent(to); if (binaries.has(from)) { binaries.set(to, binaries.get(from)!); binaries.delete(from); return; } const value = await adapter.read(from); files.delete(from); files.set(to, value); },
+        list: async path => ({ files: [...files.keys(), ...binaries.keys()].filter(p => parent(p) === path), folders: [...folders].filter(p => p !== path && parent(p) === path) }),
+        remove: async path => { if (!files.delete(path) && !binaries.delete(path)) throw new Error('File missing'); },
         rmdir: async (path, recursive) => {
             if (!recursive && ([...files.keys(), ...folders].some(p => p.startsWith(path + '/')))) throw new Error('Not empty');
             for (const file of files.keys()) if (file.startsWith(path + '/')) files.delete(file);
+            for (const file of binaries.keys()) if (file.startsWith(path + '/')) binaries.delete(file);
             for (const folder of folders) if (folder === path || folder.startsWith(path + '/')) folders.delete(folder);
         },
     };
-    return { adapter, files, folders };
+    return { adapter, files, folders, binaries };
 }
 function fixture() {
     const disk = memoryAdapter();
@@ -99,9 +103,10 @@ test('in-memory diagnostics writes verified results and leaves only its report',
         ['plugin.version', 'ok', 0], ['isMobile', 'ok', 0], ['structuredClone', 'ok', 0], ['MediaRecorder', 'skipped', 0],
         ['crypto.roundtrip', 'ok', 0], ['fs.mkdir', 'ok', 0], ['fs.write', 'ok', 0], ['fs.read', 'ok', 0],
         ['fs.append', 'ok', 0], ['fs.stat', 'ok', 0], ['fs.rename', 'ok', 0], ['fs.list', 'ok', 0],
-        ['fs.remove', 'ok', 0], ['fs.rmdir', 'ok', 0], ['model.connection', 'skipped', 0],
+        ['fs.remove', 'ok', 0], ['fs.statMissing', 'ok', 0], ['fs.directory', 'ok', 0],
+        ['fs.binary', 'ok', 0], ['fs.renameNested', 'ok', 0], ['fs.binaryRemove', 'ok', 0], ['fs.rmdir', 'ok', 0], ['model.connection', 'skipped', 0],
     ]);
-    t.is(result.ok, 13); t.is(result.errors, 0);
+    t.is(result.ok, 18); t.is(result.errors, 0);
     const saved = await f.adapter.read(result.path);
     t.is(saved, [
         '# Device diagnostics', '',
@@ -121,6 +126,11 @@ test('in-memory diagnostics writes verified results and leaves only its report',
         '| fs.rename | OK | 0 | Verified |',
         '| fs.list | OK | 0 | Verified |',
         '| fs.remove | OK | 0 | Verified |',
+        '| fs.statMissing | OK | 0 | Verified |',
+        '| fs.directory | OK | 0 | Verified |',
+        '| fs.binary | OK | 0 | Verified |',
+        '| fs.renameNested | OK | 0 | Verified |',
+        '| fs.binaryRemove | OK | 0 | Verified |',
         '| fs.rmdir | OK | 0 | Temporary folder removed |',
         '| model.connection | SKIPPED | 0 | No consent; no request sent |', '',
         '## Memory synchronization conflict traces', '',
@@ -139,7 +149,7 @@ test('rename failure is red in saved Markdown and cleanup still removes all temp
     f.adapter.rename = async () => { throw new Error('rename denied'); };
     const result = await runDeviceDiagnostics(f.input);
     t.regex(await f.adapter.read(result.path), /\| fs.rename \| ERROR \| 0 \| Class: Error; code: unknown \|/);
-    t.is(result.errors, 1);
+    t.is(result.errors, 2);
     t.deepEqual(result.checks.find(c => c.name === 'fs.rmdir'), { name: 'fs.rmdir', status: 'ok', ms: 0, detail: 'Temporary folder removed' });
     t.deepEqual([...f.files.keys()], [result.path]);
     t.deepEqual([...f.folders], ['', '.pkm-assistant', '.pkm-assistant/diagnostics']);
@@ -149,7 +159,7 @@ test('declining connection records a skip and sends zero requests', async t => {
     const f = fixture();
     const result = await runDeviceDiagnostics(f.input);
     t.regex(await f.adapter.read(result.path), /\| model.connection \| SKIPPED \| 0 \| No consent; no request sent \|/);
-    t.is(result.ok, 13); t.is(f.requests(), 0);
+    t.is(result.ok, 18); t.is(f.requests(), 0);
 });
 
 test('missing append is skipped but rename, remove and cleanup are still verified', async t => {
@@ -201,7 +211,7 @@ test('adapter messages never enter the saved report; class and EACCES survive li
     t.deepEqual(report.checks.find(c => c.name === 'fs.rename'), {
         name: 'fs.rename', status: 'error', ms: 0, detail: 'Class: Error; code: EACCES',
     });
-    t.is(report.errors, 1);
+    t.is(report.errors, 2);
     t.true(saved.includes('| fs.rename | ERROR | 0 | Class: Error; code: EACCES |'));
     for (const output of [saved, report.markdown, JSON.stringify(report.checks)]) {
         for (const secret of ['kuba', 'example.com', '/storage', 'content://', 'prywatna', 'Vault', 'session=', 'sk-ant', '\\Users']) t.false(output.includes(secret), secret);
@@ -375,7 +385,7 @@ test('connection exceptions and huge adapter messages cannot become report text'
     f.input.connection = async () => { throw new Error(privateMessage); };
     f.adapter.rename = async () => { throw new Error(privateMessage + '/a'.repeat(50000)); };
     const report = await runDeviceDiagnostics(f.input);
-    t.is(report.errors, 2);
+    t.is(report.errors, 3);
     t.is(report.checks.find(c => c.name === 'model.connection')?.detail, 'No connection or CORS blocked the request');
     t.is(report.checks.find(c => c.name === 'fs.rename')?.detail, 'Class: Error; code: unknown');
     t.is(await f.adapter.read(report.path), report.markdown);
@@ -542,3 +552,106 @@ test('D6 deferred facts are collected once after consent and failure does not br
     t.false(failed.markdown.includes('Synthetic private content'));
     t.is(f.requests(), 0);
 });
+
+for (const stage of ['not-started', 'registry', 'ports', 'presence', 'restore', 'cleanup', 'ready']) {
+    test(`F2e saves literal draft stage ${stage} with validated measurements`, async t => {
+        const f = fixture();
+        f.input.facts = { 'drafts.stage': stage, 'drafts.error.name': 'Error', 'drafts.error.code': 'EACCES',
+            'drafts.recoveryIssues': 2.6, 'drafts.present': true, 'drafts.available': stage === 'ready' };
+        const report = await runDeviceDiagnostics(f.input);
+        const saved = await f.adapter.read(report.path);
+        t.is(saved, report.markdown);
+        t.deepEqual(saved.split('\n').filter(line => line.startsWith('| drafts.')), [
+            stage === 'ready' ? '| drafts.available | OK | 0 | true |' : '| drafts.available | OK | 0 | false |',
+            `| drafts.stage | OK | 0 | ${stage} |`, '| drafts.error.name | OK | 0 | Error |',
+            '| drafts.error.code | OK | 0 | EACCES |', '| drafts.recoveryIssues | OK | 0 | 3 |',
+            '| drafts.present | OK | 0 | true |',
+        ]);
+    });
+}
+
+for (const invalid of ['sekret-probny-F2e', 'ready\n', 'Ready', undefined]) {
+    test(`F2e rejects draft facts with stage ${String(invalid)}`, async t => {
+        const f = fixture();
+        f.input.facts = { 'drafts.stage': invalid, 'drafts.error.name': 'Error\n', 'drafts.error.code': 'EACCES-secret',
+            'drafts.recoveryIssues': -1, 'drafts.present': 'true', 'drafts.private': 'sekret-probny-F2e' };
+        const report = await runDeviceDiagnostics(f.input);
+        for (const output of [await f.adapter.read(report.path), report.markdown]) {
+            t.deepEqual(output.split('\n').filter(line => line.startsWith('| drafts.')), [
+                '| drafts.stage | SKIPPED | 0 | Unavailable |', '| drafts.error.name | OK | 0 | unknown |',
+                '| drafts.error.code | OK | 0 | unknown |', '| drafts.recoveryIssues | SKIPPED | 0 | Unavailable |',
+                '| drafts.present | SKIPPED | 0 | Unavailable |',
+            ]);
+            t.true(output.includes('Sub-agent writes have been disabled since startup. Stage: Unavailable.'));
+            t.false(output.includes('sekret-probny-F2e'));
+            t.false(output.includes('EACCES-secret'));
+        }
+    });
+}
+
+for (const locale of ['pl', 'en']) for (const ready of [true, false]) test.serial(`F2e draft explanation ${locale}, ready=${ready}`, async t => {
+    setLocale(locale);
+    const f = fixture();
+    f.input.facts = { 'drafts.stage': ready ? 'ready' : 'presence', 'drafts.present': false,
+        'drafts.recoveryIssues': 0, 'drafts.error.name': 'TypeError', 'drafts.error.code': 7 };
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.is(saved, report.markdown);
+    const title = locale === 'pl' ? '## Magazyn kopii roboczych sub-agenta' : '## Sub-agent draft storage';
+    t.true(saved.indexOf(title) > saved.indexOf(locale === 'pl' ? '## Ślady konfliktu' : '## Memory synchronization'));
+    t.true(saved.includes(ready
+        ? locale === 'pl' ? 'Sub-agent zapisuje przez kopie robocze na tym urządzeniu.' : 'The sub-agent writes through drafts on this device.'
+        : locale === 'pl' ? 'Zapisy sub-agenta są wyłączone od startu. Etap: presence.' : 'Sub-agent writes have been disabled since startup. Stage: presence.'));
+    t.true(saved.includes('| drafts.present | OK | 0 | false |'));
+    t.true(saved.includes('| drafts.recoveryIssues | OK | 0 | 0 |'));
+    t.true(saved.includes('| drafts.error.name | OK | 0 | TypeError |'));
+    t.true(saved.includes('| drafts.error.code | OK | 0 | 7 |'));
+});
+
+for (const failure of ['none', 'statMissing', 'binary', 'size', 'writeBinary', 'readBinary', 'renameNested', 'binaryRemove', 'directory'] as const) {
+    test(`F2e adapter probes ${failure}: saved result and complete cleanup`, async t => {
+        const f = fixture();
+        if (failure === 'statMissing') {
+            const stat = f.adapter.stat;
+            f.adapter.stat = async path => {
+                if (path.endsWith('/missing.bin')) throw Object.assign(new Error('sekret-probny-F2e'), { code: 'EACCES' });
+                return stat(path);
+            };
+        } else if (failure === 'binary') f.adapter.readBinary = async () => new Uint8Array([0, 255, 195, 40, 0, 65]).buffer;
+        else if (failure === 'size') {
+            const stat = f.adapter.stat;
+            f.adapter.stat = async path => { const result = await stat(path); return path.endsWith('.bin') && result ? { ...result, size: 99 } : result; };
+        } else if (failure === 'writeBinary' || failure === 'readBinary') delete f.adapter[failure];
+        else if (failure === 'renameNested') {
+            const rename = f.adapter.rename;
+            f.adapter.rename = async (from, to) => { if (!from.endsWith('.bin')) await rename(from, to); };
+        } else if (failure === 'binaryRemove') {
+            const remove = f.adapter.remove;
+            f.adapter.remove = async path => { if (!path.endsWith('.bin')) await remove(path); };
+        } else if (failure === 'directory') {
+            const stat = f.adapter.stat;
+            f.adapter.stat = async path => path.endsWith('/.target') ? null : stat(path);
+        }
+        const report = await runDeviceDiagnostics(f.input);
+        const missing = failure === 'writeBinary' || failure === 'readBinary';
+        const badBinary = failure === 'binary' || failure === 'size';
+        const badRename = failure === 'renameNested';
+        const rows = report.checks.filter(c => ['fs.statMissing', 'fs.directory', 'fs.binary', 'fs.renameNested', 'fs.binaryRemove'].includes(c.name));
+        t.deepEqual(rows.map(c => [c.name, c.status, c.detail]), [
+            ['fs.statMissing', failure === 'statMissing' ? 'error' : 'ok', failure === 'statMissing' ? 'Class: Error; code: EACCES' : 'Verified'],
+            ['fs.directory', failure === 'directory' ? 'error' : 'ok', failure === 'directory' ? 'Read-back verification failed' : 'Verified'],
+            ['fs.binary', missing ? 'skipped' : badBinary ? 'error' : 'ok', missing ? 'Unavailable' : badBinary ? 'Read-back verification failed' : 'Verified'],
+            ['fs.renameNested', missing || badBinary || failure === 'directory' ? 'skipped' : badRename ? 'error' : 'ok',
+                missing ? 'Unavailable' : badBinary || failure === 'directory' ? 'Prerequisite failed' : badRename ? 'Class: Error; code: unknown' : 'Verified'],
+            ['fs.binaryRemove', missing || badBinary || badRename || failure === 'directory' ? 'skipped' : failure === 'binaryRemove' ? 'error' : 'ok',
+                missing ? 'Unavailable' : badBinary || badRename || failure === 'directory' ? 'Prerequisite failed' : failure === 'binaryRemove' ? 'Read-back verification failed' : 'Verified'],
+        ]);
+        const saved = await f.adapter.read(report.path);
+        t.is(saved, report.markdown);
+        t.false(saved.includes('sekret-probny-F2e'));
+        t.is(report.checks.find(c => c.name === 'fs.rmdir')?.detail, 'Temporary folder removed');
+        t.deepEqual([...f.files.keys()], [report.path]);
+        t.deepEqual([...f.binaries], []);
+        t.deepEqual([...f.folders], ['', '.pkm-assistant', '.pkm-assistant/diagnostics']);
+    });
+}

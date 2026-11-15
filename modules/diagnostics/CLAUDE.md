@@ -243,3 +243,60 @@ na zapis, literalny licznik w raporcie, nienaruszone bajty źródła, brak przeg
 zapisu i sieci po anulowaniu oraz skuteczny kolejny zapis po anulowaniu.
 Test produkcyjnego startu w `src/main.mobile.test.ts` mierzy odczyty plików kontrolnych
 na obu platformach: zero przy starcie, po jednym po wyborze lokalnego raportu.
+
+## Mobile M4 F2e - wynik startu kopii roboczych
+
+Composition root przekazuje migawkę istniejącej pracy startowej, bez nowych I/O.
+`drafts.available` pozostaje w dotychczasowym miejscu. Nowe fakty mają osobną
+sekcję ZA sekcją pamięci, żeby zachować kolejność wszystkich starszych wierszy
+oraz sekcji. Sekcja pojawia się, gdy wejście zawiera nowe fakty kopii (produkcyjna
+komenda zawsze je przekazuje). Stałe objaśnienie PL/EN odróżnia gotowy magazyn od
+wyłączonych od startu zapisów i podaje zwalidowany literał etapu.
+
+- `drafts.stage`: wyłącznie `not-started/registry/ports/presence/restore/cleanup/ready`,
+  dokładne dopasowanie całego tekstu; reszta daje `Unavailable`.
+- `drafts.error.name/code`: istniejące funkcje i zbiory D2 `errorName/errorCode`,
+  bez drugiego słownika. Nieznana obecna wartość daje `unknown`, brak pola
+  `Unavailable`. Liczbowy code zachowuje granice D2 (0-999, liczba całkowita).
+- `drafts.recoveryIssues`: dotychczasowy format nieujemnego licznika, dopiero po
+  zakończeniu restore (lub potwierdzonym pustym magazynie). To liczba issues,
+  nigdy ich ścieżki ani komunikaty.
+- `drafts.present`: boolean z istniejącego mobilnego `storagePresent`; brak wiedzy
+  daje `Unavailable`, także na desktopie, gdzie nie dokładamy sondy istnienia.
+- Barrel eksportuje `localErrorFields(error)` do migawki surowych `name/code`;
+  używa istniejącego bezpiecznego odczytu pól (także rzucających getterów).
+  Nie czyta `message`, nie przechowuje całego błędu i nie waliduje przedwcześnie.
+
+Nowe próby są częścią dotychczasowego `try/finally` we własnym `tmp-<id>`, na obu
+platformach, bez dostępu do namespace magazynu ani uruchamiania DraftStore.
+Brak `readBinary` lub `writeBinary` daje skipped dla zależnych prób. Niepowodzenie
+próby nie blokuje niezależnych prób; sprzątanie zawsze jest sprawdzane i jego
+awaria nadal oznacza błąd. Nowe wiersze fs są po `fs.remove`, przed `fs.rmdir`.
+
+Założenia portu adapterowego i pokrycie:
+
+| Założenie | Sprawdzenie |
+| --- | --- |
+| Brak ścieżki to `stat === null`, bez wyjątku | `fs.statMissing` |
+| Ukryci i zagnieżdżeni rodzice dają się utworzyć | istniejące `fs.mkdir`, nowe `fs.directory` (ukryty podfolder) |
+| `stat.type` rozróżnia folder/plik; listing pokazuje bezpośrednie dzieci | `fs.directory`, `fs.binary`, `fs.renameNested`, istniejące `fs.list` |
+| Binary read/write zachowują bajty i dokładny `stat.size` | `fs.binary`: 00 FF C3 28 80 41, także niepoprawny UTF-8 |
+| Rename między folderami przenosi pełne bajty i usuwa źródło | `fs.renameNested`: readback, stat obu stron i listing celu |
+| Remove usuwa binarium, listing od razu odzwierciedla usunięcie | `fs.binaryRemove`; tekst pokrywa istniejące `fs.remove` |
+| Sprzątanie własnego katalogu działa rekurencyjnie | istniejące `fs.rmdir`, także po awariach |
+
+Listingi nowych prób dopuszczają pełną ścieżkę albo samą nazwę, tak jak port
+magazynu. SHA-256/Web Crypto pokrywa częściowo istniejące `crypto.roundtrip`
+(PBKDF2/SHA-256 i AES-GCM); próby plików nie potwierdzają osobno digest/randomUUID.
+Nie mierzymy zachowania rename po wyjątku, atomowości, trwałości po ubiciu procesu,
+wyścigów z synchronizatorem, symlinków ani wydajności dużych plików. Port sam
+weryfikuje wynik zapisu, lecz adapter nie zapewnia fsync ani blokady urządzeń.
+Te ograniczenia F2 pozostają bez zmian i wymagają prób na fizycznym telefonie.
+
+Testy F2e w `diagnostics.test.ts`: siedem etapów, poprawne i odrzucone pola w
+zapisanym raporcie/Markdown, objaśnienia PL/EN, próbki binarne, przekłamane bajty
+lub rozmiar, stat rzucający prywatny komunikat, brak metod binarnych, rename/remove
+bez efektu, błędny typ folderu i pełne sprzątanie w każdym przypadku.
+`src/main.mobile.test.ts` wykonuje produkcyjny start i komendę: ready obu platform,
+ports obu platform, presence/EACCES oraz restore na mobile, literalne fakty,
+brak prywatnego komunikatu, niezmienione I/O i desktopowy Notice.

@@ -8,17 +8,28 @@ import type { SubTaskRegistry } from '../sub-agents/index.js';
 import { createDraftReviewHost } from './draftReviewHost.js';
 import { createSubagentChangesTool } from './SubagentChangesTool.js';
 
+/** Observations of existing boot work only; callbacks must be synchronous and non-throwing. */
+export type DraftStartupProgress =
+    | { stage: 'presence' }
+    | { stage: 'restore'; present: boolean | undefined }
+    | { stage: 'cleanup'; present: boolean | undefined; recoveryIssues: number };
+
 /** The same boot entry in production and offline tests. Restore precedes admission. */
 export async function initializeVaultDrafts(input: {
     storage: DraftStorageIO; vault: DraftViewIO & DraftReviewIO; hasher: DraftHasher;
     registry: SubTaskRegistry; clock?: DraftClock;
     /** Mobile-only empty namespace probe. Errors must propagate, never mean empty. */
     storagePresent?: () => Promise<boolean>;
+    onProgress?: (progress: DraftStartupProgress) => void;
 }) {
     const persistence = new DraftPersistence(input.storage, input.hasher);
     const store = new DraftStore(persistence, input.vault, input.clock ?? { now: () => Date.now() });
+    input.onProgress?.({ stage: 'presence' });
     const present = input.storagePresent ? await input.storagePresent() : true;
+    const observedPresence = input.storagePresent ? present : undefined;
+    input.onProgress?.({ stage: 'restore', present: observedPresence });
     const recovered = present ? await store.restore() : { issues: [] };
+    input.onProgress?.({ stage: 'cleanup', present: observedPresence, recoveryIssues: recovered.issues.length });
     const drafts = new SubRunDrafts(store, persistence, input.vault, () => parseDraftId(crypto.randomUUID()));
     const registry = input.registry;
     drafts.setRetention(id => {
@@ -36,7 +47,7 @@ export async function initializeVaultDrafts(input: {
     const review = new DraftReview(store, persistence, input.vault);
     if (present) collect();
     await pending;
-    return { store, persistence, drafts, review, tool: createSubagentChangesTool(review), issues: recovered.issues,
+    return { store, persistence, drafts, review, tool: createSubagentChangesTool(review), issues: recovered.issues, present: observedPresence,
         flush: () => pending, dispose: () => { for (const unsubscribe of off) unsubscribe(); } };
 }
 

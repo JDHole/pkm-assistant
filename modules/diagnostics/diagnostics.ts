@@ -5,7 +5,7 @@ import type { ConnectionResult } from './connection.js';
 import { t } from '../../core/i18n/index.js';
 import type { DataAdapter } from 'obsidian';
 
-export type DiagnosticAdapter = Pick<DataAdapter, 'exists' | 'mkdir' | 'write' | 'read' | 'stat' | 'rename' | 'list' | 'remove' | 'rmdir'> & Partial<Pick<DataAdapter, 'append'>>;
+export type DiagnosticAdapter = Pick<DataAdapter, 'exists' | 'mkdir' | 'write' | 'read' | 'stat' | 'rename' | 'list' | 'remove' | 'rmdir'> & Partial<Pick<DataAdapter, 'append' | 'writeBinary' | 'readBinary'>>;
 export type CheckStatus = 'ok' | 'error' | 'skipped';
 export interface DiagnosticCheck { name: string; status: CheckStatus; ms: number; detail: string }
 export interface DiagnosticInput {
@@ -111,6 +111,55 @@ export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<Diag
                 const path = moved ? renamed : original; await adapter.remove(path); assert(!await adapter.exists(path)); return t('diagnostics.verified');
             });
         } else for (const name of ['read', 'append', 'stat', 'rename', 'list', 'remove']) skipped(`fs.${name}`);
+        // These probes share the same disposable namespace and finally as the text probes.
+        if (created) {
+            await check('fs.statMissing', async () => {
+                assert(await adapter.stat(`${tmp}/missing.bin`) === null);
+                return t('diagnostics.verified');
+            });
+            const targetFolder = `${tmp}/.target`;
+            const folderReady = await check('fs.directory', async () => {
+                await adapter.mkdir(targetFolder);
+                assert((await adapter.stat(targetFolder))?.type === 'folder');
+                const listed = await adapter.list(tmp);
+                assert(listed.folders.includes(targetFolder) || listed.folders.includes('.target'));
+                return t('diagnostics.verified');
+            });
+            if (typeof adapter.writeBinary === 'function' && typeof adapter.readBinary === 'function') {
+                const writeBinary = adapter.writeBinary.bind(adapter), readBinary = adapter.readBinary.bind(adapter);
+                const bytes = new Uint8Array([0x00, 0xFF, 0xC3, 0x28, 0x80, 0x41]);
+                const binary = `${nested}/probe.bin`, target = `${targetFolder}/probe.bin`;
+                const verify = async (path: string) => {
+                    const actual = new Uint8Array(await readBinary(path));
+                    const stat = await adapter.stat(path);
+                    assert(actual.length === bytes.length && actual.every((byte, i) => byte === bytes[i])
+                        && stat?.type === 'file' && stat.size === bytes.length);
+                };
+                const binaryReady = await check('fs.binary', async () => {
+                    await writeBinary(binary, bytes.buffer);
+                    await verify(binary);
+                    return t('diagnostics.verified');
+                });
+                let moved = false;
+                if (binaryReady && folderReady) moved = await check('fs.renameNested', async () => {
+                    await adapter.rename(binary, target);
+                    await verify(target);
+                    const listed = await adapter.list(targetFolder);
+                    assert((listed.files.includes(target) || listed.files.includes('probe.bin'))
+                        && await adapter.stat(binary) === null);
+                    return t('diagnostics.verified');
+                });
+                else skipped('fs.renameNested');
+                if (moved) await check('fs.binaryRemove', async () => {
+                    await adapter.remove(target);
+                    assert(await adapter.stat(target) === null);
+                    const listed = await adapter.list(targetFolder);
+                    assert(listed.files.length === 0 && listed.folders.length === 0);
+                    return t('diagnostics.verified');
+                });
+                else skipped('fs.binaryRemove');
+            } else for (const name of ['binary', 'renameNested', 'binaryRemove']) skipped(`fs.${name}`, t('diagnostics.unavailable'));
+        } else for (const name of ['statMissing', 'directory', 'binary', 'renameNested', 'binaryRemove']) skipped(`fs.${name}`);
     } finally {
         await check('fs.rmdir', async () => {
             // Recursive removal is required by Obsidian even for an empty folder.

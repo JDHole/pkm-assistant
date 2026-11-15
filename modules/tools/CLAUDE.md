@@ -1062,3 +1062,33 @@ typy i granice rewizji, scope/cursor. Asercje odmów sprawdzają pełny wynik wy
 a poprawne decyzje także bajty pliku i stan kopii. Dotychczasowe asercje zależności
 schematów przeniesiono na wykonawców, ponieważ to oni nadal egzekwują te same
 odmowy. Pełna droga F2b pozostaje sprawdzana w `runnerDrafts.test.ts`.
+
+## Mobile M4 F2e - obserwacja startu magazynu
+
+`initializeVaultDrafts` przyjmuje opcjonalny synchroniczny `onProgress`, który
+nie może rzucać, z eksportowaną unią `DraftStartupProgress`: presence przed sondą,
+restore z wynikiem sondy, cleanup z wynikiem sondy i liczbą issues. Zwraca też
+`present: boolean | undefined` (undefined bez sondy). Callback jedynie obserwuje
+istniejące kroki; nie dodaje await, I/O, retry ani nowej obsługi wyjątków.
+Composition root dodaje etapy not-started, registry (brak rejestru), ports oraz
+ready po zakończeniu runtime i zapamiętuje wyłącznie surowe name/code wyjątku.
+Raport waliduje te pola istniejącym słownikiem D2 modułu diagnostics.
+
+Cleanup oznacza podpięcie rejestru i pierwsze prune/collectResolved/oczekiwanie
+na pending. Dotychczasowy catch asynchronicznego collectResolved pozostaje:
+loguje awarię, ale nie odmawia startu. Taka awaria nadal kończy się ready;
+nie dodajemy nowego trybu awarii ani Notice. Sprzątanie stagingu należy do restore.
+Mobile nie pokazuje nowego Notice, desktopowy Notice pozostaje bez zmian.
+
+Odmowa mobile PL/EN mówi teraz, że zapisy przez kopie nie uruchomiły się na tym
+urządzeniu, i wskazuje istniejącą komendę diagnostyki. Nazwa komendy i odmowa
+korzystają ze wspólnej wartości w każdym słowniku i18n. Rozmowa i zadania tylko
+do odczytu działają dalej; tekst desktopowy oraz kolejność bramek bez zmian.
+
+`vaultDraftRuntime.startup.test.ts` sprawdza literalne ślady portu obu platform
+oraz adaptera mobile dla pustego magazynu i jednej zamkniętej pending kopii,
+a także rzeczywiście odtworzoną propozycję. Ślady porównano z runtime sprzed F2e
+(6fff56f): identyczne. Mobile: 1 operacja dla pustego namespace, 23 dla jednej
+propozycji nowego pliku z istniejącym pustym stagingiem, bez zapisów przy starcie.
+`src/main.mobile.test.ts` sprawdza zapis raportu przez produkcyjny start/komendę;
+`runnerDrafts.test.ts` zachowuje odmowę PL/EN przez rzeczywiste narzędzia delegacji.

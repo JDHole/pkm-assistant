@@ -55,6 +55,10 @@ export function field(value: unknown, key: string): unknown {
     if (!value || typeof value !== 'object') return undefined;
     try { return Reflect.get(value, key); } catch { return undefined; }
 }
+/** Snapshot only the two permitted raw fields; even throwing getters cannot break boot. */
+export function localErrorFields(error: unknown): { name: unknown; code: unknown } {
+    return { name: field(error, 'name'), code: field(error, 'code') };
+}
 export function count(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 }
@@ -82,6 +86,10 @@ const factFormats: Record<string, (value: unknown) => string | null> = {
     'memory.conflict.unreadable': numberFact, 'memory.conflict.skipped': numberFact,
     'mcp.total': numberFact, 'mcp.stdio': numberFact, 'mcp.http': numberFact,
     'embedding.status': value => typeof value === 'string' && ['idle', 'disabled_mobile', 'no_provider', 'building', 'ready', 'error'].includes(value) ? value : null,
+    'drafts.stage': value => typeof value === 'string' && ['not-started', 'registry', 'ports', 'presence', 'restore', 'cleanup', 'ready'].includes(value) ? value : null,
+    'drafts.error.name': value => value == null ? null : errorName(value),
+    'drafts.error.code': value => value == null ? null : errorCode(value),
+    'drafts.recoveryIssues': numberFact, 'drafts.present': booleanFact,
     'drafts.available': booleanFact, 'vault.markdownCount': numberFact,
     'model.default': value => {
         if (typeof value !== 'string') return null;

@@ -195,9 +195,9 @@ test.serial('inline comment waits for first chat view and preserves formatted me
     ]]);
 });
 
-for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agents', 'mcp', ...(mobile ? ['drafts' as const] : [])] as const) {
+for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agents', 'mcp', 'ports', ...(mobile ? ['drafts' as const, 'restore' as const] : [])] as const) {
     const skinFails = failure === 'skin';
-    const scenario = failure === 'agents' || failure === 'mcp' || failure === 'drafts'
+    const scenario = failure === 'agents' || failure === 'mcp' || failure === 'drafts' || failure === 'ports' || failure === 'restore'
         ? `U13 production startup: ${mobile ? 'mobile' : 'desktop'}, ${failure} failure`
         : `U12 production startup: ${mobile ? 'mobile' : 'desktop'}, skin failure=${skinFails}`;
     test.serial(scenario, async t => {
@@ -231,10 +231,17 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
             mock.method(app.vault.adapter, method, (...args: [string, ...unknown[]]) => {
                 if (args[0].startsWith('.pkm-assistant/subagent-drafts')) {
                     draftOperations.push([method, args[0]]);
-                    if (failure === 'drafts') throw new Error('Controlled draft storage failure');
+                    if (failure === 'drafts') throw Object.assign(new Error('sekret-probny-F2e'), { code: 'EACCES' });
+                    if (failure === 'restore' && method === 'list') throw new Error('sekret-probny-F2e');
                 }
                 return Reflect.apply(original, app.vault.adapter, args);
             });
+        }
+        if (failure === 'ports' && mobile) Object.defineProperty(app.vault.adapter, 'writeBinary', { value: undefined });
+        if (failure === 'restore') {
+            for (const path of ['.pkm-assistant', '.pkm-assistant/subagent-drafts', '.pkm-assistant/subagent-drafts/v1'])
+                if (!await app.vault.adapter.exists(path)) await app.vault.adapter.mkdir(path);
+            draftOperations.length = 0;
         }
         await app.vault.adapter.write('.gitignore', '# Synthetic vault\n');
         let localReads = 0, localWrites = 0;
@@ -261,7 +268,7 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         let nodeReads = 0;
         Object.defineProperty(window, 'require', mobile
             ? { configurable: true, get() { nodeReads++; throw new Error('Node reached on mobile'); } }
-            : { configurable: true, value: () => fs });
+            : { configurable: true, value: failure === 'ports' ? undefined : () => fs });
         t.teardown(async () => {
             clock.mock.restore();
             plugin.onunload();
@@ -310,8 +317,13 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         await Promise.all(layouts.map(callback => callback()));
         t.true(plugin._ready);
         if (failure !== 'mcp') {
-            t.deepEqual(draftOperations, mobile ? [['stat', '.pkm-assistant/subagent-drafts/v1']] : []);
-            if (failure === 'drafts') {
+            t.deepEqual(draftOperations, failure === 'restore' ? [
+                ['stat', '.pkm-assistant/subagent-drafts/v1'],
+                ['stat', '.pkm-assistant/subagent-drafts/v1/.staging'],
+                ['stat', '.pkm-assistant/subagent-drafts/v1'],
+                ['list', '.pkm-assistant/subagent-drafts/v1'],
+            ] : mobile && failure !== 'ports' ? [['stat', '.pkm-assistant/subagent-drafts/v1']] : []);
+            if (failure === 'drafts' || failure === 'restore' || failure === 'ports') {
                 t.is(draftErrors.length, 1);
                 t.is(plugin.toolRegistry?.getTool('delegate')?.name, 'delegate');
                 t.is(plugin.toolRegistry?.getTool('sub_agent')?.name, 'sub_agent');
@@ -344,6 +356,22 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         const reports = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
         t.is(reports.length, 1);
         const content = await app.vault.adapter.read(reports[0]);
+        const draftRows = content.split('\n').filter(line => line.startsWith('| drafts.'))
+            .map(line => line.replace(/\| (OK|SKIPPED) \| \d+ \|/, '| $1 | 0 |'));
+        const failed = failure === 'drafts' || failure === 'restore' || failure === 'ports';
+        t.deepEqual(draftRows, [
+            failed ? '| drafts.available | OK | 0 | false |' : '| drafts.available | OK | 0 | true |',
+            failure === 'drafts' ? '| drafts.stage | OK | 0 | presence |'
+                : failure === 'restore' ? '| drafts.stage | OK | 0 | restore |'
+                : failure === 'ports' ? '| drafts.stage | OK | 0 | ports |' : '| drafts.stage | OK | 0 | ready |',
+            failed ? '| drafts.error.name | OK | 0 | Error |' : '| drafts.error.name | SKIPPED | 0 | Unavailable |',
+            failure === 'drafts' ? '| drafts.error.code | OK | 0 | EACCES |' : '| drafts.error.code | SKIPPED | 0 | Unavailable |',
+            failure === 'restore' ? '| drafts.present | OK | 0 | true |'
+                : mobile && !failed ? '| drafts.present | OK | 0 | false |' : '| drafts.present | SKIPPED | 0 | Unavailable |',
+            failed ? '| drafts.recoveryIssues | SKIPPED | 0 | Unavailable |' : '| drafts.recoveryIssues | OK | 0 | 0 |',
+        ]);
+        t.false(content.includes('sekret-probny-F2e'));
+        if (failure === 'ports' && !mobile) t.true(notices.includes('Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.'));
         if (failure === 'none') {
             t.deepEqual(diagnosticReads, [diagnosticProbe, costProbe], 'one scan after the local report consent');
             t.true(content.includes('| memory.conflict.state | OK | 0 | 1 |'));
@@ -356,6 +384,8 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
             {
                 none: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
                 drafts: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+                ports: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
+                restore: '| plugin.startupMs | OK | <collection-ms> | 1234 |',
                 skin: '| plugin.startupMs | OK | <collection-ms> | 11194 |',
                 agents: '| plugin.startupMs | OK | <collection-ms> | 11184 |',
                 mcp: '| plugin.startupMs | OK | <collection-ms> | 11174 |',
@@ -431,7 +461,7 @@ for (const failure of ['none', 'stat', 'missing-stat', 'restore', 'list', 'readB
                 prompt: 'Test', enabled: true, description: 'Test', role: 'worker', model: 'openai/model',
                 scope: null, max_iterations: 5, min_iterations: 1, max_tool_result_length: 1000 }, {} as never, { origin: { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) } });
             t.deepEqual([result.failed, result.result], [true,
-                'Sub-agent child error: Draft storage is unavailable on this mobile device. You can continue chatting and run read-only tasks.']);
+                'Sub-agent child error: Sub-agent writes through drafts did not start on this device. Run "Run device diagnostics". You can continue chatting and run read-only tasks.']);
         }
         t.deepEqual([nodeReads, notices, [...adapter.files]], [0, [], []]);
     });
@@ -528,9 +558,11 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
         write: async (path: string, text: string) => { files.set(path, text); if (path.endsWith('.md')) reportWrites.push(path); },
         read: async (path: string) => { if (path === costProbe) scans++; return files.get(path) ?? ''; },
         append: async (path: string, text: string) => { files.set(path, (files.get(path) ?? '') + text); },
-        stat: async (path: string) => ({ type: 'file', size: files.get(path)?.length ?? 0 }),
+        stat: async (path: string) => files.has(path) ? { type: 'file', size: files.get(path)!.length }
+            : dirs.has(path) ? { type: 'folder', size: 0 } : null,
         rename: async (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
-        list: async (path: string) => ({ files: [...files.keys()].filter(p => p.startsWith(path + '/')), folders: [] }),
+        list: async (path: string) => ({ files: [...files.keys()].filter(p => p.slice(0, p.lastIndexOf('/')) === path),
+            folders: [...dirs].filter(p => p.slice(0, p.lastIndexOf('/')) === path) }),
         remove: async (path: string) => { files.delete(path); },
         rmdir: async (path: string) => { for (const dir of dirs) if (dir.startsWith(path)) dirs.delete(dir); },
     };
