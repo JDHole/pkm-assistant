@@ -45,6 +45,9 @@ export const VAULT_GITIGNORE_ENTRIES = [
     '.pkm-assistant/backups/',
     // Log pluginu niesie nagłówki żądań i pełne ścieżki notatek — nigdy do repo usera.
     '.pkm-assistant/logs/',
+    // Lokalna kopia indeksu: * obejmuje jeden slug agenta, a pełna nazwa tylko brain.md.bak.
+    // brain.md, notatki brain/ i sessions/ nadal podróżują z repo vaulta.
+    '.pkm-assistant/agents/*/memory/brain.md.bak',
 ];
 
 /**

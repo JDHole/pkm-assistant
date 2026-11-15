@@ -14,6 +14,7 @@ import test from 'ava';
 
 import { NOTICE_DEFAULT_TIMEOUT_MS } from './runtime/contracts.js';
 import { CHAT_VIEW_TYPE } from './utils/viewTypes.js';
+import { VAULT_GITIGNORE_ENTRIES } from './security/keySanitizer.js';
 import type { NoticeHandle, PluginVersionData, SettingsBag } from './runtime/contracts.js';
 
 type BaseClass = typeof import('./PluginBase.js')['PluginBase'];
@@ -412,6 +413,61 @@ test('addToGitignore: adapter bez `append` dostaje SKLEJONĄ treść przez `writ
 // liniach, nie po podciągu), wołana SEKWENCYJNIE (await), błąd jednego wpisu nie
 // blokuje reszty listy.
 // ═════════════════════════════════════════════════════════════════════════════
+
+for (const nativeAppend of [true, false]) {
+    test(`D5: ensureGitignoreEntries dodaje tylko kopię brain, drugi start i brak pliku bez zapisu (append=${nativeAppend})`, async t => {
+        const files = new Map<string, string>([['.gitignore',
+            '# Własne reguły  \r\nNotatki/local/\r\n' +
+            '.pkm-assistant/settings.json\r\n' +
+            '.pkm-assistant/settings.last-good.json\r\n' +
+            '.pkm-assistant/backups/\r\n' +
+            '.pkm-assistant/logs/\r\n',
+        ]]);
+        const changes: Array<{ kind: string; path: string; data: string }> = [];
+        const adapter = {
+            read: async (path: string) => {
+                const content = files.get(path);
+                if (content === undefined) throw new Error('ENOENT');
+                return content;
+            },
+            write: async (path: string, data: string) => {
+                changes.push({ kind: 'write', path, data });
+                files.set(path, data);
+            },
+            ...(nativeAppend ? { append: async (path: string, data: string) => {
+                changes.push({ kind: 'append', path, data });
+                files.set(path, (files.get(path) ?? '') + data);
+            } } : {}),
+        };
+        const expected = '# Własne reguły  \r\nNotatki/local/\r\n' +
+            '.pkm-assistant/settings.json\r\n' +
+            '.pkm-assistant/settings.last-good.json\r\n' +
+            '.pkm-assistant/backups/\r\n' +
+            '.pkm-assistant/logs/\r\n' +
+            '.pkm-assistant/agents/*/memory/brain.md.bak\n';
+        const start = async () => {
+            const plugin = await makeBarePlugin({ app: { vault: { adapter } } });
+            await plugin.ensureGitignoreEntries(VAULT_GITIGNORE_ENTRIES);
+        };
+
+        await start();
+        t.is(await adapter.read('.gitignore'), expected);
+        t.deepEqual(changes, [{
+            kind: nativeAppend ? 'append' : 'write', path: '.gitignore',
+            data: nativeAppend ? '.pkm-assistant/agents/*/memory/brain.md.bak\n' : expected,
+        }]);
+
+        changes.length = 0;
+        await start();
+        t.is(await adapter.read('.gitignore'), expected);
+        t.deepEqual(changes, []);
+
+        files.delete('.gitignore');
+        await start();
+        t.deepEqual([...files], []);
+        t.deepEqual(changes, []);
+    });
+}
 
 test('ensureGitignoreEntries: porównanie po CAŁEJ linii — ".../settings.json.example" NIE maskuje ".../settings.json"', async t => {
     // Podciąg `.pkm-assistant/settings.json` jest zawarty w istniejącej linii

@@ -223,3 +223,7 @@ Memory odtwarza obie strony konfliktu sesji w RAM, naprawia plik przy pierwszym 
 ## Mobile M2 D4 - dziennik kosztów dopisywany natywnie
 
 Memory kolejkuje natywne dopiski do `cost_log.jsonl`, zachowuje fallback dla starszych adapterów i odczytuje rekordy obu stron konfliktu oraz pełne sklejone obiekty bez zmiany pliku; kontrakt, testy i ograniczenia opisuje `modules/memory/CLAUDE.md`.
+
+## Mobile M2 D5 - kopia awaryjna brain.md poza gitem vaulta
+
+Start dopisuje do istniejącego `.gitignore` wyłącznie regułę kopii `brain.md.bak` każdego agenta, zachowując synchronizację diagnostyki i dotychczasowy zapis pamięci; pliki już śledzone musi wyłączyć ze śledzenia właściciel vaulta (kontrakt i testy: `core/CLAUDE.md`, `modules/memory/CLAUDE.md`).

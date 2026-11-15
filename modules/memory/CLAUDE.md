@@ -282,6 +282,12 @@ odtwarza identyczny plik. Bezpiecznik `.bak` (`_brainHasManualContent`) zostaje 
 nadal tworzy kopię przy zmianie pliku z ręczną linią w strefie `managed`, teraz już tylko jako
 redundantna siatka bezpieczeństwa, bo treść i tak przeżywa w samym `brain.md`.
 
+M2 D5: kopia nadal powstaje obok indeksu jako
+`.pkm-assistant/agents/<safeName>/memory/brain.md.bak`; start pluginu dopisuje do
+istniejącego `.gitignore` regułę `.pkm-assistant/agents/*/memory/brain.md.bak`.
+Nie zmienia to zapisu kopii ani formatu pamięci. Plik już śledzony nadal pozostaje
+w indeksie gita - zdjęcie go ze śledzenia należy do właściciela vaulta, plugin nie wykonuje gita.
+
 **Fabryczne prompty robocze** (`workPrompts.ts`, owned przez memory, żeby workflow miał własne
 defaulty bez cyklu memory→agents): `factoryWorkPrompt('save_session' | 'archive' | 'summary')`.
 Konsumowane przez `resolveWorkPrompt(agent, key, settings, factory)` (`core/`) - łańcuch

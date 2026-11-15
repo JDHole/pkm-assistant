@@ -511,3 +511,19 @@ Pozostałe pozycje korzystają z istniejących etykiet. Test renderu obu język�
 M3 U19 dodaje `chat.trigger_popup.phone_hint` i `phone_filter` w PL/EN dla
 nagłówka popupu `/` bez podpowiedzi klawiszy. Czat wybiera je tylko na telefonie;
 desktop/tablet zachowują stare napisy. Test renderu: `modules/chat/chat/TriggerPopup.phone.test.ts`.
+
+## Mobile M2 D5 - lokalna kopia brain.md
+
+`VAULT_GITIGNORE_ENTRIES` zawiera w kolejności `.pkm-assistant/settings.json`,
+`.pkm-assistant/settings.last-good.json`, `.pkm-assistant/backups/`,
+`.pkm-assistant/logs/` oraz `.pkm-assistant/agents/*/memory/brain.md.bak`.
+Ostatni wzorzec obejmuje jeden katalog agenta i dokładną nazwę kopii indeksu.
+Start używa istniejącego `PluginBase.ensureGitignoreEntries`: dopisuje brakujące
+wiersze sekwencyjnie przez adapter, zachowuje starą treść, nie tworzy `.gitignore`
+przy jego braku. Ponowny start nie pisze niczego. Reguła nie usuwa pliku już
+śledzonego z indeksu gita - to zadanie właściciela vaulta; plugin nie wykonuje gita.
+`.pkm-assistant/diagnostics/` celowo nie jest ignorowane: raporty mają unikalne nazwy,
+a synchronizacja pozwala odebrać raport telefonu na innym urządzeniu.
+Testy: `PluginBase.test.ts` (bajty i operacje adaptera z append i bez niego) oraz
+`security/keySanitizer.test.ts` (pełna lista i dopasowanie przez prawdziwy `git check-ignore -v`
+w izolowanym katalogu tymczasowym; Git wymagany wyłącznie przez test).

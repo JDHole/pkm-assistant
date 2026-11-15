@@ -1,4 +1,8 @@
 import test from 'ava';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { sanitizePath, isProtectedPath, VAULT_GITIGNORE_ENTRIES } from './keySanitizer.js';
 
 // ── sanitizePath ──
@@ -289,12 +293,62 @@ test('isProtectedPath: reszta .pkm-assistant/agents nadal NIE jest „protected"
     t.false(isProtectedPath('Projekty/logs/notatka.md'));
 });
 
-test('VAULT_GITIGNORE_ENTRIES: lista wpisów .gitignore obejmuje logi i settings', t => {
+test('VAULT_GITIGNORE_ENTRIES: pełna lista wpisów .gitignore w kolejności', t => {
+    t.deepEqual(VAULT_GITIGNORE_ENTRIES, [
+        '.pkm-assistant/settings.json',
+        '.pkm-assistant/settings.last-good.json',
+        '.pkm-assistant/backups/',
+        '.pkm-assistant/logs/',
+        '.pkm-assistant/agents/*/memory/brain.md.bak',
+    ]);
     t.true(VAULT_GITIGNORE_ENTRIES.includes('.pkm-assistant/logs/'));
     // Regresja: starsze wpisy zostają.
     for (const legacy of ['.pkm-assistant/settings.json', '.pkm-assistant/settings.last-good.json', '.pkm-assistant/backups/']) {
         t.true(VAULT_GITIGNORE_ENTRIES.includes(legacy), `zgubiony wpis ${legacy}`);
     }
+});
+
+test('D5: git ignoruje kopie brain.md dwóch agentów, zachowuje pozostałą pamięć i diagnostykę', t => {
+    const dir = mkdtempSync(join(tmpdir(), 'pkm-d5-'));
+    t.teardown(() => rmSync(dir, { recursive: true, force: true }));
+    const emptyConfig = join(dir, 'empty-config');
+    writeFileSync(emptyConfig, '');
+    // Izolacja od repo i globalnych reguł użytkownika uruchamiającego test.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+    env.GIT_CONFIG_NOSYSTEM = '1';
+    env.GIT_CONFIG_GLOBAL = emptyConfig;
+    const options = { cwd: dir, env, encoding: 'utf8' as const, timeout: 10_000 };
+    const init = spawnSync('git', ['init', '--quiet', '--template='], options);
+    t.is(init.status, 0, init.stderr || init.error?.message);
+    writeFileSync(join(dir, '.gitignore'), VAULT_GITIGNORE_ENTRIES.join('\n') + '\n');
+
+    const result = spawnSync('git', ['-c', `core.excludesFile=${emptyConfig}`, 'check-ignore', '-v', '--non-matching', '--stdin'], {
+        ...options,
+        input: [
+            '.pkm-assistant/agents/tester-a/memory/brain.md.bak',
+            '.pkm-assistant/agents/tester-b/memory/brain.md.bak',
+            '.pkm-assistant/agents/tester-a/memory/brain.md',
+            '.pkm-assistant/agents/tester-a/memory/brain/x.md',
+            '.pkm-assistant/agents/tester-a/memory/sessions/active/a.md',
+            '.pkm-assistant/agents/tester-a/memory/brain.md.bak.md',
+            'Notatki/brain.md.bak',
+            '.pkm-assistant/diagnostics/report.md',
+            '.pkm-assistant/agents/group/tester-a/memory/brain.md.bak',
+            'Notatki/.pkm-assistant/agents/tester-a/memory/brain.md.bak',
+        ].join('\n') + '\n',
+    });
+    t.is(result.status, 0, result.stderr || result.error?.message);
+    t.is(result.stdout,
+        '.gitignore:5:.pkm-assistant/agents/*/memory/brain.md.bak\t.pkm-assistant/agents/tester-a/memory/brain.md.bak\n' +
+        '.gitignore:5:.pkm-assistant/agents/*/memory/brain.md.bak\t.pkm-assistant/agents/tester-b/memory/brain.md.bak\n' +
+        '::\t.pkm-assistant/agents/tester-a/memory/brain.md\n' +
+        '::\t.pkm-assistant/agents/tester-a/memory/brain/x.md\n' +
+        '::\t.pkm-assistant/agents/tester-a/memory/sessions/active/a.md\n' +
+        '::\t.pkm-assistant/agents/tester-a/memory/brain.md.bak.md\n' +
+        '::\tNotatki/brain.md.bak\n' +
+        '::\t.pkm-assistant/diagnostics/report.md\n' +
+        '::\t.pkm-assistant/agents/group/tester-a/memory/brain.md.bak\n' +
+        '::\tNotatki/.pkm-assistant/agents/tester-a/memory/brain.md.bak\n');
 });
 
 test('VAULT_GITIGNORE_ENTRIES: pliki sesji NIE są w .gitignore — pamięć agentów podróżuje z repo vaulta', t => {
