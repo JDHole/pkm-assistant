@@ -2,9 +2,9 @@ import test from 'ava';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { mergeBrainConflict, readBrainContent } from './brainConflict.js';
 import { AgentMemory, type MemoryVaultAdapterLike } from './AgentMemory.js';
-import { log } from '../../core/utils/Logger.js';
 import { setLocale } from '../../core/i18n/index.js';
 
 test.before(() => { setLocale('pl'); });
@@ -43,7 +43,7 @@ for (const style of styles) {
                 '# Tester\n## Na teraz: User\n- Zadanie\n## User\nRęczny B\n');
             t.is(conflict.conflicts, 1);
             t.deepEqual(mergeBrainConflict(conflict.text), {
-                kind: 'merged', text: '# Tester\n## User\nRęczny A\nRęczny B\n## Na teraz: User\n- Zadanie\n',
+                kind: 'merged', text: '# Tester\n## Na teraz: User\n- Zadanie\n## User\nRęczny A\nRęczny B\n',
             });
             const s = setup(conflict.text);
             const expected = '# Tester\n\n## Na teraz: User\n- Zadanie\n\n## Bieżące\n\n## User\nRęczny A\nRęczny B\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
@@ -65,7 +65,7 @@ for (const style of styles) {
                     convert('# Tester\n## User\nDodatkowy\n## Dawna\nIch\n## User\nKońcowy'));
                 t.is(conflict.conflicts, 1);
                 t.deepEqual(mergeBrainConflict(conflict.text), { kind: 'merged',
-                    text: convert('# Tester\n## Obca\nNasz\n## Dawna\nIch\n## User\nKońcowy\nDodatkowy\n') });
+                    text: convert('# Tester\n## Obca\nNasz\n## User\nKońcowy\nDodatkowy\n## Dawna\nIch\n') });
                 const s = setup(conflict.text);
                 const expected = '# Tester\n\n## Bieżące\n\n## User\nKońcowy\nDodatkowy\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n\n## Obca\nNasz\n\n## Dawna\nIch\n';
                 t.deepEqual(await s.memory.rebuildBrainIndex(), { changed: true, content: expected });
@@ -90,10 +90,13 @@ function conflictRows(text: string): { section: string; text: string }[] {
         if (line === '=======') { mode = 'theirs'; continue; }
         if (line === '>>>>>>> theirs') { mode = 'common'; continue; }
         if (mode === 'base') continue;
-        const heading = /^ {0,3}#{1,2}[ \t]+/.test(line);
+        const heading = /^ {0,3}##[ \t]+/.test(line);
         if ((mode === 'ours' || mode === 'common') && heading) oursSection = line.trimEnd();
         if ((mode === 'theirs' || mode === 'common') && heading) theirsSection = line.trimEnd();
-        if (line.trimEnd() && mode !== 'common') required.push({ section: mode === 'ours' ? oursSection : theirsSection, text: line.trimEnd() });
+        if (line.trimEnd()) {
+            if (mode === 'ours' || mode === 'common') required.push({ section: oursSection, text: line.trimEnd() });
+            if (mode === 'theirs' || mode === 'common') required.push({ section: theirsSection, text: line.trimEnd() });
+        }
     }
     return required;
 }
@@ -102,13 +105,13 @@ function sectionRows(text: string): Set<string> {
     const entries = new Set<string>();
     for (const raw of text.replace(/^\uFEFF/, '').split('\n')) {
         const line = raw.trimEnd();
-        if (/^ {0,3}#{1,2}[ \t]+/.test(line)) section = line;
+        if (/^ {0,3}##[ \t]+/.test(line)) section = line;
         if (line) entries.add(JSON.stringify([section, line]));
     }
     return entries;
 }
 
-test('D3b seeded edits through real git preserve section membership and row boundaries', t => {
+for (let batch = 0; batch < 3; batch++) test.serial(`D3c seeded edits batch ${batch + 1}: full section membership and row boundaries`, async t => {
     const dir = mkdtempSync(join(process.cwd(), '.d3b-property-'));
     let seed = 0x51ec710;
     const random = (max: number) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % max; };
@@ -122,7 +125,7 @@ test('D3b seeded edits through real git preserve section membership and row boun
     let malformed = 0;
     let merged = 0;
     try {
-        for (let pair = 0; pair < 360; pair++) {
+        for (let pair = 0; pair < (batch + 1) * 240; pair++) {
             const eol = pair % 2 ? '\r\n' : '\n';
             const encode = (sections: string[][], finalEol: boolean) =>
                 ['# Tester', ...sections.flat()].join(eol) + (finalEol ? eol : '');
@@ -131,7 +134,7 @@ test('D3b seeded edits through real git preserve section membership and row boun
                 const count = 1 + random(6);
                 for (let operation = 0; operation < count; operation++) {
                     const at = random(sections.length);
-                    switch (random(5)) {
+                    switch (random(11)) {
                         case 0: sections[at].push(`Wpis ${side} ${pair} ${operation}`); break;
                         case 1: if (sections[at].length > 1) sections[at].splice(1 + random(sections[at].length - 1), 1); break;
                         case 2: sections.splice(at, 0, [
@@ -140,6 +143,12 @@ test('D3b seeded edits through real git preserve section membership and row boun
                         ]); break;
                         case 3: sections.splice(random(sections.length), 0, ...sections.splice(at, 1)); break;
                         case 4: sections[at].push('Wspólny  '); break;
+                        case 5: if (sections.length > 1) sections.splice(at, 1); break;
+                        case 6: sections[at][0] = ['## User', '## Na teraz: User', '## Zmieniona'][random(3)]; break;
+                        case 7: if (sections[at].length > 1) sections[random(sections.length)].push(...sections[at].splice(1, 1)); break;
+                        case 8: sections[at].push(...sections[at].slice(1)); break;
+                        case 9: sections[at] = sections[at].map(line => line + ' \t'); break;
+                        case 10: sections.splice(at, 0, ['## Pusta']); break;
                     }
                 }
                 return encode(sections, random(2) === 0);
@@ -147,6 +156,7 @@ test('D3b seeded edits through real git preserve section membership and row boun
             const base = encode(baseSections, pair % 3 !== 0);
             const ours = edit('A');
             const theirs = edit('B');
+            if (pair < batch * 240) continue;
             for (const style of styles) {
                 const result = gitMerge(dir, style, base, ours, theirs);
                 if (!result.conflicts) continue;
@@ -155,6 +165,7 @@ test('D3b seeded edits through real git preserve section membership and row boun
                 if (actual.kind === 'not-applicable') {
                     t.deepEqual(actual, { kind: 'not-applicable', malformed: true }, `pair ${pair} ${style}`);
                     malformed++;
+                    t.fail(`valid conflict refused: pair ${pair} ${style}`);
                     continue;
                 }
                 merged++;
@@ -168,20 +179,92 @@ test('D3b seeded edits through real git preserve section membership and row boun
                 t.is(/^(?:<<<<<<<|=======|>>>>>>>|\|{7})(?: |\r?$)/m.test(actual.text), false);
             }
         }
-        t.log(`360 pairs, 1080 git merges, ${conflicts} conflicts, ${merged} merged, ${malformed} malformed`);
+        t.log(`240 pairs, 720 git merges, ${conflicts} conflicts, ${merged} merged, ${malformed} malformed`);
         t.is(conflicts > 500, true);
-        t.is(merged > 300, true); // Refusing every input must not satisfy the property test.
+        t.is(merged, conflicts);
+        t.is(malformed, 0); // No H1 edits or malformed syntax in this generator.
+        await setImmediate(); // Let AVA report this batch before the next git batch.
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test.serial('D3b invariant refuses a new section capturing shared continuation with one warning', t => {
+test('D3c preserves both memberships of shared continuation instead of refusing', t => {
     const input = '# Tester\n## User\n<<<<<<< ours\nRęczny A\n=======\n## Dodana\nDodatek\n>>>>>>> theirs\nWspólny ogon\n';
-    t.deepEqual(mergeBrainConflict(input), { kind: 'not-applicable', malformed: true });
-    const warnings: unknown[][] = [];
-    const warn = log.warn;
-    log.warn = (...args) => { warnings.push(args); };
-    try {
-        t.is(readBrainContent(input), input);
-        t.deepEqual(warnings, [['AgentMemory', 'Brain conflict is incomplete or nested; keeping original text']]);
-    } finally { log.warn = warn; }
+    const expected = '# Tester\n## User\nRęczny A\nWspólny ogon\n## Dodana\nDodatek\nWspólny ogon\n';
+    t.deepEqual(mergeBrainConflict(input), { kind: 'merged', text: expected });
+    t.is(readBrainContent(input), expected);
+});
+
+for (const style of styles) for (const eol of ['\n', '\r\n']) {
+    test(`D3c ${style} EOL=${JSON.stringify(eol)}: renamed heading preserves shared manual row through two rebuilds`, async t => {
+        const dir = mkdtempSync(join(process.cwd(), '.d3c-git-'));
+        const base = '# Tester\n## Old\nRęczny\n## User\nProfil\n'.replace(/\n/g, eol);
+        try {
+            const conflict = gitMerge(dir, style, base, base.replace('## Old', '## Na teraz: User'), base.replace('## Old', '## User'));
+            t.is(conflict.conflicts, 1);
+            t.deepEqual(mergeBrainConflict(conflict.text), { kind: 'merged',
+                text: '# Tester\n## Na teraz: User\nRęczny\n## User\nProfil\nRęczny\n'.replace(/\n/g, eol) });
+            const s = setup(conflict.text);
+            const expected = '# Tester\n\n## Bieżące\n\n## User\nProfil\nRęczny\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
+            t.deepEqual(await s.memory.rebuildBrainIndex(), { changed: true, content: expected });
+            t.is(s.files.get(s.path), expected);
+            t.deepEqual([...s.files].filter(([p]) => p.startsWith('.pkm-assistant/backups/')).map(([, text]) => text), [conflict.text]);
+            t.deepEqual(await s.memory.rebuildBrainIndex(), { changed: false, content: expected });
+            t.is(s.files.get(s.path), expected);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+}
+
+const hunk = (ours: string, theirs: string) => `<<<<<<< ours\n${ours}=======\n${theirs}>>>>>>> theirs\n`;
+
+test('D3c last repeated section receives additions after its nonempty tail, with section-local dedup', t => {
+    const ours = '# Tester  \nIntro A\n\n## User\nOne\nOne\n\n## Other\nTwo\n## User  \nLast\n\n';
+    const theirs = '# Tester\nIntro B\n## User\nOne \t\nTwo\nTwo\n## Other\nThree\n';
+    t.deepEqual(mergeBrainConflict(hunk(ours, theirs)), { kind: 'merged',
+        text: '# Tester  \nIntro A\nIntro B\n\n## User\nOne\nOne\n\n## Other\nTwo\nThree\n## User  \nLast\nTwo\n\n' });
+});
+
+test('D3c whole new sections keep duplicate rows, repeated headers and empty sections after their predecessors', t => {
+    const ours = '# Tester\n## User\nA\n## End\nZ\n';
+    const theirs = '# Tester\n## User\nB\n## New  \n C  \n C  \n\n## Empty\n\n## New\nD\n## End\nZ\n';
+    t.deepEqual(mergeBrainConflict(hunk(ours, theirs)), { kind: 'merged',
+        text: '# Tester\n## User\nA\nB\n## New  \n C  \n C  \n\n## Empty\n\n## New\nD\n## End\nZ\n' });
+});
+
+for (const style of styles) {
+    test(`D3c ${style}: differing H1 is malformed, matching H1 keeps preamble additions`, t => {
+        const dir = mkdtempSync(join(process.cwd(), '.d3c-title-'));
+        try {
+            const conflict = gitMerge(dir, style, '# Tester\nIntro\n## User\nA\n',
+                '# Tester A\nIntro A\n## User\nA\n', '# Tester B\nIntro B\n## User\nA\n');
+            t.is(conflict.conflicts, 1);
+            t.deepEqual(mergeBrainConflict(conflict.text), { kind: 'not-applicable', malformed: true });
+            const matching = conflict.text.replace(/# Tester [AB]/g, '# Tester');
+            t.deepEqual(mergeBrainConflict(matching), { kind: 'merged', text: '# Tester\nIntro A\nIntro B\n## User\nA\n' });
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+}
+
+test('D3c independently tracks fences on full sides including a shared heading', t => {
+    const input = '# Tester\n## Foreign\n' + hunk('```text\n', '') +
+        '## User\nShared\n' + hunk('```\n', '') + '## End\nDone\n';
+    t.deepEqual(mergeBrainConflict(input), { kind: 'merged',
+        text: '# Tester\n## Foreign\n```text\n## User\nShared\n```\n## User\nShared\n## End\nDone\n' });
+});
+
+for (const eol of ['\n', '\r\n']) for (const finalEol of ['', eol]) {
+    test(`D3c protected example retains BOM and exact fence bytes EOL=${JSON.stringify(eol)} final=${!!finalEol}`, t => {
+        const example = ('## Foreign\n```text\n' + hunk('## Example\nA\n', '## Example\nB\n') + '```').replace(/\n/g, eol) + finalEol;
+        const input = '\uFEFF' + ('# Tester\n## User\n' + hunk('A\n', 'B\n')).replace(/\n/g, eol) + example;
+        t.deepEqual(mergeBrainConflict(input), { kind: 'merged',
+            text: '\uFEFF' + '# Tester\n## User\nA\nB\n'.replace(/\n/g, eol) + example });
+        t.deepEqual(mergeBrainConflict('\uFEFF# Tester' + eol + example), { kind: 'not-applicable' });
+    });
+}
+
+test('D3c self-check refuses residual markers and fence-induced membership loss', t => {
+    for (const input of [
+        '# Tester\n## User\n' + hunk('A\n', 'B\n') + '=======\n',
+        '# Tester\n## Foreign\n' + hunk('A\n', '```\nB\n') + '## End\nDone\n',
+        '<<<<<<<\r\nA\r\n',
+    ]) t.deepEqual(mergeBrainConflict(input), { kind: 'not-applicable', malformed: true });
 });

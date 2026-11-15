@@ -1637,29 +1637,42 @@ odczyt nadal ładuje całość dziennika do RAM i zachowuje dotychczasowy wstęp
 `brainConflict.ts` rozpoznaje kompletne, niezagnieżdżone bloki merge/diff3/zdiff3.
 `mergeBrainConflict` jest czysty: wynik `merged` z tekstem albo `not-applicable`
 (z `malformed:true` dla złej struktury lub niespełnionego niezmiennika).
-D3b scala sekcje H1/H2, nie dodatki pod wspólną kotwicą wiersza:
+D3c zastępuje blokowe kotwice scalaniem dwóch pełnych stron:
 
-- Rozbiór zachowuje wspólne wiersze i bloki, prowadząc kontekst nagłówka osobno
-  dla obu stron. Baza diff3 jest pomijana.
-- Nasze wiersze pozostają w naszej kolejności. Wiersze drugiej strony porównujemy
-  po `trimEnd` z całą naszą sekcją, także poza blokiem, oraz wcześniejszymi dodatkami.
-  Nie usuwamy powtórzeń już istniejących po naszej stronie.
-- Dodatki do istniejącej sekcji trafiają za jej ostatni niepusty wiersz w pliku,
-  przed końcowe puste wiersze. Dodatki z wielu bloków zachowują kolejność bloków.
-  Przy powtórzonym nagłówku celem jest ostatnie wystąpienie tej sekcji.
-- Nowa sekcja drugiej strony jest osobną całością, emitowaną po naszych wierszach
-  danego bloku, w kolejności jej pierwszego wystąpienia. Powtórzony nagłówek nie
-  jest emitowany ponownie; dopisek do innej sekcji nie trafia pod nowy nagłówek.
-- Przed emisją następnego wiersza dopisujemy brakujący koniec poprzedniego wiersza:
-  CRLF, jeśli plik zawiera CRLF, inaczej LF. To jedyny wyjątek od zachowania bajtów
-  naszych wierszy i zapobiega sklejeniu dopisku z ostatnim wierszem bez EOL.
-  BOM i pozostałe bajty wierszy odczytu pozostają nietknięte.
-- Liniowa samokontrola ponownie rozbiera wyemitowany tekst. Każdy niepusty wiersz
-  obu stron każdego bloku musi wystąpić pod tym samym nagłówkiem, według tej samej
-  reguły `trimEnd`. Dodatkowo kontrolujemy wspólne wiersze naszej strony, aby nowa
-  sekcja nie przejęła wspólnego ogona. Niespełnienie daje `not-applicable` z
-  `malformed:true`; `readBrainContent` zwraca oryginał i jeden dotychczasowy warn,
-  bez treści użytkownika, zamiast publikować błędne scalenie.
+- Po ochronie kompletnych przykładów w obcych ogrodzeniach odtwarzamy naszą i ich
+  wersję całego pliku; baza diff3/zdiff3 jest pomijana. Każdą stronę rozbieramy
+  niezależnie, z własnym kontekstem ogrodzeń kodu.
+- Sekcja to preambuła (wszystko przed pierwszym H2, razem z H1) albo H2 z treścią
+  do następnego H2 poza ogrodzeniem. Klucz H2 to cały wiersz nagłówka po `trimEnd`.
+  Powtórzone nagłówki mają wspólny zbiór wierszy, ale zachowują swoje wystąpienia.
+  Różne wiersze H1 poza ogrodzeniami, również brak H1 po jednej stronie, oznaczają
+  `malformed`: nie zgadujemy tytułu. Końcowe białe znaki H1 nie stanowią różnicy.
+- Nasza strona zachowuje wszystkie wiersze, bajty, kolejność i powtórzone nagłówki.
+  Do sekcji obecnej po obu stronach dopisujemy tylko brakujące niepuste wiersze
+  ich pełnej wersji tej sekcji. Porównanie po `trimEnd`, zbiór dla całej sekcji;
+  dopiski nie powtarzają się i zachowują ich kolejność. Trafiają za ostatni
+  niepusty wiersz ostatniego naszego wystąpienia sekcji, przed końcowe puste wiersze.
+  Preambuła jest scalana tą samą regułą.
+- Sekcje obecne tylko po ich stronie kopiujemy w całości, z białymi znakami,
+  duplikatami i kolejnymi wystąpieniami. Każde wystąpienie trafia za ostatnie
+  wystąpienie poprzedzającej je sekcji ich wersji, jeśli jest w wyniku, inaczej
+  na koniec. Preambuła może być poprzednikiem pierwszej nowej sekcji.
+- **Scalanie nigdy nie usuwa:** wiersz usunięty przez jedną stronę, a zachowany
+  przez drugą, pozostaje. Może to przywrócić świadomie skasowaną treść; bez historii
+  intencji bezpieczniejsza jest zachowana treść. Dotyczy to projekcji konfliktu,
+  nie późniejszych, istniejących reguł przebudowy indeksu i limitów "Na teraz".
+- Każdy dopisek zaczyna się w nowym wierszu. Brakujący EOL poprzednika uzupełniamy
+  CRLF, jeśli plik zawiera CRLF, inaczej LF. To jedyny wyjątek od zachowania
+  bajtów naszych wierszy; BOM i EOL chronionych ogrodzeń także pozostają nietknięte.
+- Liniowa samokontrola rozbiera rzeczywiście wyemitowane bajty i pełne projekcje
+  OBU stron, łącznie z wierszami wspólnymi. Każda para (sekcja, niepusty wiersz
+  po `trimEnd`) musi pozostać w wyniku. Sprawdzamy także brak znaczników poza
+  chronionymi ogrodzeniami po przywróceniu ich bajtów. Niespełnienie oznacza
+  `not-applicable` z `malformed:true`, oryginał i dotychczasowy pojedynczy warn
+  bez treści użytkownika. Na przykład niedomknięte ogrodzenie jednej strony
+  może zmienić przynależność dalszych nagłówków i wymusić tę odmowę.
+- Mapy zbiorów i ostatnich wystąpień oraz lista połączonych sekcji zapewniają
+  liniowy koszt bez przeszukiwania narastającego wyniku, kotwic i grupowania hunka.
 
 Zamknięte ogrodzenie kodu backtickami lub tyldami w obcej sekcji H2 chroni
 kompletny przykład konfliktu wewnątrz. Same takie przykłady dają `not-applicable`.
@@ -1713,16 +1726,31 @@ zgodny z katalogiem, Na teraz, migracja, wyszukiwanie, kopie i ich kolizje, awar
 I/O, pull podczas kopii, kolejka dwóch instancji, druga przebudowa oraz literalne
 bajty i uporządkowane I/O zdrowych ścieżek porównane z kodem sprzed D3, w tym
 `updateBrain` oraz bezpośrednie `applyPlan` bez oryginału.
-Testy D3b `brainConflict.sections.test.ts`: oba błędy recenzji odtworzone przez
-prawdziwy `git merge-file` w merge/diff3/zdiff3, pełne literalne wyniki, LF/CRLF,
-zweryfikowana kopia, zachowanie ręcznych wierszy po przebudowie i stabilna druga
-przebudowa. Osobny test sprawdza odmowę przez niezmiennik i pojedynczy warn.
-Próba własnościowa ze stałym ziarnem tworzy 360 par edycji jednej bazy (1080 scaleń
-trzema stylami): dodanie/usunięcie wiersza, nowa sekcja zarządzana, "Na teraz" lub
-obca, przestawienie sekcji, brak końcowego EOL i CRLF. Niezależny czytnik testowy
-sprawdza przynależność wierszy obu stron, brak znaczników i sklejenia wierszy.
-Dwie literalne asercje starszego testu konfliktów zmieniają wyłącznie kolejność
-według nowej reguły końca całej sekcji; testy zdrowych bajtów i I/O zostają bez zmian.
+Testy `brainConflict.sections.test.ts` zachowują oba przypadki D3b i dodają
+bloker D3c: zmiana nagłówka zmienia sekcję wspólnego ogona po ich stronie.
+Wszystkie trzy style prawdziwego `git merge-file`, LF/CRLF, literalny pełny wynik,
+kopie i dwie przebudowy potwierdzają zachowanie ręcznego wiersza pod `## User`.
+Nowe testy sprawdzają ostatnie powtórzone H2, lokalną deduplikację, preambułę,
+całe nowe/puste/powtórzone sekcje, różnicę H1 (3 odmowy), niezależne konteksty
+ogrodzeń, BOM i dokładne EOL przykładów oraz odmowę po naruszeniu samokontroli.
+
+Próba własnościowa ze stałym ziarnem: 720 par, 2160 wywołań gita, 2025 konfliktów,
+2025 `merged`, 0 `malformed` (H1: 0, składnia: 0, niezmiennik: 0).
+Niezależna projekcja testowa sprawdza pełne obie strony, także wspólne wiersze;
+wynik: 0 naruszeń przynależności, 0 sklejonych wierszy, 0 znaczników.
+Edycje obejmują dodawanie/usuwanie wierszy i sekcji, zmianę nagłówka, przenoszenie
+wiersza między sekcjami, zmianę kolejności sekcji, duplikaty, końcowe białe znaki,
+puste sekcje, brak końcowego EOL i CRLF. Generator nie zmienia H1; różne H1
+sprawdzają osobne testy prawdziwego gita.
+
+Świadome zmiany oczekiwań D3b: przypadek nowej sekcji "Na teraz" umieszcza ją
+po preambule, przed `User`; przypadek EOF umieszcza `Dawna` za `User`.
+To tylko kolejność projekcji, oczekiwania obu przebudów pozostają identyczne.
+Dawny test odmowy dla przejętego wspólnego ogona wymaga teraz dokładnego
+bezstratnego scalenia, zgodnie z D3c. Testy zdrowych bajtów/I/O są nietknięte.
+Samokontrola mutacyjna na 80 testach D3: pominięcie wspólnych wierszy ich strony
+wywraca 12 testów, dopiski pod pierwszym zamiast właściwym nagłówkiem 43,
+usunięcie uzupełniania EOL 9. Po każdej próbie kod został przywrócony.
 Pomiar przed zmianą na syntetycznym pliku: prompt niósł 3 bloki konfliktu;
 rebuild zostawiał 2 bloki oraz dwie kopie ręcznego wiersza "Wspólny".
 
