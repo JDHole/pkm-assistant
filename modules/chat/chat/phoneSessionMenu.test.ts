@@ -778,11 +778,12 @@ for (const entry of ['menu', 'sidebar'] as const) {
     }
 }
 
-for (const locale of ['pl', 'en']) for (const choice of ['cancel', 'takeover'] as const)
-test.serial(`D2: real phone takeover dialog ${choice}/${locale}`, async t => {
+for (const locale of ['pl', 'en']) for (const choice of ['cancel', 'takeover'] as const) for (const bom of [false, true])
+test.serial(`D2: real phone takeover dialog ${choice}/${locale}/BOM=${bom}`, async t => {
     const f = await fixture(t, 'phone', locale, parseDeviceId('bbbbbbbbbbbbbbbb'));
     const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('aaaaaaaaaaaaaaaa'));
     const path = await remote.saveSession([{ role: 'user', content: 'Rozmowa z laptopa' }, { role: 'assistant', content: 'Wspólny kontekst' }]);
+    if (bom) f.files.set(path, '\uFEFF' + f.files.get(path)!);
     const before = [...f.files];
     const opening = f.view.handleLoadSession(path);
     const modal = await until(() => f.opened.find((m): m is InstanceType<typeof OpenSessionModal> => m instanceof OpenSessionModal));
@@ -797,7 +798,7 @@ test.serial(`D2: real phone takeover dialog ${choice}/${locale}`, async t => {
         t.deepEqual([...f.files], before);
         t.deepEqual(f.view.rollingWindow.messages, []);
     } else {
-        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
+        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace(/^\uFEFF/, '').replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
         t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Rozmowa z laptopa', 'Wspólny kontekst']);
         t.is(f.view.chatTabs.find(tab => tab.isActive)?.sessionPath, path);
         t.is(f.memory.activeSessionPath, path);
@@ -852,4 +853,149 @@ test.serial('D2: taking back an already open foreign tab discards its stale RAM 
     t.is(f.files.get(path), before.replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
     t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Aktualna rozmowa laptopa']);
     t.is(f.view.chatTabs[0].sessionPath, path);
+});
+
+for (const entry of ['slash', 'sidebar', 'menu'] as const) for (const locale of ['pl', 'en'])
+for (const timing of ['before', 'dialog'] as const)
+test.serial(`D2b ${entry}/${locale}/${timing}: foreign new conversation preserves draft and remote file, then saves a new owned conversation`, async t => {
+    const f = await fixture(t, entry === 'menu' ? 'phone' : 'desktop', locale, parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await f.memory.saveSession([{ role: 'user', content: 'Stara rozmowa' }]);
+    Object.assign(f.view.chatTabs[0], { sessionPath: path, sessionEpoch: f.memory.sessionEpoch });
+    await f.view.rollingWindow.addMessage('user', 'Stara rozmowa');
+    f.view.input_area.value = entry === 'slash' ? '/clear' : 'Mój niedokończony szkic';
+    const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('bbbbbbbbbbbbbbbb'));
+    if (timing === 'before') await remote.takeOverActiveSession(path);
+    const invoke = entry === 'slash'
+        ? f.view.send_message({ meta: { origin: 'human' } })
+        : f.invoke(entry, 'new');
+    // A real slash send clears the submitted command; typing continues during I/O.
+    if (entry === 'slash') f.view.input_area.value = 'Mój niedokończony szkic';
+    if (timing === 'dialog') {
+        const modal = await until(() => f.opened.find((m): m is InstanceType<typeof SessionCloseModal> => m instanceof SessionCloseModal));
+        await remote.takeOverActiveSession(path);
+        // User has decided to discard; ownership is rechecked after the dialog.
+        modal._resolveWith('discard');
+    }
+    const remoteBytes = f.files.get(path)!;
+    await invoke;
+    await until(() => f.view.chatTabs[0].sessionPath === undefined ? true : undefined);
+    t.is(f.view.input_area.value, 'Mój niedokończony szkic');
+    t.deepEqual(f.view.rollingWindow.messages, []);
+    t.is(f.files.get(path), remoteBytes);
+    t.deepEqual([...f.files.keys()].filter(p => p.includes('/.discarded/') || p.includes('/sessions/archive/')), []);
+    t.is(host.notices.at(-1), locale === 'pl'
+        ? 'Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę w Profilu agenta, Persona, albo otwórz ją z archiwum.'
+        : 'This conversation now belongs to another device. Your draft was not sent. Sync your devices and take over the conversation in Agent profile, Persona, or open it from the archive.');
+    await f.view.rollingWindow.addMessage('user', 'Nowa własna rozmowa');
+    await f.view.handleSaveSession();
+    const fresh = f.memory.activeSessionPath!;
+    t.not(fresh, path);
+    t.deepEqual((await f.memory.loadActiveSession(fresh)).messages.map(m => m.content), ['Nowa własna rozmowa']);
+    t.is((await f.memory.loadActiveSession(fresh)).metadata.device, 'aaaaaaaaaaaaaaaa');
+    t.is(f.files.get(path), remoteBytes);
+});
+
+for (const mode of ['foreign', 'ambiguous', 'unreadable'] as const)
+test.serial(`D2b restore EACCES after stale mine listing preserves shared state: ${mode}`, async t => {
+    const f = await fixture(t, 'phone', 'pl', parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await f.memory.saveSession([{ role: 'user', content: 'Historia do zachowania' }]);
+    Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
+    const state = f.files.get(f.memory.paths.state)!;
+    const read = f.adapter.read;
+    let reads = 0;
+    f.adapter.read = async p => {
+        if (p === path && ++reads >= 2) {
+            if (mode === 'foreign') f.files.set(path, f.files.get(path)!.replace('device: aaaaaaaaaaaaaaaa', 'device: bbbbbbbbbbbbbbbb'));
+            if (mode === 'ambiguous') f.files.set(path, '---\ndevice: bbbbbbbbbbbbbbbb\ndevice: aaaaaaaaaaaaaaaa\n---\n');
+            if (reads === 2 || mode === 'unreadable') throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+        }
+        return read(p);
+    };
+    await f.view._restoreActiveSession();
+    t.is(f.files.get(f.memory.paths.state), state);
+    t.deepEqual(f.view.chatTabs.map(tab => tab.sessionPath ?? null), [null]);
+    t.deepEqual(f.view.rollingWindow.messages, []);
+});
+
+for (const mode of ['mine', 'unowned', 'nonempty'] as const)
+test.serial(`D2b pruning requires a fresh owned empty session: ${mode}`, async t => {
+    const f = await fixture(t, 'phone', 'pl', parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await f.memory.startActiveSession();
+    if (mode === 'unowned') f.files.set(path, '---\nagent: Mira\n---\n');
+    Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
+    const read = f.adapter.read;
+    let reads = 0;
+    f.adapter.read = async p => {
+        if (p === path && ++reads === 3 && mode === 'nonempty') {
+            f.files.set(path, '---\ndevice: aaaaaaaaaaaaaaaa\n---\n\n## User\n\nNowa treść\n');
+        }
+        return read(p);
+    };
+    await f.view._restoreActiveSession();
+    const state = JSON.parse(f.files.get(f.memory.paths.state)!);
+    t.deepEqual(state.active_sessions, mode === 'nonempty' ? [path.split('/').pop()] : []);
+    if (mode === 'nonempty') t.is(f.files.get(path), '---\ndevice: aaaaaaaaaaaaaaaa\n---\n\n## User\n\nNowa treść\n');
+    else t.is((await f.memory.loadActiveSession(path)).ownership, mode);
+});
+
+for (const choice of ['cancel', 'takeover'] as const) for (const locale of ['pl', 'en'])
+for (const alreadyOpen of [true, false])
+test.serial(`D2b production profile button opens takeover and chat: ${choice}/${locale}/open=${alreadyOpen}`, async t => {
+    const f = await fixture(t, 'phone', locale, parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const remote = new AgentMemory({ adapter: { ...f.adapter } }, 'Mira', {}, parseDeviceId('bbbbbbbbbbbbbbbb'));
+    const path = await remote.saveSession([{ role: 'user', content: 'Rozmowa z laptopa' }]);
+    const before = [...f.files];
+    Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
+    let ready = alreadyOpen;
+    const leaf = {
+        get view() { return ready ? f.view : undefined; },
+        async setViewState(state: { type: string; active: boolean }) {
+            t.deepEqual(state, { type: 'pkm-assistant-chat', active: true });
+            await new Promise<void>(resolve => setImmediate(resolve));
+            ready = true;
+        },
+    };
+    Object.assign(f.view.plugin, { openChatView: async () => { t.true(ready); } });
+    Object.assign(f.view.app.workspace, {
+        getLeavesOfType: () => ready ? [leaf] : [],
+        getRightLeaf: (split: boolean) => { t.false(split); return leaf; },
+    });
+    const { renderProfileTab } = await import('../../agents/profile/profile_persona.js');
+    const profile = browserEvents(createDiv());
+    await renderProfileTab({ formData: { personality: '' }, agent: { name: 'Mira' },
+        plugin: f.view.plugin, agentManager: f.view.plugin.agentManager } as unknown as Parameters<typeof renderProfileTab>[0], profile);
+    const button = descendants(profile).find(el => el.className === 'cs-session-takeover') as HTMLButtonElement;
+    t.is(button.textContent, locale === 'pl' ? 'Przejmij rozmowę' : 'Take over conversation');
+    button.dispatchEvent(new Event('click'));
+    const modal = await until(() => f.opened.find((m): m is InstanceType<typeof OpenSessionModal> => m instanceof OpenSessionModal));
+    t.is(modal.foreign, true);
+    t.deepEqual([...f.files], before);
+    const buttons = descendants(modal.contentEl).filter(el => el.tagName.toLowerCase() === 'button');
+    buttons[choice === 'takeover' ? 0 : 1].dispatchEvent(new Event('click'));
+    await until(() => !button.disabled ? true : undefined);
+    if (choice === 'cancel') {
+        t.deepEqual([...f.files], before);
+        t.deepEqual(f.view.rollingWindow.messages, []);
+    } else {
+        t.is(f.files.get(path), before.find(([p]) => p === path)![1].replace('device: bbbbbbbbbbbbbbbb', 'device: aaaaaaaaaaaaaaaa'));
+        t.deepEqual(f.view.rollingWindow.messages.map(m => m.content), ['Rozmowa z laptopa']);
+        t.is(f.view.chatTabs[0].sessionPath, path);
+    }
+});
+
+for (const fields of ['device: bbbbbbbbbbbbbbbb\ndevice: aaaaaaaaaaaaaaaa', '<<<<<<< HEAD\ndevice: aaaaaaaaaaaaaaaa\n=======\n>>>>>>> sync'])
+test.serial(`D2b production restore and explicit open reject ambiguous header: ${fields}`, async t => {
+    const f = await fixture(t, 'phone', 'pl', parseDeviceId('aaaaaaaaaaaaaaaa'));
+    const path = await f.memory.startActiveSession();
+    f.files.set(path, `---\n${fields}\n---\n\n## User\n\nNiepewna historia\n`);
+    Object.assign(f.adapter, { stat: async () => ({ mtime: 1, size: 100 }) });
+    const state = f.files.get(f.memory.paths.state);
+    await f.view._restoreActiveSession();
+    t.deepEqual(f.view.chatTabs.map(tab => tab.sessionPath ?? null), [null]);
+    t.deepEqual(f.view.rollingWindow.messages, []);
+    await f.view.handleLoadSession(path);
+    t.deepEqual(f.opened, []);
+    t.is(host.notices.at(-1), 'wymaga naprawy po synchronizacji');
+    t.is(f.files.get(f.memory.paths.state), state);
+    t.is(f.files.get(path), `---\n${fields}\n---\n\n## User\n\nNiepewna historia\n`);
 });

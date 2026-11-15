@@ -247,14 +247,22 @@ sprawdza start, zapis klucza API i restart z rzeczywistym pancerzem/defaultami o
 jawny wybór EN. Pozostałe seedy i migracje zachowują własne markery w plikach vaulta.
 
 
-## Mobile M2 D2 - identyfikator i lista sesji
+## Mobile M2 D2/D2b - identyfikator i lista sesji
 
 `AgentManager` przyjmuje opcjonalny branded `DeviceId | null` z composition root
 jako czwarty argument i przekazuje go przez `_initializeMemoryForAgent` do każdej
 pamięci (także przy reload/rename). Manager nie odczytuje hostowego storage.
-`profile_persona.ts` oznacza aktywne sesje `foreign` etykietą PL/EN "na innym
-urządzeniu"; klik pozostaje podglądem `openHiddenFile(readOnly: true)`. Zakładka
-Pamięć/Sesje listuje wyłącznie wspólne archiwum i nie wymaga przejęcia. Jawne
-przejęcie aktywnej sesji jest własnością czatu (`OpenSessionModal`). Test
-`profile/profile_persona.ownership.test.ts` sprawdza literalne etykiety trzech
-stanów w obu językach, a test startu `src/main.mobile.test.ts` wstrzyknięcie id.
+
+Aktywne sesje są w zakładce Persona (`profile_persona.ts`), a Pamięć/Sesje pokazuje
+wspólne archiwum. Lista oznacza `foreign` etykietą PL/EN "na innym urządzeniu"
+i przyciskiem "Przejmij rozmowę" (telefon: min. 44 px). Przycisk zatrzymuje propagację,
+ładuje publiczne `openProfileSession` przez barrel czatu i otwiera istniejący modal
+potwierdzenia. Podczas operacji jest wyłączony; błędy trafiają do Loggera i Notice.
+Kliknięcie pozostałej części wiersza nadal otwiera podgląd `readOnly: true`.
+`ambiguous` ma etykietę "wymaga naprawy po synchronizacji" i NIE ma przycisku,
+podobnie jak własna sesja i sesja bez właściciela. Naprawa konfliktów należy do D7.
+
+`profile/profile_persona.ownership.test.ts` sprawdza literalne etykiety czterech
+stanów PL/EN oraz przycisk wyłącznie przy `foreign`. Produkcyjny przepływ kliknięcia,
+anulowania i przejęcia z otwarciem czatu sprawdza `chat/chat/phoneSessionMenu.test.ts`.
+`src/main.mobile.test.ts` nadal sprawdza wstrzyknięcie lokalnego id.

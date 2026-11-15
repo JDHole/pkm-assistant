@@ -17,9 +17,12 @@ for (const locale of ['pl', 'en']) test.serial(`D2 persona labels only foreign a
             { name: 'mira_2026-11-14_10-00.md', ownership: 'mine' },
             { name: 'mira_2026-11-14_11-00.md', ownership: 'foreign' },
             { name: 'legacy.md', ownership: 'unowned' },
+            { name: 'broken.md', ownership: 'ambiguous' },
         ] }),
     } } as unknown as Parameters<typeof renderProfileTab>[0], el);
     t.deepEqual(descendants(el).filter(child => child.className === 'cs-mem-item__date').map(child => child.textContent), [
-        '2026-11-14  10:00', locale === 'pl' ? '2026-11-14  11:00 · na innym urządzeniu' : '2026-11-14  11:00 · on another device', 'legacy',
+        '2026-11-14  10:00', locale === 'pl' ? '2026-11-14  11:00 · na innym urządzeniu' : '2026-11-14  11:00 · on another device', 'legacy', locale === 'pl' ? 'broken · wymaga naprawy po synchronizacji' : 'broken · needs repair after sync',
     ]);
+    t.deepEqual(descendants(el).filter(child => child.className === 'cs-session-takeover').map(child => child.textContent),
+        [locale === 'pl' ? 'Przejmij rozmowę' : 'Take over conversation']);
 });

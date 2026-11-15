@@ -2385,27 +2385,40 @@ Adaptery częściowego widoku w `chat_streaming.sendTab.test.ts`, `chatViewClose
 oraz jego początkowy stan, ponieważ omijają konstruktor.
 
 
-## Mobile M2 D2 - cudza rozmowa i jawne przejęcie
+## Mobile M2 D2/D2b - cudza rozmowa i jawne przejęcie
 
-Restore pomija `foreign` przed ładowaniem okna i historii subów, a po odczycie
-ponownie sprawdza własność. Nie usuwa cudzych wpisów `.state.json`, także pustych
-sesji; fallback pamięci stosuje tę samą politykę. `safeErrorText` mapuje publiczny
-`ForeignSessionError` na komunikat PL/EN; istniejący mechanizm przyjęcia wysyłki
-zwraca szkic do pola i nie wysyła modelu ani dopisku do cudzej sesji.
+Restore pomija `foreign` i `ambiguous` przed ładowaniem okna i historii subów;
+po odczycie ponownie sprawdza własność. Sprzątanie pustego wpisu przy id wymaga
+kolejnego świeżego odczytu potwierdzającego `mine`/`unowned` i brak wiadomości/subów.
+EACCES, cudzy lub niejednoznaczny nagłówek zachowują wspólny `.state.json`.
+`safeErrorText` mapuje `ForeignSessionError` na PL/EN; przyjęcie wysyłki zwraca szkic
+do pola i nie wywołuje modelu ani nie dopisuje do cudzej sesji.
 
-`handleLoadSession` przy cudzej aktywnej sesji otwiera wariant `OpenSessionModal`
-z przyciskami "Przejmij rozmowę"/"Anuluj", ostrzeżeniem o zakończeniu pracy i
-synchronizacji drugiego urządzenia oraz sugestią przeniesienia przez archiwum.
-Anuluj ma domyślny fokus, zamknięcie działa jak Anuluj. Wariant korzysta z klas
-`cs-open-session__btn` i ograniczeń modali M3 (na telefonie cele 44 px).
-Potwierdzenie woła `takeOverActiveSession`, czyta świeżą sesję i otwiera pełną
-rozmowę z jej ścieżką/epoką oraz historią subów. Publikacja należy do uchwyconej
-zakładki i okna; przy przejmowaniu ścieżki już otwartej w tym oknie pomijamy
-autozapis jego starego snapshotu do przejętego pliku; kontrole lifecycle chronią przed zmianą zakładki/zamknięciem
-w trakcie I/O. Archiwum i warianty continue/compress/fresh zachowują starą ścieżkę.
+`handleLoadSession` używa dla aktywnej ścieżki `loadActiveSession`, również z BOM.
+`ambiguous` dostaje komunikat o naprawie, bez możliwości przejęcia. `foreign`
+otwiera `OpenSessionModal`: Przejmij/Anuluj, ostrzeżenie o synchronizacji i archiwum,
+domyślny fokus Anuluj. Zamknięcie anuluje. `.cs-takeover-session-modal` zapewnia
+cele przycisków 48 px na telefonie. Potwierdzenie przejmuje, czyta świeży plik
+z ponowną kontrolą własności i otwiera historię z właściwą ścieżką/epoką/subami.
+Kontrole lifecycle chronią uchwyconą zakładkę podczas I/O. Przy przejmowaniu sesji
+już otwartej pomijamy autozapis starego snapshotu. Archiwum zachowuje swój czytnik.
 
-Profil agenta ma wyłącznie podgląd aktywnych sesji, więc tam jest tylko etykieta
-"na innym urządzeniu". Pamięć/Sesje pokazuje archiwum, bez własności urządzenia.
-Testy `phoneSessionMenu.test.ts` wykonują rzeczywisty restore oraz przyciski
-modalu PL/EN, a `chat_streaming.sendTab.test.ts` sprawdza odmowę po przejęciu,
-komunikat i szkic w obu językach oraz udaną wysyłkę po jawnym przejęciu z powrotem.
+Publiczne `openProfileSession` przez barrel czatu oczekuje utworzenia widoku
+(`setViewState`), ujawnia go przez `openChatView`, wybiera agenta
+i kieruje do `handleLoadSession`. Wywołuje je przycisk przy cudzej aktywnej sesji
+w Profilu agenta, zakładka Persona (tam jest ta lista; Pamięć/Sesje to archiwum).
+To miejsce wskazuje komunikat PL/EN.
+
+`handleNewSession` sprawdza świeżą własność przed zapisem i po decyzji z modalu.
+Odmowa z przycisku, menu telefonu lub `/clear` pokazuje ten sam komunikat co wysyłka,
+odpina uchwyconą zakładkę i przygotowuje nową własną rozmowę, zachowując szkic.
+Cudzy plik, jego wpis stanu i zasoby nie są odrzucane ani archiwizowane. `/clear`
+oczekuje zakończenia handlera, obsługuje odrzucenie i czyści tylko wpisaną komendę,
+nie szkic zmieniony podczas oczekiwania. Bez id pozostaje dotychczasowy lifecycle.
+
+`phoneSessionMenu.test.ts` sprawdza realne wejścia przycisk/menu/slash w PL/EN,
+przejęcie przed akcją i podczas modalu, szkic i nowy własny zapis; świeże sprzątanie
+oraz EACCES; BOM i pełne wejście profil -> modal -> anuluj/przejmij -> czat.
+`chat_streaming.sendTab.test.ts` sprawdza odmowę wysyłki po przejęciu, komunikat,
+szkic oraz udaną wysyłkę po przejęciu z powrotem. Testy używają oddzielnych adapterów
+urządzeń nad wspólnymi plikami. Cele dotykowe są deklaracją CSS, nie pomiarem telefonu.

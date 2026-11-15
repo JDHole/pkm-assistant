@@ -58,6 +58,7 @@ export class OpenSessionModal extends Modal {
         const { contentEl, modalEl } = this;
         contentEl.empty();
         contentEl.addClass('cs-open-session-modal');
+        if (this.foreign) contentEl.addClass('cs-takeover-session-modal');
         if (modalEl) {
             modalEl.addClass('cs-session-modal-narrow');
         }

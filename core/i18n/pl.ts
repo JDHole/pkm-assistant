@@ -4,8 +4,9 @@
  * {{param}} for interpolation.
  */
 export const pl: Record<string, string> = {
+  "session.needs_repair": "wymaga naprawy po synchronizacji",
   "session.on_other_device": "na innym urządzeniu",
-  "chat.session.foreign_error": "Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę świadomie albo otwórz ją z archiwum.",
+  "chat.session.foreign_error": "Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę w Profilu agenta, Persona, albo otwórz ją z archiwum.",
   "modal.takeover_session.title": "Rozmowa na innym urządzeniu",
   "modal.takeover_session.description": "Ta rozmowa toczy się na innym urządzeniu. Przejmij ją tylko wtedy, gdy tamto urządzenie już jej nie używa i jest zsynchronizowane. Bezpieczniejsza droga: zarchiwizuj ją tam i otwórz tutaj z archiwum.",
   "modal.takeover_session.confirm": "Przejmij rozmowę",

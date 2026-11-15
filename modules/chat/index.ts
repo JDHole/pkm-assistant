@@ -39,3 +39,4 @@ export { insertInlineTriggerMarker } from './chat/InlineChipPlugin.js';
 // (`modules/agents/profile/profile_memory.js`) — leniwym `import()`, żeby nie dokładać statycznej
 // krawędzi agents→chat do i tak splątanego trójkąta shell↔chat↔agents.
 export { startConsolidationRun } from './consolidationRunner.js';
+export { openProfileSession } from './openProfileSession.js';

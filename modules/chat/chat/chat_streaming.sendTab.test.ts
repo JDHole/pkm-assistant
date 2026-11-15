@@ -1842,8 +1842,8 @@ for (const locale of ['pl', 'en'] as const) test.serial(`D2: synced takeover rej
     await f.clickSend();
     const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
     const expected = locale === 'pl'
-        ? 'Błąd: Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę świadomie albo otwórz ją z archiwum.'
-        : 'Error: This conversation now belongs to another device. Your draft was not sent. Sync your devices and explicitly take over the conversation, or open it from the archive.';
+        ? 'Błąd: Ta rozmowa należy teraz do innego urządzenia. Szkic nie został wysłany. Zsynchronizuj urządzenia i przejmij rozmowę w Profilu agenta, Persona, albo otwórz ją z archiwum.'
+        : 'Error: This conversation now belongs to another device. Your draft was not sent. Sync your devices and take over the conversation in Agent profile, Persona, or open it from the archive.';
     t.true(texts(f.view.messages_container).includes(expected));
     t.is(f.view.input_area.value, 'Mój szkic');
     t.deepEqual(f.modelInputs, []);

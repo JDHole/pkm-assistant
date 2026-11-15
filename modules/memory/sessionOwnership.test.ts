@@ -10,15 +10,16 @@ const A = parseDeviceId('aaaaaaaaaaaaaaaa')!;
 const B = parseDeviceId('bbbbbbbbbbbbbbbb')!;
 const epoch = '0123456789abcdef0123456789abcdef';
 function disk(files = new Map<string, string>(), folders = new Set<string>()) {
+    const mtimes = new Map<string, number>();
     const counts = { read: 0, write: 0, exists: 0, mkdir: 0, list: 0, append: 0, stat: 0, remove: 0 };
     const adapter = {
         async read(path: string) { counts.read++; if (!files.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return files.get(path)!; },
-        async write(path: string, value: string) { counts.write++; files.set(path, value); },
+        async write(path: string, value: string) { counts.write++; files.set(path, value); mtimes.set(path, Date.now()); },
         async exists(path: string) { counts.exists++; return files.has(path) || folders.has(path); },
         async mkdir(path: string) { counts.mkdir++; folders.add(path); },
         async list(path: string) { counts.list++; return { files: [...files.keys()].filter(p => p.startsWith(path + '/') && !p.slice(path.length + 1).includes('/')), folders: [] }; },
-        async append(path: string, value: string) { counts.append++; files.set(path, (files.get(path) ?? '') + value); },
-        async stat(path: string) { counts.stat++; return { mtime: 1, size: files.get(path)?.length ?? 0 }; },
+        async append(path: string, value: string, options?: { mtime?: number }) { counts.append++; files.set(path, (files.get(path) ?? '') + value); mtimes.set(path, options?.mtime ?? Date.now()); },
+        async stat(path: string) { counts.stat++; return { mtime: mtimes.get(path) ?? 1, size: new TextEncoder().encode(files.get(path) ?? '').length }; },
         async remove(path: string) { counts.remove++; files.delete(path); },
     };
     return { files, folders, counts, adapter, reset() { for (const key of Object.keys(counts) as Array<keyof typeof counts>) counts[key] = 0; },
@@ -38,7 +39,7 @@ for (const id of [null, A]) test.serial(`D2 golden from 558d888: start, three tu
     mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-14T10:00:00.000Z') });
     t.teardown(() => mock.timers.reset());
     const baseline = JSON.parse(readFileSync(new URL('./fixtures/device-session-baseline.json', import.meta.url), 'utf8')) as {
-        path: string; content: string; state: string; pointer: string; stages: unknown[];
+        path: string; content: string; state: string; pointer: string; stages: Array<Record<string, number>>;
     };
     const d = disk(), memory = d.memory(id);
     await memory.initialize(); d.reset();
@@ -52,7 +53,8 @@ for (const id of [null, A]) test.serial(`D2 golden from 558d888: start, three tu
         stages.push({ ...d.counts });
     }
     await memory.saveSession(messages); stages.push({ ...d.counts });
-    t.deepEqual(stages, baseline.stages);
+    // D2b adds exactly one stat per append with identity; the null fixture is untouched.
+    t.deepEqual(stages, id ? baseline.stages.map((stage, i) => ({ ...stage, stat: [0, 2, 4, 6, 6][i] })) : baseline.stages);
     t.is(path, baseline.path);
     t.is(d.files.get(path), id ? baseline.content.replace(`epoch: ${epoch}\n`, `epoch: ${epoch}\ndevice: aaaaaaaaaaaaaaaa\n`) : baseline.content);
     t.is(d.files.get(memory.paths.state), baseline.state);
@@ -60,7 +62,7 @@ for (const id of [null, A]) test.serial(`D2 golden from 558d888: start, three tu
 });
 
 test.serial('two devices: foreign writers refuse every mutation, explicit takeover preserves events and reverses ownership', async t => {
-    const d = disk(), a = d.memory(A), b = d.memory(B);
+    const d = disk(), a = d.memory(A), b = new AgentMemory({ adapter: { ...d.adapter } }, 'Mira', {}, B);
     await a.initialize(); await b.initialize();
     const path = await a.startActiveSession();
     await a.appendToActiveSession({ type: 'user_message', content: 'Moja rozmowa' });
@@ -90,8 +92,8 @@ test.serial('two devices: foreign writers refuse every mutation, explicit takeov
     t.deepEqual((await a.listActiveSessions()).map(s => s.ownership), ['foreign']);
 });
 
-test.serial('unowned restore is read-only; P3 appends epoch without adoption; next metadata save adopts without extra I/O', async t => {
-    const d = disk(), a = d.memory(A), b = d.memory(B);
+test.serial('unowned restore is read-only; P3 appends epoch without adoption; first message adopts before metadata save', async t => {
+    const d = disk(), a = d.memory(A), b = new AgentMemory({ adapter: { ...d.adapter } }, 'Mira', {}, B);
     await a.initialize(); await b.initialize();
     const path = `${a.paths.sessionsActive}/legacy.md`;
     const original = '---\nagent: Mira\ncreated: 2020-01-01\n---\n\n## User\n\nStara wiadomość\n';
@@ -108,7 +110,8 @@ test.serial('unowned restore is read-only; P3 appends epoch without adoption; ne
     t.false(d.files.get(path)!.includes('\ndevice:'));
     t.is(d.counts.write, 0); t.is(d.counts.append, 1);
     await a.appendToActiveSession({ type: 'agent_message', content: 'Nowa wiadomość' });
-    t.false(d.files.get(path)!.includes('\ndevice:'));
+    t.is(parseFrontmatter(d.files.get(path)!).device, 'aaaaaaaaaaaaaaaa');
+    t.is(d.counts.write, 1);
     const messages = (await a.loadActiveSession(path)).messages;
     d.reset(); await a.saveSession(messages);
     t.is(d.counts.write, 1); t.is(d.counts.read, 1); t.is(d.counts.append, 0);
@@ -142,8 +145,11 @@ for (const mode of ['save', 'repair'] as const) test.serial(`new device header v
     const d = disk(), memory = d.memory(A); await memory.initialize();
     const path = mode === 'save' ? await memory.saveSession([{ role: 'user', content: 'Treść' }]) : await memory.startActiveSession();
     if (mode === 'repair') {
+        await memory.appendToActiveSession({ type: 'tool_call', tool: 'read', content: 'Warm writer before deletion' });
         d.files.delete(path);
+        d.reset();
         await memory.appendToActiveSession({ type: 'user_message', content: 'Treść' });
+        t.is(d.counts.stat, 1);
     }
     const active = memory.activeSessionPath!;
     t.is(parseFrontmatter(d.files.get(active)!).device, 'aaaaaaaaaaaaaaaa');
@@ -203,7 +209,9 @@ test.serial(`adoption follows actual message events: ${type}`, async t => {
     const path = await old.startActiveSession();
     const memory = d.memory(A); memory.setActiveSessionIdentity(path, epoch);
     await memory.appendToActiveSession({ type, content: 'Wynik operacji' });
-    t.false(d.files.get(path)!.includes('device:'));
+    const adopted = parseFrontmatter(d.files.get(path)!);
+    if (type === 'tool_call') t.false(Object.hasOwn(adopted, 'device'));
+    else t.is(adopted.device, 'aaaaaaaaaaaaaaaa');
     const parsed = await memory.loadActiveSession(path);
     t.is(parsed.messages.length, type === 'tool_call' ? 0 : 1);
     d.reset(); await memory.saveSession(parsed.messages);

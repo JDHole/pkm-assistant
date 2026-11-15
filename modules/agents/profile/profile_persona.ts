@@ -17,6 +17,8 @@ import type { Agent } from '../Agent.js';
 import type { AgentManager } from '../AgentManager.js';
 import type { AgentsPlugin } from './profile_types.js';
 import type { ActiveSessionInfo } from '../../memory/index.js';
+import { Notice } from 'obsidian';
+import { log } from '../../../core/utils/Logger.js';
 
 interface PersonaContext {
     formData: { personality: string };
@@ -73,10 +75,28 @@ async function _renderActiveSessions(ctx: PersonaContext, el: HTMLElement) {
 
     const list = el.createDiv({ cls: 'cs-mem-list' });
     for (const session of sessions) {
-        const label = _sessionLabel(session) + (session.ownership === 'foreign' ? ` · ${t('session.on_other_device')}` : '');
+        const label = _sessionLabel(session) + (session.ownership === 'foreign' ? ` · ${t('session.on_other_device')}`
+            : session.ownership === 'ambiguous' ? ` · ${t('session.needs_repair')}` : '');
         const item = list.createDiv({ cls: 'cs-mem-item' });
         setSvg(item.createSpan({ cls: 'cs-mem-item__icon' }), UiIcons.file(12));
         item.createSpan({ cls: 'cs-mem-item__date', text: label });
+        if (session.ownership === 'foreign') {
+            const takeover = item.createEl('button', { cls: 'cs-session-takeover', text: t('modal.takeover_session.confirm') });
+            takeover.addEventListener('click', event => {
+                event.stopPropagation();
+                if (takeover.disabled) return;
+                takeover.disabled = true;
+                void (async () => {
+                    try {
+                        const { openProfileSession } = await import('../../chat/index.js');
+                        await openProfileSession(plugin, agent.name, session.path);
+                    } catch (error) {
+                        log.error('Agents', 'Could not open session takeover:', error);
+                        new Notice(t('chat.open_failed'));
+                    } finally { takeover.disabled = false; }
+                })();
+            });
+        }
         item.addEventListener('click', () => {
             void openHiddenFile(plugin.app, session.path, label, {
                 agentName: agent.name, agentColor: agent.color || '', readOnly: true

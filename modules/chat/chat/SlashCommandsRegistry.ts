@@ -63,9 +63,15 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
     registry.register({
         name: '/clear',
         description: 'Start a new chat session.',
-        handler: async ({ view }) => {
-            void view.handleNewSession();
-            view.resetInputArea();
+        handler: async ({ view }, raw) => {
+            const reset = guardedInputReset(view, raw);
+            try {
+                reset();
+                await view.handleNewSession();
+            } catch (error) {
+                log.error('Chat', 'Nie udało się rozpocząć nowej rozmowy:', error);
+                new Notice(t('chat.session.new_failed'), 6000);
+            }
         }
     });
 

@@ -1753,3 +1753,12 @@ body.is-phone .cs-ask-user :is(button, .cs-ask-user__input) {
   overflow-wrap: anywhere;
   box-sizing: border-box;
 }
+body.is-phone .cs-session-takeover {
+  min-height: 44px;
+  height: auto;
+  white-space: normal;
+}
+
+body.is-phone .cs-takeover-session-modal .cs-open-session__btn {
+  min-height: 48px;
+}

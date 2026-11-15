@@ -10,7 +10,7 @@ import { cancelMessageEdit } from './messageEdit.js';
 import { Notice, Platform } from 'obsidian';
 import { renderPhoneHistory } from './phoneHistoryScroll.js';
 import { RollingWindow } from './RollingWindow.js';
-import { IdleScheduler, sessionMessageId, sessionOwnership, ForeignSessionError } from '../../memory/index.js';
+import { IdleScheduler, sessionMessageId, ForeignSessionError } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
@@ -121,7 +121,12 @@ export async function _idleTick(this: ChatViewLike) {
  */
 async function _pruneEmptyActiveSessionFromState(agentMemory: AgentMemory, session: ActiveSessionInfo) {
     try {
-        if (session.ownership === 'foreign') return;
+        if (session.ownership === 'foreign' || session.ownership === 'ambiguous') return;
+        if (agentMemory.deviceId) {
+            const fresh = await agentMemory.loadActiveSession(session.path);
+            if (fresh.ownership !== 'mine' && fresh.ownership !== 'unowned') return;
+            if (fresh.messages.length || fresh.subTaskHistory?.length) return;
+        }
         const path = session?.path;
         const name = session?.name || (path ? path.split('/').pop() : null);
         if (!name) return;
@@ -249,7 +254,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             const sessions = await agentMemory.listActiveSessions();
             if (!current()) return;
             for (const session of sessions) {
-                if (session.ownership === 'foreign') continue;
+                if (session.ownership === 'foreign' || session.ownership === 'ambiguous') continue;
                 let parsed = null;
                 try {
                     parsed = await agentMemory.loadActiveSession(session);
@@ -258,7 +263,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
                     log.warn('Chat', `Could not load active session ${session?.name}: ${(e as Error).message}`);
                 }
                 if (!current()) return;
-                if (parsed && sessionOwnership(parsed.metadata.device, agentMemory.deviceId ?? null) === 'foreign') continue;
+                if (parsed && (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous')) continue;
                 const hasHistory = parsed && restoreSubTaskHistory(this, parsed, agentName, session.path);
                 if (!parsed || (!parsed.messages.length && !hasHistory)) {
                     // Memory v3: do NOT delete the underlying file. We previously called
@@ -299,7 +304,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             // `restoredPath` jest niepuste tylko wtedy, gdy `agentMemory` istnieje (linia wyżej).
             const parsed = await agentMemory!.loadActiveSession(restoredPath);
             if (!current()) return;
-            if (sessionOwnership(parsed.metadata.device, agentMemory!.deviceId ?? null) === 'foreign') return;
+            if (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous') return;
             const hasHistory = restoreSubTaskHistory(this, parsed, activeAgentName, restoredPath);
             if (!parsed.messages.length && !hasHistory) return;
 
@@ -466,87 +471,114 @@ async function persistSendEvent(this: ChatViewLike, event: ActiveSessionEventInp
  */
 export async function handleNewSession(this: ChatViewLike) {
     const owner = captureSessionLifecycle(this);
-    return requestSessionLifecycle(owner, 'new', async () => {
-        cancelMessageEdit(owner.window);
-        if (this.is_generating) this.stop_generation();
-        const prepared = await serializeSessionLifecycle(owner, async () => {
-            if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
-            const msgCount = owner.window.messages.length;
-            log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
-            if (msgCount || owner.window.removedMessageIds?.length || owner.window.removedMessageRanges?.length) {
-                await this.handleSaveSession(owner.agentName, owner.window,
-                    owner.path ? { path: owner.path, epoch: owner.epoch } : undefined, owner);
+    try {
+        await requestSessionLifecycle(owner, 'new', async () => {
+            if (!owner.memory?.deviceId) cancelMessageEdit(owner.window);
+            if (this.is_generating) this.stop_generation();
+            const prepared = await serializeSessionLifecycle(owner, async () => {
+                if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+                await assertCurrentSessionWritable(owner);
                 if (!owner.current()) return;
-            }
-            if (!msgCount) return { hasMessages: false, decision: Promise.resolve({ choice: 'discard' as const }) };
-            const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');
-            const modal = new SessionCloseModal(this.app, {
-                agentName: owner.agentName || 'Agent', agentColor: agent?.color || '', messageCount: msgCount,
-            });
-            // Do not hold the queue while a dialog waits: Close can invalidate its owner.
-            return { hasMessages: true, decision: promptSessionDecision(this, modal, { choice: 'cancel' }) };
-        });
-        if (!prepared || !owner.current()) return;
-        const { choice } = await prepared.decision || { choice: 'cancel' };
-        if (!owner.current() || choice === 'cancel') return;
-        await serializeSessionLifecycle(owner, async () => {
-            if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
-            if (choice === 'archive') {
-                new Notice(t('chat.session.compressing'));
-                // The existing review owns every outcome; never reset again here.
-                await this.consolidateSession({ resetAfterArchive: true });
-                return;
-            }
-            const path = owner.path || '';
-            if (path && prepared.hasMessages) {
-                this.plugin?.subTaskRegistry?.pruneSession?.(path);
-                this._renderSubTaskStrip?.();
-                // Explicit path: selecting another tab during I/O must not retire its file.
-                await _retireActiveSession(owner.memory, 'discard', path);
-                // Once discard is admitted, retire its data even if the view closes.
-                await _retireTodoFileFor(this, owner.agentName, path);
-            }
-            if (path) {
-                // Unlike closing a tab, ending a session frees its path for reuse.
-                // Consent and threads must be cleared for that captured path only.
-                this.plugin?.mcpClient?.sessionWriteConsent.clearSession(path);
-                this.plugin?.subTaskRegistry?.closeSessionThreads?.(owner.agentName || '', path);
-            }
-            // The remaining work belongs to the view, not the completed session.
-            if (!owner.current()) return;
-            // Only reset the shared memory cursor when it still points to this conversation.
-            if (owner.memory && (!owner.memory.activeSessionPath || owner.memory.activeSessionPath === path)
-                && (!owner.tab || owner.tab.isActive)) {
-                await owner.memory.startNewSession();
-                if (!owner.current()) return;
-            }
-            const tab = owner.tab;
-            const previousKey = tab ? _tabKey(tab) : undefined;
-            const state = previousKey ? this._agentStates?.get(previousKey) : undefined;
-            const fresh = this._createRollingWindow(owner.agentName);
-            if (tab) {
-                tab.sessionPath = undefined;
-                tab.sessionEpoch = null;
-                tab.sessionId = undefined;
-                tab.sessionName = undefined;
-                tab.sessionLabel = undefined;
-                if (state && previousKey) {
-                    this._agentStates.delete(previousKey);
-                    state.rollingWindow = fresh;
-                    this._agentStates.set(_tabKey(tab), state);
+                if (owner.memory?.deviceId) cancelMessageEdit(owner.window);
+                const msgCount = owner.window.messages.length;
+                log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
+                if (msgCount || owner.window.removedMessageIds?.length || owner.window.removedMessageRanges?.length) {
+                    await this.handleSaveSession(owner.agentName, owner.window,
+                        owner.path ? { path: owner.path, epoch: owner.epoch } : undefined, owner);
+                    if (!owner.current()) return;
                 }
-            }
-            if (!tab || tab.isActive) {
-                this.rollingWindow = fresh;
-                this.tokenTracker.clear();
-                void this.render_messages();
-                this.add_welcome_message();
-                this.updateTokenCounter();
-                this._updateTokenPanel();
-                this._resetTodoPanelState?.();
-            } else state?.tokenTracker.clear();
+                if (!msgCount) return { hasMessages: false, decision: Promise.resolve({ choice: 'discard' as const }) };
+                const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');
+                const modal = new SessionCloseModal(this.app, {
+                    agentName: owner.agentName || 'Agent', agentColor: agent?.color || '', messageCount: msgCount,
+                });
+                // Do not hold the queue while a dialog waits: Close can invalidate its owner.
+                return { hasMessages: true, decision: promptSessionDecision(this, modal, { choice: 'cancel' }) };
+            });
+            if (!prepared || !owner.current()) return;
+            const { choice } = await prepared.decision || { choice: 'cancel' };
+            if (!owner.current() || choice === 'cancel') return;
+            await serializeSessionLifecycle(owner, async () => {
+                if (!await selectSessionLifecycle(this, owner) || !owner.current() || this.rollingWindow !== owner.window) return;
+                await assertCurrentSessionWritable(owner);
+                if (!owner.current()) return;
+                if (choice === 'archive') {
+                    new Notice(t('chat.session.compressing'));
+                    // The existing review owns every outcome; never reset again here.
+                    await this.consolidateSession({ resetAfterArchive: true });
+                    return;
+                }
+                const path = owner.path || '';
+                if (path && prepared.hasMessages) {
+                    // Explicit path: selecting another tab during I/O must not retire its file.
+                    await _retireActiveSession(owner.memory, 'discard', path);
+                    this.plugin?.subTaskRegistry?.pruneSession?.(path);
+                    this._renderSubTaskStrip?.();
+                    // Once discard is admitted, retire its data even if the view closes.
+                    await _retireTodoFileFor(this, owner.agentName, path);
+                }
+                if (path) {
+                    // Unlike closing a tab, ending a session frees its path for reuse.
+                    // Consent and threads must be cleared for that captured path only.
+                    this.plugin?.mcpClient?.sessionWriteConsent.clearSession(path);
+                    this.plugin?.subTaskRegistry?.closeSessionThreads?.(owner.agentName || '', path);
+                }
+                await resetNewConversation(this, owner);
+            });
         });
-    });
+    } catch (error) {
+        if (!(error instanceof ForeignSessionError)) throw error;
+        await serializeSessionLifecycle(owner, async () => {
+            if (!owner.current()) return;
+            new Notice(t('chat.session.foreign_error'), 6000);
+            // Detach only this tab. The remote file, shared state and its resources stay intact.
+            await resetNewConversation(this, owner);
+        });
+        return;
+    }
+}
+
+async function assertCurrentSessionWritable(owner: SessionLifecycleOwner): Promise<void> {
+    if (!owner.memory?.deviceId || !owner.path) return;
+    const fresh = await owner.memory.loadActiveSession(owner.path);
+    if (fresh.ownership === 'foreign' || fresh.ownership === 'ambiguous') throw new ForeignSessionError();
+}
+
+async function resetNewConversation(view: ChatViewLike, owner: SessionLifecycleOwner): Promise<void> {
+    const path = owner.path || '';
+    // The remaining work belongs to the view, not the completed session.
+    if (!owner.current()) return;
+    // Only reset the shared memory cursor when it still points to this conversation.
+    if (owner.memory && (!owner.memory.activeSessionPath || owner.memory.activeSessionPath === path)
+        && (!owner.tab || owner.tab.isActive)) {
+        await owner.memory.startNewSession();
+        if (!owner.current()) return;
+    }
+    const tab = owner.tab;
+    const previousKey = tab ? _tabKey(tab) : undefined;
+    const state = previousKey ? view._agentStates?.get(previousKey) : undefined;
+    const fresh = view._createRollingWindow(owner.agentName);
+    if (tab) {
+        tab.sessionPath = undefined;
+        tab.sessionEpoch = null;
+        tab.sessionId = undefined;
+        tab.sessionName = undefined;
+        tab.sessionLabel = undefined;
+        if (state && previousKey) {
+            view._agentStates.delete(previousKey);
+            state.rollingWindow = fresh;
+            view._agentStates.set(_tabKey(tab), state);
+        }
+    }
+    if (!tab || tab.isActive) {
+        view.rollingWindow = fresh;
+        view.tokenTracker.clear();
+        void view.render_messages();
+        view.add_welcome_message();
+        view.updateTokenCounter();
+        view._updateTokenPanel();
+        view._resetTodoPanelState?.();
+    } else state?.tokenTracker.clear();
 }
 
 /**
@@ -652,9 +684,14 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                 const agentMemory = owner.memory;
                 if (!agentMemory) return;
                 const filename = path.split('/').pop() || path;
-                const parsed = await agentMemory.loadSession(path);
-                const foreign = path.startsWith(`${agentMemory.paths?.sessionsActive}/`)
-                    && sessionOwnership(parsed.metadata?.device, agentMemory.deviceId ?? null) === 'foreign';
+                const active = path.startsWith(`${agentMemory.paths?.sessionsActive}/`);
+                const parsed = active ? await agentMemory.loadActiveSession(path) : await agentMemory.loadSession(path);
+                const ownership = 'ownership' in parsed ? parsed.ownership : undefined;
+                if (ownership === 'ambiguous') {
+                    new Notice(t('session.needs_repair'));
+                    return;
+                }
+                const foreign = ownership === 'foreign';
                 if (!owner.current() || !parsed?.messages) return;
                 const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');
                 const modal = new OpenSessionModal(this.app, {
@@ -679,7 +716,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                     takenOver = await agentMemory.loadActiveSession(path);
                     parsed = takenOver;
                     if (!owner.current()) return;
-                    if (sessionOwnership(parsed.metadata.device, agentMemory.deviceId) === 'foreign') throw new ForeignSessionError();
+                    if (takenOver.ownership === 'foreign' || takenOver.ownership === 'ambiguous') throw new ForeignSessionError();
                 }
                 cancelMessageEdit(owner.window);
                 // A tab left open before a remote takeover contains a stale snapshot of
