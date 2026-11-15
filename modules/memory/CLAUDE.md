@@ -1276,7 +1276,7 @@ Nie ma osobnego zapisu adopcji ani kopii; pełny zapis metadanych zachowuje zast
 politykę maskowania i tę samą klasę ryzyka częściowego zapisu co przed D2.
 Zwykły natywny append i migracja P3 zachowują cały stary prefiks bajt w bajt,
 również BOM/CRLF, nieznane bloki i sekrety. Plik bez frontmattera pozostaje bezgłowy
-przy appendzie. `sessionHeaderWrite.ts` służy wyłącznie jawnemu przejęciu.
+przy appendzie. `sessionHeaderWrite.ts` służy jawnemu przejęciu oraz naprawie konfliktu D7 opisanej niżej.
 
 `listActiveSessions` i `loadActiveSession` dodają opcjonalne `ownership` tylko dla id.
 `restoreActiveSession` ma jedną kolejność z id i bez: wspólne `state.last_used`,
@@ -1365,3 +1365,88 @@ D2c nadal sprawdza 40 dopisków własnej sesji, kolizje rozmiaru/mtime (odmowa z
 20), A -> B -> A -> B, archiwum, BOM/CRLF i szerokie identyfikatory. Macierz kopii
 została wyłącznie dla przejęcia: sukces, brak/błędna kopia, wyjątek po 20 bajtach,
 cichy częściowy zapis, błąd odczytu kontrolnego i dwie awarie odtworzenia.
+
+## Mobile M2 D7 - naprawa rozmowy ze znacznikami konfliktu
+
+`sessionConflict.ts` jest czystą warstwą nad `splitGitConflict` i istniejącym
+`parseActiveSession`. Wynik `mergeSessionConflict` ma `kind`: `not-applicable`,
+`unresolved` albo `merged` z tekstem. Granice surowych bloków używają tego samego
+`SESSION_BLOCK_BOUNDARY` z `activeSessionFormat.ts`, co parser (również bloki legacy
+bez poprawnego czasu). Escapowanie `## ` przez pisarza chroni treść pól.
+
+Bezpiecznik wymaga granicy bloku albo wiersza frontmattera WEWNĄTRZ konfliktu.
+Frontmatter jest rozpoznawany po położeniu, nie po `key: value` w treści wiadomości.
+Przykład znaczników wewnątrz pola, także w fenced code, zostaje zwykłą treścią.
+Wiele bloków i diff3 rekonstruują dwie pełne strony; baza diff3 nie wchodzi do wyniku.
+Zagnieżdżony lub niekompletny konflikt struktury daje `unresolved`. Trzy urządzenia
+można scalić kolejno po rozwiązaniu poprzedniego konfliktu; nie rozwijamy drzewa
+zagnieżdżonych znaczników. Fixture z powieleniem uszkodzenia na 313df88 też jest
+czytelny: zachowujemy jego późniejsze zdarzenia, usuwając znaczniki przez rekonstrukcję.
+
+Unia bloków usuwa tylko bajtowo identyczne kopie po przeciwnych stronach; powtórzenia
+wewnątrz jednej strony zostają (maksimum liczności z obu stron). Bloki nie są
+przepisywane ani maskowane podczas samej naprawy, CRLF i seq zostają. Sortowanie
+po czasie jest stabilne, przy remisie nasze bloki są pierwsze. Blok bez parsowalnego
+czasu zachowuje kotwicę poprzedniego datowanego bloku swojej strony; początkowe
+niedatowane bloki zostają na początku. Nagłówek bierze nasze bajty, jeśli oba są
+identyczne albo różnią się wyłącznie liniami `updated`/`messageCount` we frontmatterze.
+Każda inna różnica (także nieznane pole/tytuł), niejednoznaczny `device` lub różna
+efektywna epoka odmawia. Ponowne rozbicie wyniku musi zachować każdy blok i jego
+nagłówek, a istniejący parser musi zwrócić tę samą epokę. Brak newline, który skleiłby
+dwa nagłówki, oznacza odmowę, nie dopisanie wymyślonych bajtów.
+
+`seq` nie identyfikuje wiadomości: parser nie sortuje po nim ani nie usuwa duplikatów,
+a następny zapis zaczyna od `maxSeq + 1`. `legacy:N` zależy od pozycji wiadomości,
+nie od seq; `session_epoch` nie zwiększa N. `messages_removed` działa po ID i zakresach
+pozycyjnych. D7 zachowuje usunięcia po jawnych ID, ale odmawia automatycznego scalenia
+z kontrolnym blokiem odwołującym się do `legacy:N` lub niepustym `removed_ranges`:
+przeplatanie mogłoby zmienić cel albo objąć wiadomości drugiej strony. Nie zmieniamy
+ID ani seq w surowych blokach. Resolver epoki musi zgadzać się na obu stronach i po
+sortowaniu, również gdy epoka pochodzi z eventu zamiast frontmattera.
+
+Czytelnicy: `loadActiveSession`, `_parseActiveSessionFile`, lista sesji i restore;
+`SaveSessionWorkflow` czyta przez `loadActiveSession`, a archiwizacja używa tekstu
+po przygotowaniu zapisu. Konsolidacja L1 czyta dopiero pochodne archiwum, bez nowego
+formatu. Sam odczyt nie zapisuje pliku ani kopii. Opcjonalne diagnostyczne pole
+`conflict: 'unresolved'` istnieje tylko w wynikach odczytu/listingu, nigdy w danych
+vaulta. Nienaprawialny plik jest parsowany dotychczasową drogą. Jego wpis stanu nie
+jest usuwany przez pruning czatu tylko dlatego, że parser nie odzyskał wiadomości.
+
+Wszyscy pisarze active używają `_prepareSessionWrite` pod istniejącą kolejką pliku:
+append live/frozen (także fallback bez native append), save, archive, discard,
+ensure epoki i takeover. Tekst pochodzi z odczytu, który już wykonywali.
+Naprawa jest dozwolona dla `mine`/`unowned`, także bez lokalnego id. Konflikt wyłącznie
+metadanych pochodnych ocenia własność po rekonstrukcji nagłówka; różnice tożsamości
+pozostają niejednoznaczne. Cudzy konflikt blokuje nawet jawne przejęcie; zdrowe
+przejęcie zachowuje D2. Nienaprawialne uszkodzenie daje publiczny `SessionConflictError`,
+a odmowy własności z id nadal `ForeignSessionError`.
+
+Przed pierwszą zmianą `sessionHeaderWrite.ts` zapisuje i odczytuje wierną kopię
+`.pkm-assistant/backups/session-<agent>-<sesja>-<czas>[-<sufiks>].md.bak`, bez nadpisania
+wcześniejszej kopii i bez rotacji ustawień. Potem sprawdza źródło, zapisuje scalone
+bajty i sprawdza je odczytem. Sukces loguje jeden warn ze ścieżkami, bez treści.
+Dopiero wtedy biegnie właściwa operacja. Błąd kopii blokuje zapis; błąd zapisu/readbacku
+wywołuje jedną próbę odtworzenia oryginału i odmowę, także po udanym odtworzeniu.
+Jeżeli odtworzenie zawiedzie, zostaje zweryfikowana kopia oraz error w logu.
+Zmiana źródła podczas kopii daje jeden świeży odczyt i ponowną ocenę (również własności).
+Druga zmiana odmawia. Kopie zostają także po odmowie. Nie ma atomowego compare-and-swap
+ani blokady synchronizatora; pozostaje okno między ostatnim porównaniem a zapisem,
+również podczas przywracania po awarii, jak w D2.
+
+Wykrycie konfliktu unieważnia wspólny cache pisarzy adaptera, także w list/load, readbacku epoki i przy
+odmowie. Sukces odświeża seq/newline/własność/rozmiar, unieważnia mtime oraz licznik
+pokrycia autosave. Native append ustala własne mtime jak w D2. Zdrowy plik zachowuje
+bajty, kolejność i liczbę operacji adaptera; odczyty nie podgrzewają cache naprawionym
+tekstem z RAM. Ciepły native append bez odczytu pozostaje bez odczytu: z id konflikt
+wykrywa zmieniony stat lub odczyt co 20 zdarzeń, bez id dopiero następny rzeczywisty
+odczyt (sam okresowy exists nie wykrywa konfliktu). Do tego czasu istnieje okno
+niewidocznej zmiany zewnętrznej. Pisarz zamrożonej sesji czyta przed każdym dopiskiem.
+
+Testy D7: `sessionConflict.test.ts` (13) i `AgentMemory.conflict.test.ts` (33),
+próbki z libgit2 w `fixtures/session-conflict/` (w tym baza, obie strony,
+konflikt i powielenie z 313df88; układ konfliktu z prawdziwego scalenia, wyniki narzędzi
+we wspólnej części zastąpione danymi syntetycznymi - próbki nie mogą zawierać treści
+z niczyjego vaulta). Obejmują literalną rozmowę, surowe bloki, diff3/CRLF,
+metadane, przykłady, trzy strony, seq/ID/usunięcia/epoki, wszystkich pisarzy, błędy
+kopii/zapisu/readbacku/odtworzenia, pull podczas kopii, współdzieloną kolejkę i cache.
+Istniejące golden testy D2 oraz append/P3 nadal sprawdzają dokładne zdrowe bajty i I/O.

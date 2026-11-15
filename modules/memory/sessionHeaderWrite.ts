@@ -11,10 +11,14 @@ export class SessionHeaderWriteError extends Error {
     }
 }
 
+/** A pull arrived after the backup. No source write has been attempted. */
+export class SessionSourceChangedError extends SessionHeaderWriteError {}
+
 /** Caller holds the session queue. False means the original was preserved; refuse takeover.
  * Like D1/settingsArmor, keep a verbatim local copy, outside settings rotation. */
 export async function writeSessionHeader(
     adapter: MemoryVaultAdapterLike, agent: string, path: string, original: string, output: string,
+    purpose: 'takeover' | 'conflict' = 'takeover',
 ): Promise<boolean> {
     let backupPath: string | null = null;
     try {
@@ -34,10 +38,13 @@ export async function writeSessionHeader(
         return false;
     }
     // Do not overwrite a pull that arrived while the backup was being written.
-    if (await adapter.read(path) !== original) throw new SessionHeaderWriteError();
+    if (await adapter.read(path) !== original) throw new SessionSourceChangedError();
     try {
         await adapter.write(path, output);
-        if (await adapter.read(path) === output) return true;
+        if (await adapter.read(path) === output) {
+            if (purpose === 'conflict') log.warn('AgentMemory', 'Session synchronization conflict repaired', { path, backupPath });
+            return true;
+        }
     } catch { /* One restoration attempt, including when write partially succeeded. */ }
     try {
         await adapter.write(path, original);

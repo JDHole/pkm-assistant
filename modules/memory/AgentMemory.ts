@@ -1,5 +1,7 @@
+import { mergeSessionConflict, readConflictAwareSession, SessionConflictError } from './sessionConflict.js';
+import type { ConflictAwareSession } from './sessionConflict.js';
 import { ForeignSessionError, readSessionDevice, ownershipOfSessionDevice, sessionOwnershipFromText } from './sessionOwnership.js';
-import { SessionHeaderWriteError, writeSessionHeader } from './sessionHeaderWrite.js';
+import { SessionHeaderWriteError, SessionSourceChangedError, writeSessionHeader } from './sessionHeaderWrite.js';
 import type { DeviceId, SessionOwnership, SessionDevice } from './sessionOwnership.js';
 import { knownSessionMessageId, sessionMessageId } from './sessionMessageIdentity.js';
 /**
@@ -29,7 +31,7 @@ import {
     KNOWN_ROLES,
 } from './activeSessionFormat.js';
 import { StateManager } from './StateManager.js';
-import type { ParsedActiveSession, SessionFrontmatter, SessionRole, SessionQuestion } from './activeSessionFormat.js';
+import type { SessionFrontmatter, SessionRole, SessionQuestion } from './activeSessionFormat.js';
 import type { TranscriptMetadata, ParsedSessionFile } from './sessionParser.js';
 import type { MemoryNoteType } from './MemoryAccessGuard.js';
 import type { NaTerazOp, NaTerazSections } from './BrainIndex.js';
@@ -225,6 +227,7 @@ export interface ArchiveSessionInfo {
 
 /** Pozycja listy `sessions/active`. */
 export interface ActiveSessionInfo {
+    conflict?: 'unresolved';
     ownership?: SessionOwnership;
     path: string;
     name: string;
@@ -579,7 +582,8 @@ export class AgentMemory {
     private async _establishSessionEpochUnderLock(path: string, expectedEpoch: string | null, current: () => boolean): Promise<string> {
         try {
             if (!current()) throw new Error('Session epoch: owner changed');
-            const content = await persistSessionEpoch('read-failed', () => this.vault.adapter.read(path));
+            const original = await persistSessionEpoch('read-failed', () => this.vault.adapter.read(path));
+            const content = await this._prepareSessionWrite(path, original);
             this._observeSessionDevice(path, content);
             const metadata = this._parseFrontmatter(content);
             if (!current() || metadata.agent && metadata.agent !== this.agentName) throw new Error('Session epoch: owner changed');
@@ -645,7 +649,41 @@ export class AgentMemory {
     }
 
     getSessionOwnership(content: string): SessionOwnership {
-        return sessionOwnershipFromText(content, this.deviceId);
+        const merged = mergeSessionConflict(content);
+        return sessionOwnershipFromText(merged.kind === 'merged' ? merged.text : content, this.deviceId);
+    }
+
+    /** Called only under the existing file queue, using text already read by the writer. */
+    private async _prepareSessionWrite(path: string, original: string, retry = true): Promise<string> {
+        const merged = mergeSessionConflict(original);
+        if (merged.kind === 'not-applicable') return original;
+        this._invalidateSessionWriterCache(path);
+        if (merged.kind === 'unresolved') {
+            // Preserve D2's recognizable refusal for ambiguous/foreign ownership.
+            this._observeSessionDevice(path, original);
+            throw new SessionConflictError();
+        }
+        this._observeSessionDevice(path, merged.text);
+        try {
+            if (!await writeSessionHeader(this.vault.adapter, this.safeName, path, original, merged.text, 'conflict')) {
+                throw new SessionConflictError();
+            }
+            this._refreshSessionWriterState(path, merged.text);
+            this._sessionSavedCounts.delete(path);
+            return merged.text;
+        } catch (error) {
+            this._invalidateSessionWriterCache(path);
+            if (error instanceof SessionSourceChangedError && retry) {
+                let fresh: string;
+                try { fresh = await this.vault.adapter.read(path); }
+                catch { throw new SessionConflictError(); }
+                const content = await this._prepareSessionWrite(path, fresh, false);
+                this._refreshSessionWriterState(path, content);
+                this._sessionSavedCounts.delete(path);
+                return content;
+            }
+            throw new SessionConflictError();
+        }
     }
 
     private _assertSessionDevice(marker: SessionDevice | undefined): void {
@@ -683,7 +721,7 @@ export class AgentMemory {
         }
         const deviceId = this.deviceId;
         await this._enqueuePathWrite(path, async () => {
-            const content = await this.vault.adapter.read(path);
+            const content = await this._prepareSessionWrite(path, await this.vault.adapter.read(path));
             const marker = readSessionDevice(content);
             if (marker.kind === 'ambiguous') throw new ForeignSessionError();
             const { header, device } = marker;
@@ -805,7 +843,9 @@ export class AgentMemory {
             try {
                 if (!(await this.vault.adapter.exists(path))) continue;
                 const content = await this.vault.adapter.read(path);
-                const metadata = this._parseFrontmatter(content);
+                const conflict = mergeSessionConflict(content);
+                if (conflict.kind !== 'not-applicable') this._invalidateSessionWriterCache(path);
+                const metadata = this._parseFrontmatter(conflict.kind === 'merged' ? conflict.text : content);
                 const stat = await this.vault.adapter.stat!(path);
                 const created = (metadata.created || this._createdFromActiveSessionName(name) || '') as string;
                 const agent = (metadata.agent || this.agentName) as string;
@@ -817,6 +857,7 @@ export class AgentMemory {
                     mtime: stat?.mtime || 0,
                     size: stat?.size || 0,
                     label: this._formatActiveSessionLabel(agent, created, path.split('/').pop() as string),
+                    ...(conflict.kind === 'unresolved' ? { conflict: 'unresolved' as const } : {}),
                     ...(this.deviceId ? { ownership: this.getSessionOwnership(content) } : {}),
                 });
             } catch (e) {
@@ -831,7 +872,7 @@ export class AgentMemory {
         return sessions;
     }
 
-    async loadActiveSession(fileOrName: string | { path?: string } | null | undefined): Promise<ParsedActiveSession & { ownership?: SessionOwnership }> {
+    async loadActiveSession(fileOrName: string | { path?: string } | null | undefined): Promise<ConflictAwareSession & { ownership?: SessionOwnership }> {
         let path: string;
         if (typeof fileOrName === 'string') {
             path = fileOrName.includes('/') ? fileOrName : `${this.paths.sessionsActive}/${fileOrName}`;
@@ -842,6 +883,7 @@ export class AgentMemory {
         }
 
         const content = await this.vault.adapter.read(path);
+        if (mergeSessionConflict(content).kind !== 'not-applicable') this._invalidateSessionWriterCache(path);
         const parsed = this._parseActiveSessionFile(content);
         return this.deviceId ? { ...parsed, ownership: this.getSessionOwnership(content) } : parsed;
     }
@@ -1073,7 +1115,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
      * z id sprawdzamy metadane przed każdym dopiskiem i odczytujemy zmieniony plik.
      * @private
      */
-    async _appendSessionFile(path: string, chunk: string): Promise<void> {
+    async _appendSessionFile(path: string, chunk: string, afterRepair: () => string): Promise<void> {
         const masked = maskSensitiveData(chunk);
         if (typeof this.vault.adapter.append === 'function') {
             try {
@@ -1109,8 +1151,9 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 `_appendSessionFile: adapter bez append() i nie mogę odczytać istniejącego pliku — nie nadpisuję: ${path} (${causeText(probe.cause)})`
             );
         }
-        this._observeSessionDevice(path, probe.content);
-        await this.vault.adapter.write(path, probe.content + masked);
+        const content = await this._prepareSessionWrite(path, probe.content);
+        this._observeSessionDevice(path, content);
+        await this.vault.adapter.write(path, content + (content === probe.content ? masked : maskSensitiveData(afterRepair())));
     }
 
     /**
@@ -1174,12 +1217,13 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
             // Frozen receipts always read first, including warm cache and native append.
             const probe = await readIfExists(this.vault.adapter, path);
             if (probe.state !== 'content') throw new Error('appendSessionEvent: frozen session missing or unreadable');
-            this._observeSessionDevice(path, probe.content);
-            if (expectedEpoch !== undefined && resolveSessionEpoch(probe.content) !== expectedEpoch) {
+            const content = await this._prepareSessionWrite(path, probe.content);
+            this._observeSessionDevice(path, content);
+            if (expectedEpoch !== undefined && resolveSessionEpoch(content) !== expectedEpoch) {
                 log.warn('AgentMemory', 'appendSessionEvent: frozen session epoch mismatch');
                 throw new Error('appendSessionEvent: frozen session epoch mismatch');
             }
-            await this._appendEventUnderLock(path, event, { kind: 'observed', content: probe.content });
+            await this._appendEventUnderLock(path, event, { kind: 'observed', content });
             return path;
         });
     }
@@ -1268,7 +1312,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
     /** Shared event writer. Never re-enter the public queue from here. */
     private async _appendEventUnderLock(path: string, event: ActiveSessionEventInput, input: ObservedWriterInput): Promise<void> {
         try {
-            if (input.kind === 'observed') this._refreshSessionWriterState(path, input.content);
+            if (input.kind === 'observed') this._refreshSessionWriterState(path, await this._prepareSessionWrite(path, input.content));
             this._assertSessionDevice(this._sessionDevices.get(path));
             const isEpoch = event.type === 'session_epoch';
             if (isEpoch && typeof this.vault.adapter.append !== 'function') {
@@ -1278,7 +1322,10 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
             const seq = this._nextSeq(path, '');
             const body = formatSessionEvent(event.type || 'event', { ...event, seq }, timestamp);
             const separator = isEpoch || !this._sessionEndsWithNewline.get(path) ? '\n' : '';
-            await this._appendSessionFile(path, separator + body);
+            await this._appendSessionFile(path, separator + body, () => {
+                const nextBody = formatSessionEvent(event.type || 'event', { ...event, seq: this._nextSeq(path, '') }, timestamp);
+                return (this._sessionEndsWithNewline.get(path) ? '' : '\n') + nextBody;
+            });
             this._sessionEndsWithNewline.set(path, true);
         } catch (error) {
             this._invalidateSessionWriterCache(path);
@@ -1287,6 +1334,12 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
     }
 
     private _refreshSessionWriterState(path: string, content: string): void {
+        // A readback may include a concurrent sync after our own append. Never warm a
+        // writer from conflict bytes; the next queued operation must read and repair.
+        if (mergeSessionConflict(content).kind !== 'not-applicable') {
+            this._invalidateSessionWriterCache(path);
+            throw new SessionConflictError();
+        }
         this._observeSessionDevice(path, content);
         if (this.deviceId) {
             this._sessionSizes.set(path, new TextEncoder().encode(content).length);
@@ -1374,7 +1427,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
         // Serialize against any pending appends to the same active session file so a
         // late append cannot resurrect a half-removed file (or be lost after copy).
         return this._enqueuePathWrite(path, () => this._enqueuePathWrite(this.paths.sessionsArchive, async () => {
-            const content = await this.vault.adapter.read(path);
+            const content = await this._prepareSessionWrite(path, await this.vault.adapter.read(path));
             this._observeSessionDevice(path, content);
             const { path: archivePath } = await findFreeCollisionPath(
                 this.vault.adapter, this.paths.sessionsArchive, filename,
@@ -1478,7 +1531,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
             await this._enqueuePathWrite(path, () => this._enqueuePathWrite(discardedDir, async () => {
                 if (!(await this.vault.adapter.exists(path))) return;
                 // With identity, inspect before mkdir or any other disk mutation.
-                const ownedContent = this.deviceId ? await this.vault.adapter.read(path) : null;
+                const ownedContent = this.deviceId ? await this._prepareSessionWrite(path, await this.vault.adapter.read(path)) : null;
                 if (ownedContent !== null) this._observeSessionDevice(path, ownedContent);
                 try {
                     if (!(await this.vault.adapter.exists(discardedDir))) {
@@ -1496,12 +1549,12 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                     'discardActiveSession: brak wolnej nazwy pliku',
                 )).path;
 
-                const content = ownedContent ?? await this.vault.adapter.read(path);
+                const content = ownedContent ?? await this._prepareSessionWrite(path, await this.vault.adapter.read(path));
                 await this._writeSessionFile(target, content);
                 if (this.vault.adapter.remove) await this.vault.adapter.remove(path);
             }));
         } catch (e) {
-            if (e instanceof ForeignSessionError) throw e;
+            if (e instanceof ForeignSessionError || e instanceof SessionConflictError) throw e;
             log.warn(`AgentMemory:${this.agentName}`, `Could not discard active session ${filename}:`, e);
             return null;
         }
@@ -1638,7 +1691,7 @@ epoch: ${epoch}${this.deviceId ? `\ndevice: ${this.deviceId}` : ''}
                 // failed" i NIE czyści okno rozmowy — wiadomości zostają do następnej próby.
                 throw new Error(`saveSession: nie mogę odczytać istniejącego pliku sesji — nie nadpisuję: ${path} (${causeText(probe.cause)})`);
             }
-            const existing = probe.state === 'content' ? probe.content : '';
+            const existing = probe.state === 'content' ? await this._prepareSessionWrite(path, probe.content) : '';
             this._observeSessionDevice(path, existing);
             const parsed = parseActiveSession(existing);
             if (changes.expectedSession && (!existing || parsed.metadata.epoch !== changes.expectedSession.epoch)) {
@@ -2946,8 +2999,8 @@ ${String(note.content || '')}
      * (trwała utrata rozmowy przy poprzedniej wersji) siedzi w `activeSessionFormat.js`.
      * @see modules/memory/activeSessionFormat.js
      */
-    _parseActiveSessionFile(content: string): ParsedActiveSession {
-        return parseActiveSession(content);
+    _parseActiveSessionFile(content: string): ConflictAwareSession {
+        return readConflictAwareSession(content);
     }
 
     _createdFromActiveSessionName(name: string | null | undefined): string {

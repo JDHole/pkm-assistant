@@ -2441,3 +2441,26 @@ właściciela, także gdy wszystkie wiadomości już są w pliku. Ubicie aplikac
 nim pozostawia możliwość dopisku z drugiego urządzenia. Ochrona z konstrukcji
 obejmuje nowe sesje D2 i starsze po pierwszym zapisie metadanych; zwykła wysyłka
 legacy nadal zachowuje kontrakt P3 (stare bajty nietknięte, epoka przez dopisek).
+
+## Mobile M2 D7 - rozmowa po konflikcie synchronizacji
+
+Restore (lista oraz fallback) i otwarcie z profilu używają wyniku pamięci D7.
+Naprawialny konflikt odtwarza normalną rozmowę bez komunikatu i bez zapisu transkryptu;
+naprawa z kopią następuje przy pierwszej operacji piszącej. `conflict: 'unresolved'`
+powoduje jeden komunikat PL/EN na plik w ramach otwarcia, również gdy własność D2
+wyklucza odtworzenie zakładki. Zbiór powiadomień przeżywa wewnętrzne ponowienie restore.
+Pruning pustych sesji nie usuwa wpisu rozpoznanego konfliktu. Prywatny mixin restore
+przyjmuje opcjonalny port powiadomień; domyślnie jest to Obsidian Notice.
+
+`safeErrorText` rozpoznaje publiczny `SessionConflictError` przez barrel memory,
+analogicznie do D1. Istniejąca bramka przyjęcia wysyłki zatrzymuje model, zachowuje
+okno i przywraca szkic. Komunikat mówi o zachowanym oryginale lub jego kopii, ponieważ
+awaria przywracania pliku może pozostawić wyłącznie zweryfikowaną kopię w backups.
+Odmowa własności oraz ręczne otwarcie niejednoznacznego nagłówka nadal używają komunikatów D2. Nie dodano pól do plików sesji.
+
+Osiem testów D7 w `chat/chat_streaming.sendTab.test.ts` wykonuje produkcyjne restore,
+render dymków i wysyłkę: lista/fallback, PL/EN, naprawialny/nienaprawialny fixture.
+Sprawdzają literalne teksty, pojedyncze powiadomienie, brak zmian źródła na odczycie,
+kopię 1:1 po turze, zerową liczbę znaczników, odmowę modelu i zachowany szkic.
+Warstwa Notice i MarkdownRenderer jest zastąpiona portem/atrapą hosta; układ i zachowanie
+prawdziwego telefonu oraz synchronizacja GitSync/obsidian-git wymagają próby na urządzeniach.

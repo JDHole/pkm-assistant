@@ -10,6 +10,7 @@ export const pl: Record<string, string> = {
   "modal.takeover_session.title": "Rozmowa na innym urządzeniu",
   "modal.takeover_session.description": "Ta rozmowa toczy się na innym urządzeniu. Przejmij ją tylko wtedy, gdy tamto urządzenie już jej nie używa i jest zsynchronizowane. Bezpieczniejsza droga: zarchiwizuj ją tam i otwórz tutaj z archiwum.",
   "modal.takeover_session.confirm": "Przejmij rozmowę",
+  "chat.session.sync_conflict": "Ta rozmowa ma ślady konfliktu synchronizacji, których nie udało się scalić automatycznie. Zapis jest zablokowany. Zachowano oryginał lub jego kopię.",
   "chat.state_corrupt": "Plik stanu agenta {{agent}} jest uszkodzony po synchronizacji i nie udało się go naprawić. Rozmowa nie została zapisana.",
   "diagnostics.custom_identifier": "niestandardowy identyfikator",
   "diagnostics.local_error": "Klasa: {{name}}; kod: {{code}}",

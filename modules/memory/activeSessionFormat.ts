@@ -375,9 +375,11 @@ function normalizeSessionText(text: string): string {
 }
 
 /** Shared physical block boundaries for identity resolution and message parsing. */
+export const SESSION_BLOCK_BOUNDARY = /(?:^|\n)## /;
+
 function* sessionBlocks(text: string): Generator<{ rawHeader: string; rawBody: string }> {
     const body = normalizeSessionText(text).replace(/^---\n[\s\S]*?\n---\n*/, '');
-    for (const part of body.split(/(?:^|\n)## /).slice(1)) {
+    for (const part of body.split(SESSION_BLOCK_BOUNDARY).slice(1)) {
         if (!part.trim()) continue;
         const splitIndex = part.indexOf('\n');
         yield {
@@ -590,7 +592,7 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
 /**
  * Typ zdarzenia z nagłówka bloku: `## 2026-07-30T10:32:41.240Z - user message` → `user_message`.
  */
-function eventTypeFromHeader(header: unknown): string {
+export function eventTypeFromHeader(header: unknown): string {
     const normalized = String(header)
         .replace(/^.*\s[—-]\s*/, '')
         .trim()

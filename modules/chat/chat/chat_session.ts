@@ -121,11 +121,11 @@ export async function _idleTick(this: ChatViewLike) {
  */
 async function _pruneEmptyActiveSessionFromState(agentMemory: AgentMemory, session: ActiveSessionInfo) {
     try {
-        if (session.ownership === 'foreign' || session.ownership === 'ambiguous') return;
+        if (session.conflict || session.ownership === 'foreign' || session.ownership === 'ambiguous') return;
         if (agentMemory.deviceId) {
             const fresh = await agentMemory.loadActiveSession(session.path);
             if (fresh.ownership !== 'mine' && fresh.ownership !== 'unowned') return;
-            if (fresh.messages.length || fresh.subTaskHistory?.length) return;
+            if (fresh.conflict || fresh.messages.length || fresh.subTaskHistory?.length) return;
         }
         const path = session?.path;
         const name = session?.name || (path ? path.split('/').pop() : null);
@@ -220,16 +220,23 @@ function restoreSubTaskHistory(view: ChatViewLike, parsed: Awaited<ReturnType<Ag
 }
 
 /** Restore the last active session from disk. */
-export async function _restoreActiveSession(this: ChatViewLike): Promise<void> {
-    if (!this.rollingWindow) return _restoreSessions.call(this);
+export async function _restoreActiveSession(this: ChatViewLike, notify: (message: string) => void = message => { new Notice(message); }): Promise<void> {
+    const notices = { paths: new Set<string>(), notify };
+    if (!this.rollingWindow) return _restoreSessions.call(this, notices);
     const owner = captureSessionLifecycle(this);
     return requestSessionLifecycle(owner, 'restore', async () => {
         for (const key of new Set([...(this._preparingTurns?.keys() ?? []), ...(this._streamCtxMap?.keys() ?? [])])) this.stop_generation(key, 'restore');
-        await serializeSessionLifecycle(owner, () => _restoreSessions.call(this, owner));
+        await serializeSessionLifecycle(owner, () => _restoreSessions.call(this, notices, owner));
     });
 }
 
-async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwner): Promise<void> {
+async function _restoreSessions(this: ChatViewLike, notices: { paths: Set<string>; notify: (message: string) => void }, owner?: SessionLifecycleOwner): Promise<void> {
+    const notifyConflict = (path: string, conflict?: 'unresolved') => {
+        if (conflict && !notices.paths.has(path)) {
+            notices.paths.add(path);
+            notices.notify(t('chat.session.sync_conflict'));
+        }
+    };
     const current = () => !owner || owner.current();
     const pending = [...(this._preparingTurns?.values() ?? []), ...(this._streamCtxMap?.values() ?? [])];
     if (pending.length) {
@@ -254,6 +261,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             const sessions = await agentMemory.listActiveSessions();
             if (!current()) return;
             for (const session of sessions) {
+                notifyConflict(session.path, session.conflict);
                 if (session.ownership === 'foreign' || session.ownership === 'ambiguous') continue;
                 let parsed = null;
                 try {
@@ -263,6 +271,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
                     log.warn('Chat', `Could not load active session ${session?.name}: ${(e as Error).message}`);
                 }
                 if (!current()) return;
+                if (parsed) notifyConflict(session.path, parsed.conflict);
                 if (parsed && (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous')) continue;
                 const hasHistory = parsed && restoreSubTaskHistory(this, parsed, agentName, session.path);
                 if (!parsed || (!parsed.messages.length && !hasHistory)) {
@@ -270,7 +279,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
                     // _discardEmptyActiveSession here, which destroyed a real session for the user when
                     // the parser returned 0 messages. Only prune the .state.json pointer; the file
                     // stays on disk as a recovery anchor.
-                    await _pruneEmptyActiveSessionFromState(agentMemory, session);
+                    if (!parsed?.conflict) await _pruneEmptyActiveSessionFromState(agentMemory, session);
                     if (!current()) return;
                     continue;
                 }
@@ -304,6 +313,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             // `restoredPath` jest niepuste tylko wtedy, gdy `agentMemory` istnieje (linia wyżej).
             const parsed = await agentMemory!.loadActiveSession(restoredPath);
             if (!current()) return;
+            notifyConflict(restoredPath, parsed.conflict);
             if (parsed.ownership === 'foreign' || parsed.ownership === 'ambiguous') return;
             const hasHistory = restoreSubTaskHistory(this, parsed, activeAgentName, restoredPath);
             if (!parsed.messages.length && !hasHistory) return;
@@ -342,7 +352,7 @@ async function _restoreSessions(this: ChatViewLike, owner?: SessionLifecycleOwne
             .some(ctx => sendAdmission(ctx.rollingWindow))) {
             await this._waitForSendAdmissions();
             if (!current()) return;
-            return _restoreSessions.call(this, owner);
+            return _restoreSessions.call(this, notices, owner);
         }
         if (!current()) return;
         this.chatTabs = restored.map((item, index) => ({
@@ -691,6 +701,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                     new Notice(t('session.needs_repair'));
                     return;
                 }
+                if ('conflict' in parsed && parsed.conflict === 'unresolved') new Notice(t('chat.session.sync_conflict'));
                 const foreign = ownership === 'foreign';
                 if (!owner.current() || !parsed?.messages) return;
                 const agent = this.plugin?.agentManager?.getAgent?.(owner.agentName || '');

@@ -215,3 +215,7 @@ Lokalny identyfikator z API Obsidiana wyznacza własność `device` aktywnej ses
 ## Mobile M4 F1 - załączniki na telefonie
 
 Spinacz na `Platform.isPhone` udostępnia aparat, galerię i pliki, odrzuca HEIC/HEIF, a PDF na obu platformach ładuje bibliotekę przez API Obsidiana; kontrakt, testy i ograniczenia prób opisuje `modules/ui-components/CLAUDE.md`.
+
+## Mobile M2 D7 - naprawa rozmowy ze znacznikami konfliktu
+
+Memory odtwarza obie strony konfliktu sesji w RAM, naprawia plik przy pierwszym zapisie po zweryfikowanej kopii, a czat zgłasza nierozwiązywalny konflikt i zachowuje szkic; reguły oraz ograniczenia opisują `modules/memory/CLAUDE.md` i `modules/chat/CLAUDE.md`.

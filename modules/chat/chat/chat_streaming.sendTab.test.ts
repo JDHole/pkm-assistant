@@ -1878,3 +1878,69 @@ for (const locale of ['pl', 'en'] as const) test.serial(`D2d: sending to legacy 
     t.is((await f.memory.loadActiveSession(path)).ownership, 'unowned');
     t.deepEqual(writes.filter(target => target === path || target.startsWith('.pkm-assistant/backups/')), []);
 });
+
+for (const fallback of [false, true]) for (const locale of ['pl', 'en'] as const)
+for (const broken of [false, true]) test.serial(`D7 production restore and send: fallback=${fallback}, ${locale}, unresolved=${broken}`, async t => {
+    const f = await fixture();
+    disposeFixture(t, f); setLocale(locale);
+    const original = readFileSync(new URL('../../memory/fixtures/session-conflict/sesja_konflikt_markery.md', import.meta.url), 'utf8');
+    const raw = broken ? original.replace('<<<<<<< HEAD', '<<<<<<< HEAD\n<<<<<<< nested') : original;
+    const memory = new AgentMemory({ adapter: f.adapter }, 'Jaskier');
+    memory._structureEnsured = true;
+    const path = `${memory.paths.sessionsActive}/conflict.md`;
+    f.files.set(path, raw);
+    f.files.set(memory.paths.state, '{"active_sessions":["conflict.md"],"last_used":"conflict.md"}');
+    const agent = { name: 'Jaskier' };
+    Object.assign(f.view.plugin.agentManager, {
+        getAllAgents: () => fallback ? [] : [agent], getActiveAgent: () => agent, getAgent: () => agent,
+        getAgentMemory: () => memory, getActiveMemory: () => memory,
+    });
+    Object.assign(f.adapter, { stat: async () => ({ size: raw.length, mtime: 1 }) });
+    const notices: unknown[] = [];
+    const renderMarkdown = MarkdownRenderer.render;
+    MarkdownRenderer.render = async (_app, text, el) => { el.textContent = text; };
+    t.teardown(() => { MarkdownRenderer.render = renderMarkdown; });
+    let rendered: Promise<void> = Promise.resolve();
+    Object.assign(f.view, {
+        render_messages() { rendered = render_messages.call(f.view as never); return rendered; },
+        _drawConnectorLines() {},
+    });
+    await _restoreActiveSession.call(f.view as never, message => { notices.push(message); });
+    await rendered;
+    const expected = locale === 'pl'
+        ? 'Ta rozmowa ma ślady konfliktu synchronizacji, których nie udało się scalić automatycznie. Zapis jest zablokowany. Zachowano oryginał lub jego kopię.'
+        : 'This conversation has a synchronization conflict that could not be merged automatically. Saving is blocked. The original or its backup has been preserved.';
+    t.deepEqual(notices, broken ? [expected] : []);
+    t.is(f.files.get(path), raw);
+    t.is(memory.activeSessionPath, path);
+    const texts = (el: Element): string[] => [el.textContent || '', ...Array.from(el.children).flatMap(texts)];
+    if (!broken) {
+        const visible = texts(f.view.messages_container);
+        for (const text of ['B0: poczatek wspolnej sesji, odpowiedz slowem baza', 'baza',
+            'A1: wiadomosc z telefonu, odpowiedz slowem telefon', 'telefon',
+            'B1: wiadomosc z laptopa, odpowiedz slowem laptop', 'laptop']) t.true(visible.includes(text), text);
+        t.false(visible.join('\n').includes('<<<<<<<'));
+        t.deepEqual(f.view.rollingWindow.messages.filter(m => m.role === 'user').map(m => m.content), [
+            'B0: poczatek wspolnej sesji, odpowiedz slowem baza',
+            'A1: wiadomosc z telefonu, odpowiedz slowem telefon', 'B1: wiadomosc z laptopa, odpowiedz slowem laptop',
+        ]);
+    }
+    const before = f.view.rollingWindow.messages.map(m => [m.role, m.content]);
+    f.view.input_area.value = 'Mój szkic D7';
+    await f.clickSend();
+    if (broken) {
+        t.is(f.view.input_area.value, 'Mój szkic D7');
+        t.is(f.files.get(path), raw);
+        t.deepEqual(f.modelInputs, []);
+        t.deepEqual(f.view.rollingWindow.messages.map(m => [m.role, m.content]), before);
+        t.true(texts(f.view.messages_container).includes((locale === 'pl' ? 'Błąd: ' : 'Error: ') + expected));
+        t.deepEqual(notices, [expected]);
+    } else {
+        t.is(f.view.input_area.value, '');
+        t.is(f.modelInputs.length, 1);
+        const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Jaskier');
+        t.deepEqual((await fresh.loadActiveSession(path)).messages.slice(-2).map(m => m.content), ['Mój szkic D7', 'Odpowiedź na poprawkę A']);
+        t.is(/^(?:<<<<<<<|=======|>>>>>>>)/m.test(f.files.get(path)!), false);
+        t.deepEqual([...f.files].filter(([p]) => p.includes('/backups/')).map(([, bytes]) => bytes), [original]);
+    }
+});
