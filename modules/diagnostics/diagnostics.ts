@@ -16,7 +16,7 @@ export interface DiagnosticInput {
     /** Used only as a redaction dictionary, never serialized into the report. */
     settings: unknown;
     consent: () => Promise<boolean>;
-    /** Called after the consent dialog; the composition root enforces local scan consent. */
+    /** Part of every saved local report; called after the connection test decision. */
     memoryFacts?: () => Promise<Record<string, unknown>>;
     connection: () => Promise<ConnectionResult>;
     now?: () => number;

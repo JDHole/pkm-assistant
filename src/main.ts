@@ -1015,13 +1015,18 @@ export default class PkmAssistantPlugin extends PluginBase {
           'navigator.clipboard': !!navigator.clipboard, 'window.require': 'require' in window,
         },
         consent: async () => {
-          if (run.cancelled) return false;
+          if (run.cancelled) throw new Error('Diagnostics cancelled');
           consentModal = new DiagnosticsConsentModal(this.app, controller?.signal);
           consentModal.open();
-          return consentModal.decision;
+          const decision = await consentModal.decision;
+          if (decision === null || run.cancelled) {
+            run.cancelled = true;
+            throw new Error('Diagnostics cancelled');
+          }
+          return decision;
         },
         memoryFacts: async () => {
-          if (run.cancelled || !consentModal?.memoryScanApproved) return {};
+          if (run.cancelled) return {};
           const counts = await scanMemoryConflicts(this.app.vault.adapter);
           return {
             'memory.conflict.state': counts.state, 'memory.conflict.brain': counts.brain,
@@ -1041,6 +1046,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       });
       if (!run.cancelled) showDiagnosticReport(this.app, report);
     } catch {
+      if (run.cancelled) return;
       // Adapter errors can contain full system paths; keep notices/logs fixed and local.
       log.error('Diagnostics', 'Could not save device diagnostics');
       if (!run.cancelled) new Notice(t('diagnostics.failed'));

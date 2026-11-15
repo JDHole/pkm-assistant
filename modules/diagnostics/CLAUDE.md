@@ -22,7 +22,8 @@ Osobny moduł, bo to samodzielna funkcja, nie infrastruktura core ani część r
   limit 30 s, bez ponowień, narzędzi, promptu agenta i historii. Zwraca strukturę,
   nigdy komunikat wyjątku/odpowiedzi. Mierzy surowe porcje (również ciało błędu HTTP),
   pierwszą porcję i całkowity czas, nie tokeny modelu.
-- `ui.ts`: zgoda z dwoma przyciskami 48 px; zamknięcie/abort to odmowa. Po zapisie
+- `ui.ts`: zgoda na test połączenia z dwoma przyciskami 48 px; zamknięcie/abort anuluje raport.
+  `decision`: true = test i zapis, false = zapis lokalny, null = anulowanie. Po zapisie
   Notice i modal pokazują liczniki i ścieżkę raportu; przycisk kopiuje gotowy Markdown.
 - `buildInfo.ts`: define `__PKM_BUILD__` z esbuild (hash + UTC), bez builda `dev`.
   Watch dopisuje `watch`, ponieważ hash i czas opisują start kontekstu.
@@ -204,15 +205,21 @@ Infinity i ujemne wartości dają Unavailable, nieznane nazwy są pomijane.
 Źródłem jest `scanMemoryConflicts` modułu memory, mapowany w composition root.
 Nie przekazujemy nazw agentów, ścieżek, treści plików ani błędów adaptera.
 
-Opcjonalny callback `DiagnosticInput.memoryFacts` jest wywołany raz po zamknięciu
-okna zgody. Composition root sprawdza `DiagnosticsConsentModal.memoryScanApproved`
-i anulowanie biegu PRZED skanem; oba przyciski zapisu raportu zatwierdzają lokalny
-skan, tylko przycisk połączenia zatwierdza sieć. Zamknięcie/abort nie zatwierdza
-skanu, spóźniony klik nie zmienia decyzji. Opis PL/EN jawnie wyjaśnia ten zakres.
-Odmowa sieci nie blokuje lokalnej diagnostyki pamięci. Callback po zamknięciu bez
-wyboru zwraca pusty zestaw. Wyjątek przeglądu daje unavailable dla unreadable,
-bez treści błędu; reszta raportu i test połączenia działają dalej. Nie ma skanu
-na starcie ani przy imporcie modułu.
+Opcjonalny callback `DiagnosticInput.memoryFacts` jest wywołany raz po wyborze
+zapisu raportu. D6b: lokalny przegląd tylko do odczytu jest zwykłą częścią raportu,
+bez osobnej zgody ani ścieżki pominięcia. Oba przyciski uruchamiają przegląd;
+wyłącznie przycisk połączenia zatwierdza sieć. Pierwszy akapit PL/EN pyta o test
+połączenia (tekst sprzed D6), drugi, osobny `diagnostics.memory_notice`, krótko
+informuje o liczbach z pamięci. Istniejący układ i przyciski 48 px pozostają bez
+zmian CSS; akapity używają zwykłego przepływu treści modala.
+
+Zamknięcie/abort daje null, odróżniony od false przy zapisie bez sieci. Composition
+root przerywa wtedy callback zgody i cały bieg przed przeglądem i zapisem raportu,
+bez powiadomienia o błędzie. Spóźnione kliknięcie nie zmienia decyzji. Przed oknem
+nadal wykonują się dotychczasowe lokalne próby diagnostyczne i sprzątanie plików
+próbnych. Usunięto osobną flagę `memoryScanApproved`. Wyjątek przeglądu daje
+unavailable dla unreadable, bez treści błędu; reszta raportu i test połączenia
+działają dalej. Nie ma skanu na starcie ani przy imporcie modułu.
 
 Nowa sekcja PL/EN jest ZA dotychczasową tabelą, z niezmienioną kolejnością jej
 wierszy. Ma własną tabelę liczników, opis zakresu i jedno podsumowanie. Wszystkie
@@ -228,6 +235,11 @@ pliki poza limitami. Szczegóły kosztu i wyścigów metadanych: dokumentacja me
 Testy D6 w `diagnostics.test.ts` sprawdzają literalne sekcje PL/EN (zera i wartości
 dodatnie), odrzucenie nieznanej nazwy i nieliczbowych wartości, niepełny pomiar,
 kolejność zgoda -> callback oraz zapis raportu mimo awarii callbacku, bez wycieku.
-`ui.test.ts` sprawdza zgodę lokalną obu przycisków i odmowę zamknięcia/abort.
+`ui.test.ts` sprawdza literalne teksty PL/EN w dwóch osobnych akapitach, decyzję
+obu przycisków, anulowanie przez zamknięcie/abort i ignorowanie spóźnionych kliknięć.
+D6b w `src/main.mobile.test.ts` wykonuje prawdziwą komendę dla obu przycisków,
+zamknięcia i unload na desktopie, mobile oraz bez AbortController: jeden przegląd
+na zapis, literalny licznik w raporcie, nienaruszone bajty źródła, brak przeglądu,
+zapisu i sieci po anulowaniu oraz skuteczny kolejny zapis po anulowaniu.
 Test produkcyjnego startu w `src/main.mobile.test.ts` mierzy odczyty plików kontrolnych
 na obu platformach: zero przy starcie, po jednym po wyborze lokalnego raportu.

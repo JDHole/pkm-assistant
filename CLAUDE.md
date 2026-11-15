@@ -234,4 +234,4 @@ Memory scala odczyt indeksu w RAM, a jego przebudowa zachowuje obie strony i zap
 
 ## Mobile M2 D6 - diagnostyka śladów konfliktu pamięci
 
-Na obu platformach komenda diagnostyki po zgodzie na lokalny raport zlicza ślady konfliktu przez ograniczony przegląd tylko do odczytu, bez pracy przy starcie; zamknięty słownik, limity i testy opisują `modules/memory/CLAUDE.md` oraz `modules/diagnostics/CLAUDE.md`.
+Na obu platformach komenda diagnostyki przy zapisie lokalnego raportu zlicza ślady konfliktu przez ograniczony przegląd tylko do odczytu, bez pracy przy starcie; zamknięty słownik, limity i testy opisują `modules/memory/CLAUDE.md` oraz `modules/diagnostics/CLAUDE.md`.

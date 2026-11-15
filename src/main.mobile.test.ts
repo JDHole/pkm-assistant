@@ -32,6 +32,13 @@ test.after(() => { Obsidian.Notice = Notice; });
 test.beforeEach(() => { notices.length = 0; setLocale('en'); });
 test.afterEach.always(() => { Platform.isMobile = false; mock.restoreAll(); });
 
+function diagnosticButtons(modal: Obsidian.Modal) {
+    type ButtonNode = { tagName: string; children: ButtonNode[]; onclick?: () => void };
+    const find = (node: ButtonNode): ButtonNode[] => node.tagName === 'BUTTON'
+        ? [node] : node.children.flatMap(find);
+    return find(modal.contentEl as unknown as ButtonNode);
+}
+
 function deferred() {
     let resolve!: () => void;
     const promise = new Promise<void>(done => { resolve = done; });
@@ -178,13 +185,8 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
         mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) {
             this.onOpen();
-            if (failure === 'none') {
-                // Choose the local report in the real consent UI; no model request.
-                type ButtonNode = { tagName: string; children: ButtonNode[]; onclick?: () => void };
-                const findButton = (node: ButtonNode): ButtonNode | undefined => node.tagName === 'BUTTON'
-                    ? node : node.children.map(findButton).find(Boolean);
-                findButton(this.contentEl as unknown as ButtonNode)?.onclick?.();
-            }
+            // Startup timing tests explicitly choose the local report in the real UI.
+            diagnosticButtons(this)[0].onclick!();
             this.onClose();
         });
 
@@ -295,22 +297,41 @@ test.serial('mobile Obsidian App registers state/open with no Electron and repor
     t.is(nodeReads, 0);
 });
 
-for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, { mobile: true, missingAbort: false }, { mobile: true, missingAbort: true }]) test.serial(`device diagnostics composition: ${mobile ? 'mobile' : 'desktop'}, missing AbortController=${missingAbort}`, async t => {
+for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, { mobile: true, missingAbort: false }, { mobile: true, missingAbort: true }]) for (const choice of ['local', 'connection', 'close', 'unload'] as const) test.serial(`device diagnostics composition: ${mobile ? 'mobile' : 'desktop'}, missing AbortController=${missingAbort}, ${choice}`, async t => {
     Platform.isMobile = mobile;
     const { DiagnosticsConsentModal, StartupTimer } = await import('../modules/diagnostics/index.js');
-    // The host modal stub does not run lifecycle hooks. Simulate closing the real consent UI.
-    mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) { this.onOpen(); this.onClose(); });
+    let action = choice;
+    let dialogs = 0;
+    mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) {
+        this.onOpen();
+        dialogs++;
+        const choices = diagnosticButtons(this);
+        t.deepEqual(choices.map(button => button.tagName), ['BUTTON', 'BUTTON']);
+        if (action === 'close' || action === 'unload') {
+            if (action === 'unload') host.diagnosticController?.abort();
+            this.onClose();
+            // A detached button must not revive a cancelled report.
+            choices[0].onclick!(); choices[1].onclick!();
+        } else {
+            choices[action === 'local' ? 0 : 1].onclick!();
+            this.onClose();
+        }
+    });
     let reportSummary = '';
     mock.method(Obsidian.Modal.prototype, 'open', function(this: Obsidian.Modal) {
         reportSummary = this.contentEl.children[0]?.textContent ?? '';
     });
-    const files = new Map<string, string>();
+    const costProbe = '.pkm-assistant/cost_log.jsonl';
+    const costContent = '<<<<<<< left\n{}\n=======\n{}\n>>>>>>> right\n';
+    const files = new Map<string, string>([[costProbe, costContent]]);
     const dirs = new Set<string>();
+    let scans = 0;
+    const reportWrites: string[] = [];
     const adapter = {
         exists: async (path: string) => dirs.has(path) || files.has(path),
         mkdir: async (path: string) => { dirs.add(path); },
-        write: async (path: string, text: string) => { files.set(path, text); },
-        read: async (path: string) => files.get(path) ?? '',
+        write: async (path: string, text: string) => { files.set(path, text); if (path.endsWith('.md')) reportWrites.push(path); },
+        read: async (path: string) => { if (path === costProbe) scans++; return files.get(path) ?? ''; },
         append: async (path: string, text: string) => { files.set(path, (files.get(path) ?? '') + text); },
         stat: async (path: string) => ({ type: 'file', size: files.get(path)?.length ?? 0 }),
         rename: async (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
@@ -340,7 +361,7 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
         app: { vault: { adapter, configDir: '.custom-config', getMarkdownFiles: () => [{}, {}, {}] } },
         manifest: { version: '2.4.1' }, runtimeConfig,
         env: { settings, config: runtimeConfig },
-        _ready: true, diagnosticStartupMs: 1234, diagnosticStartupPhases, diagnosticController: null,
+        _ready: true, diagnosticStartupMs: 1234, diagnosticStartupPhases, diagnosticController: null as { abort(): void } | null,
         agentManager: { agents: new Map([['one', {}], ['two', {}]]) },
         toolRegistry: { getAllTools: () => [{}, {}, {}, {}] },
         externalMcpManager: { listServersForUi: () => [{ transport: 'stdio' }, { transport: 'http' }] },
@@ -351,16 +372,32 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
     try {
         if (missingAbort) Object.defineProperty(globalThis, 'AbortController', { configurable: true, value: undefined });
         await Plugin.prototype.runDeviceDiagnostics.call(host as never);
+        if (choice === 'close' || choice === 'unload') {
+            t.is(dialogs, 1);
+            t.deepEqual([scans, reportWrites, requests, reportSummary, notices], [0, [], 0, '', []]);
+            t.is(host.diagnosticController, null);
+            // Cancellation releases the command; a subsequent explicit save succeeds.
+            action = 'local';
+            await Plugin.prototype.runDeviceDiagnostics.call(host as never);
+            t.is(dialogs, 2);
+        }
     } finally { Object.defineProperty(globalThis, 'AbortController', abortDescriptor); }
     const reports = [...files.entries()].filter(([path]) => path.endsWith('.md'));
     t.is(reports.length, 1);
     const [path, content] = reports[0];
+    t.is(scans, 1, 'each saved report scans memory exactly once');
+    t.deepEqual(reportWrites, [path]);
+    t.is(files.get(costProbe), costContent, 'the scan is read-only');
+    t.regex(content, /\| memory.conflict.costLog \| OK \| \d+ \| 1 \|/);
+    t.true(content.includes('Files with synchronization conflict traces: 1.'));
     t.true(path.endsWith(mobile ? '-mobile.md' : '-desktop.md'));
     for (const fragment of [
         `| isMobile | OK |`, '| .custom-config |', '| plugin.startupMs | OK |', '| 1234 |',
         '| agents.count | OK |', '| tools.count | OK |', '| mcp.stdio | OK |', '| mcp.http | OK |',
         `| ${mobile ? 'disabled_mobile' : 'ready'} |`, '| openai/test-model |', '| Key set: Yes |',
-        '| model.useDeviceModels | OK |', '| model.connection | SKIPPED | 0 | No consent; no request sent |',
+        '| model.useDeviceModels | OK |',
+        action === 'connection' ? (missingAbort ? '| model.connection | SKIPPED |' : '| model.connection | ERROR |')
+            : '| model.connection | SKIPPED | 0 | No consent; no request sent |',
     ]) t.true(content.includes(fragment), fragment);
     // Fact duration is in the last column; the third measures collecting the fact.
     t.deepEqual(content.split('\n').filter(line => /^\| (startup\.|plugin.startupMs)/.test(line))
@@ -376,9 +413,9 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
     ]);
     t.regex(content, mobile ? /\| isMobile \| OK \| \d+ \| true \|/ : /\| isMobile \| OK \| \d+ \| false \|/);
     t.false(content.includes('composition-secret-123456'));
-    t.is(requests, 0);
+    t.is(requests, action === 'connection' && !missingAbort ? 1 : 0);
     t.is(host.diagnosticController, null);
-    t.regex(reportSummary, missingAbort
+    t.regex(reportSummary, missingAbort || action === 'connection'
         ? /Diagnostics: \d+ OK, 1 errors\. File: \.pkm-assistant\/diagnostics\//
         : /Diagnostics: \d+ OK, 0 errors\. File: \.pkm-assistant\/diagnostics\//);
     if (missingAbort) t.true(content.includes('| AbortController | ERROR | 0 | Unavailable |'));

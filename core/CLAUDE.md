@@ -528,6 +528,7 @@ Testy: `PluginBase.test.ts` (bajty i operacje adaptera z append i bez niego) ora
 `security/keySanitizer.test.ts` (pełna lista i dopasowanie przez prawdziwy `git check-ignore -v`
 w izolowanym katalogu tymczasowym; Git wymagany wyłącznie przez test).
 
-M2 D6 dodaje PL/EN dla sekcji śladów konfliktu pamięci, limitów i niepełnego wyniku
-oraz rozszerza opis zgody diagnostyki o lokalny przegląd przy wyborze zapisu raportu;
+M2 D6 dodaje PL/EN dla sekcji śladów konfliktu pamięci, limitów i niepełnego wyniku.
+D6b przywraca zgodę wyłącznie na test połączenia, a o lokalnym przeglądzie
+informuje osobnym akapitem `diagnostics.memory_notice`;
 reguły prywatności i zgody należą do `modules/diagnostics/CLAUDE.md`.

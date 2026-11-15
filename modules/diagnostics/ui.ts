@@ -5,33 +5,31 @@ import { log } from '../../core/utils/Logger.js';
 import type { DiagnosticReport } from './diagnostics.js';
 
 export class DiagnosticsConsentModal extends Modal {
-    private resolve: ((value: boolean) => void) | null = null;
-    private memoryApproved = false;
-    get memoryScanApproved(): boolean { return this.memoryApproved; }
-    readonly decision = new Promise<boolean>(resolve => { this.resolve = resolve; });
+    private resolve: ((value: boolean | null) => void) | null = null;
+    readonly decision = new Promise<boolean | null>(resolve => { this.resolve = resolve; });
     constructor(app: App, private readonly signal?: AbortSignal) { super(app); }
-    private readonly abort = () => { this.finish(false); };
-    private finish(value: boolean, memoryApproved = false): void {
+    private readonly abort = () => { this.finish(null); };
+    private finish(value: boolean | null): void {
         if (!this.resolve) return;
-        this.memoryApproved = memoryApproved;
         this.resolve?.(value);
         this.resolve = null;
         this.close();
     }
     onOpen(): void {
-        if (this.signal?.aborted) { this.finish(false); return; }
+        if (this.signal?.aborted) { this.finish(null); return; }
         this.signal?.addEventListener('abort', this.abort, { once: true });
         this.titleEl.setText(t('diagnostics.title'));
         this.contentEl.createEl('p', { text: t('diagnostics.consent') });
+        this.contentEl.createEl('p', { text: t('diagnostics.memory_notice') });
         const buttons = this.contentEl.createDiv({ cls: 'pkm-diagnostics-actions' });
         const decline = buttons.createEl('button', { text: t('diagnostics.without_connection') });
-        decline.onclick = () => this.finish(false, true);
+        decline.onclick = () => this.finish(false);
         const accept = buttons.createEl('button', { text: t('diagnostics.with_connection'), cls: 'mod-cta' });
-        accept.onclick = () => this.finish(true, true);
+        accept.onclick = () => this.finish(true);
     }
     onClose(): void {
         this.signal?.removeEventListener('abort', this.abort);
-        this.resolve?.(false);
+        this.resolve?.(null);
         this.resolve = null;
         this.contentEl.empty();
     }
