@@ -16,19 +16,42 @@ function fixture(t: ExecutionContext, options: Options = {}, platform = 'phone',
     Platform.isTablet = platform === 'tablet';
     setLocale(locale);
     const menus: HostMenu[] = [], inputs: HTMLInputElement[] = [];
+    const hiddenMenus: Menu[] = [];
+    const hide = Menu.prototype.hide;
+    Menu.prototype.hide = function () { hiddenMenus.push(this); return this; };
     const show = Menu.prototype.showAtMouseEvent;
     Menu.prototype.showAtMouseEvent = function () { menus.push(this as HostMenu); return this; };
     const create = globalThis.createEl;
+    // A real parent/removal boundary: the harness contains() is a constant false.
+    const bodyDescriptor = Object.getOwnPropertyDescriptor(document, 'body');
+    const body = {
+        children: new Set<HTMLElement>(),
+        appendChild(el: HTMLElement) {
+            el.remove();
+            this.children.add(el);
+            Object.defineProperty(el, 'parentNode', { configurable: true, value: this });
+            return el;
+        },
+        contains(el: HTMLElement) { return this.children.has(el); },
+    };
+    Object.defineProperty(document, 'body', { configurable: true, value: body });
     // The harness DOM has no event dispatch or attributes. Supply browser boundaries,
     // leaving the actual button handler, Menu and file intake in production code.
     const listenerCounts = new Map<HTMLElement, Set<string>>();
+    const changeCallbacks = new Map<HTMLElement, EventListenerOrEventListenerObject>();
     globalThis.createEl = ((...args: Parameters<typeof createEl>) => {
         const el = create(...args);
+        Object.defineProperty(el, 'parentNode', { configurable: true, value: null });
+        el.remove = () => {
+            body.children.delete(el);
+            Object.defineProperty(el, 'parentNode', { configurable: true, value: null });
+        };
         const events = new EventTarget();
         const listeners = new Set<string>();
         listenerCounts.set(el, listeners);
         el.addEventListener = (type: string, listener: EventListenerOrEventListenerObject | null, opts?: AddEventListenerOptions | boolean) => {
             listeners.add(type);
+            if (type === 'change' && listener) changeCallbacks.set(el, listener);
             events.addEventListener(type, listener, opts);
         };
         el.removeEventListener = (type: string, listener: EventListenerOrEventListenerObject | null, opts?: EventListenerOptions | boolean) => {
@@ -71,6 +94,10 @@ function fixture(t: ExecutionContext, options: Options = {}, platform = 'phone',
         manager.destroy();
         globalThis.createEl = create;
         Menu.prototype.showAtMouseEvent = show;
+        if (hide) Menu.prototype.hide = hide;
+        else Reflect.deleteProperty(Menu.prototype, 'hide');
+        if (bodyDescriptor) Object.defineProperty(document, 'body', bodyDescriptor);
+        else Reflect.deleteProperty(document, 'body');
         Platform.isPhone = previous.phone; Platform.isMobile = previous.mobile; Platform.isTablet = previous.tablet;
         setLocale(previous.locale);
         if (pdf === undefined) delete globalPdf.pdfjsLib;
@@ -78,7 +105,7 @@ function fixture(t: ExecutionContext, options: Options = {}, platform = 'phone',
         if (reader) Object.defineProperty(globalThis, 'FileReader', reader);
         else Reflect.deleteProperty(globalThis, 'FileReader');
     });
-    return { manager, inputs, menus, rejected, globalPdf, listenerCounts };
+    return { manager, inputs, menus, rejected, globalPdf, listenerCounts, body, hiddenMenus, changeCallbacks };
 }
 
 async function settled(read: () => boolean) {
@@ -140,17 +167,23 @@ for (const platform of ['desktop', 'tablet']) {
 
 for (const end of ['cancel', 'empty change', 'replacement', 'destroy']) {
     test.serial(`F1 picker cleanup: ${end} removes listeners and prevents stale file intake`, async t => {
-        const { manager, inputs, menus, listenerCounts } = fixture(t);
+        const { manager, inputs, menus, listenerCounts, body } = fixture(t);
         manager.getAttachButton().click();
         menus[0].items[2].callback();
         const old = inputs[0];
         t.deepEqual([...listenerCounts.get(old)!].sort(), ['cancel', 'change']);
+        t.is(old.parentNode === null, true);
+        // Even if a host attaches the picker, cleanup must detach it.
+        body.appendChild(old);
+        t.is(body.contains(old), true);
+        t.is(Object.is(old.parentNode, body), true);
         if (end === 'cancel') old.dispatchEvent(new Event('cancel'));
         if (end === 'empty change') select(old, []);
         if (end === 'replacement') menus[0].items[2].callback();
         if (end === 'destroy') manager.destroy();
         t.is(listenerCounts.get(old)?.size, 0);
-        t.false(document.body.contains(old));
+        t.is(old.parentNode === null, true);
+        t.deepEqual([...body.children], []);
         select(old, [new File(['stale'], 'stale.txt')]);
         // New intake still works after cancellation/replacement. For destroy, use a new manager.
         const next = end === 'destroy' ? new AttachmentManager(createDiv(), {} as PluginApi) : manager;
@@ -233,3 +266,79 @@ for (const platform of ['desktop', 'tablet']) {
         ]);
     });
 }
+
+
+test.serial('F1b destroy closes the menu and ignores its retained callbacks', async t => {
+    const { manager, inputs, menus, hiddenMenus } = fixture(t);
+    const button = manager.getAttachButton();
+    button.click();
+    manager.destroy();
+    t.is(hiddenMenus[0], menus[0]);
+    const errors: unknown[] = [];
+    for (const item of menus[0].items) {
+        await Promise.resolve().then(() => item.callback()).catch(error => errors.push(error));
+    }
+    button.click();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    t.deepEqual({ attachments: manager.snapshotAttachments(), inputs: inputs.length,
+        menus: menus.length, errors }, { attachments: [], inputs: 0, menus: 1, errors: [] });
+});
+
+test.serial('F1b destroy ignores a pending file read and finishes without rejection', async t => {
+    let finish!: (value: string) => void;
+    const read = new Promise<string>(resolve => { finish = resolve; });
+    const changes: string[] = [];
+    const { manager, rejected } = fixture(t, { onChange: () => changes.push('changed') });
+    const file = new File(['pending'], 'pending.txt');
+    file.text = () => read;
+    const intake = manager._processFileList([file, new File(['next'], 'next.txt')]);
+    manager.destroy();
+    finish('late text');
+    const outcome = await intake.then(() => 'completed', () => 'rejected');
+    t.deepEqual({ outcome, attachments: manager.snapshotAttachments(), changes, rejected },
+        { outcome: 'completed', attachments: [], changes: [], rejected: [] });
+});
+
+for (const platform of ['phone', 'desktop', 'tablet']) {
+    test.serial(`F1b ${platform}: conflicting MIME and extension retain literal classification`, async t => {
+        const { manager, rejected } = fixture(t, {}, platform);
+        await manager._processFileList([
+            new File(['text'], 'code.ts', { type: 'video/mp2t' }),
+            new File(['photo'], 'note.md', { type: 'image/jpeg' }),
+            new File(['note'], 'plain.md'),
+            new File(['svg'], 'drawing.svg', { type: 'image/svg+xml' }),
+            new File(['photo'], 'camera', { type: 'image/jpeg' }),
+            new File(['photo'], 'camera.heic', { type: 'image/heic' }),
+        ]);
+        const expected = [
+            ['text', 'code.ts', 'text', 'video/mp2t'],
+            ['image', 'note.md', 'cGhvdG8=', 'image/jpeg'],
+            ['text', 'plain.md', 'note', 'text/plain'],
+            ['image', 'drawing.svg', 'c3Zn', 'image/svg+xml'],
+            ['image', 'camera', 'cGhvdG8=', 'image/jpeg'],
+        ];
+        if (platform !== 'phone') expected.push(['image', 'camera.heic', 'cGhvdG8=', 'image/heic']);
+        t.deepEqual(manager.snapshotAttachments().map(a => [a.type, a.name, a.content, a.mimeType]), expected);
+        t.deepEqual(rejected, platform === 'phone'
+            ? ['Unsupported file type: camera.heic (.heic, mime: image/heic)'] : []);
+    });
+}
+
+
+test.serial('F1b destroyed picker ignores a callback already retained by the host', async t => {
+    const { manager, inputs, menus, changeCallbacks, listenerCounts } = fixture(t);
+    manager.getAttachButton().click();
+    menus[0].items[2].callback();
+    const input = inputs[0];
+    const callback = changeCallbacks.get(input)!;
+    manager.destroy();
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['late'], 'late.txt')] });
+    const errors: unknown[] = [];
+    await Promise.resolve().then(() => {
+        if (typeof callback === 'function') callback(new Event('change'));
+        else callback.handleEvent(new Event('change'));
+    }).catch(error => errors.push(error));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    t.deepEqual({ attachments: manager.snapshotAttachments(), errors, listeners: listenerCounts.get(input)?.size },
+        { attachments: [], errors: [], listeners: 0 });
+});

@@ -1,4 +1,5 @@
 import { Menu, Platform } from 'obsidian';
+import * as obsidian from 'obsidian';
 import { log } from '../../core/utils/Logger.js';
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
@@ -51,7 +52,7 @@ interface AttachmentManagerOptions {
     loadPdfJs?: () => Promise<PdfJsLib | null>;
 }
 
-type FileIntake = { kind: 'added' } | { kind: 'rejected'; message: string };
+type FileIntake = { kind: 'cancelled' } | { kind: 'added' } | { kind: 'rejected'; message: string };
 
 /** Wejście `addTextAttachment` - tylko tekst, bez `File`/`Blob` (patrz JSDoc metody). */
 interface AddTextAttachmentInput {
@@ -135,6 +136,8 @@ export class AttachmentManager {
     declare _onDrop: (e: DragEvent) => void;
     declare _onPaste: ((e: ClipboardEvent) => void) | undefined;
     private readonly pdfJsLoader: () => Promise<PdfJsLib | null>;
+    private destroyed = false;
+    private attachmentMenu: Menu | null = null;
     private disposeFilePicker: (() => void) | null = null;
 
     /**
@@ -153,8 +156,7 @@ export class AttachmentManager {
         this.dropZone = options.dropZone || container;
         this.pasteTarget = options.pasteTarget || null;
         this.pdfJsLoader = options.loadPdfJs ?? (async () => {
-            // Namespace lookup also works with older hosts/test stubs lacking this API.
-            const obsidian = await import('obsidian');
+            // Static namespace uses the host's CommonJS require; older hosts may lack this API.
             if (typeof obsidian.loadPdfJs !== 'function') return null;
             // Obsidian declares Promise<any>; validate the library entry point here.
             const library: unknown = await obsidian.loadPdfJs();
@@ -193,11 +195,14 @@ export class AttachmentManager {
         setSvg(this.attachButton, UiIcons.paperclip(16));
         this.attachButton.title = t('attach.add_attachment');
         this.attachButton.addEventListener('click', event => {
+            if (this.destroyed) return;
             if (!Platform.isPhone) {
                 this._openFilePicker();
                 return;
             }
+            this.attachmentMenu?.hide();
             const menu = new Menu();
+            this.attachmentMenu = menu;
             menu.addItem(item => item.setTitle(t('attach.take_photo')).setIcon('camera')
                 .onClick(() => this._openFilePicker('camera')));
             menu.addItem(item => item.setTitle(t('attach.from_gallery')).setIcon('image')
@@ -328,6 +333,7 @@ export class AttachmentManager {
     // ═══════════════════════════════════════════
 
     _openFilePicker(source: 'file' | 'camera' | 'gallery' = 'file'): void {
+        if (this.destroyed) return;
         this.disposeFilePicker?.();
         const input = createEl('input');
         input.type = 'file';
@@ -346,6 +352,7 @@ export class AttachmentManager {
             if (this.disposeFilePicker === cleanup) this.disposeFilePicker = null;
         };
         const onChange = () => {
+            if (this.destroyed) return;
             const files = input.files ? Array.from(input.files) : null;
             cleanup();
             if (files) void this._processFileList(files);
@@ -452,8 +459,10 @@ export class AttachmentManager {
     // ═══════════════════════════════════════════
 
     async _processFileList(files: FileList | File[]): Promise<void> {
+        if (this.destroyed) return;
         const rejections: string[] = [];
         for (const file of files) {
+            if (this.destroyed) return;
             if (this.attachments.length >= MAX_ATTACHMENTS) {
                 const message = t('attach.limit_reached', { max: MAX_ATTACHMENTS });
                 log.warn('Attachments', message);
@@ -470,12 +479,14 @@ export class AttachmentManager {
             }
         }
 
+        if (this.destroyed) return;
         this._renderChips();
         this.onChange(this.attachments);
         for (const message of rejections) this.onReject(message);
     }
 
     async _processFile(file: File): Promise<FileIntake> {
+        if (this.destroyed) return { kind: 'cancelled' };
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         const name = file.name;
         const mime = (file.type || '').toLowerCase();
@@ -504,6 +515,7 @@ export class AttachmentManager {
             const optimized = await this._optimizeImage(file);
             const base64 = await this._fileToBase64(optimized.file);
             const mimeType = optimized.mimeType || mime || `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+            if (this.destroyed) return { kind: 'cancelled' };
             this.attachments.push({
                 type: 'image',
                 name: name || `image.${this._mimeToExt(mimeType)}`,
@@ -514,6 +526,7 @@ export class AttachmentManager {
             return { kind: 'added' };
         } else if (isPdf) {
             const text = await this._extractPdfText(file);
+            if (this.destroyed) return { kind: 'cancelled' };
             this.attachments.push({
                 type: 'pdf',
                 name,
@@ -528,6 +541,7 @@ export class AttachmentManager {
                 return { kind: 'rejected', message: t('attach.file_too_large', { name, size: this._formatSize(file.size) }) };
             }
             const text = await file.text();
+            if (this.destroyed) return { kind: 'cancelled' };
             this.attachments.push({
                 type: 'text',
                 name,
@@ -784,6 +798,9 @@ export class AttachmentManager {
      * Cleanup listeners and DOM.
      */
     destroy(): void {
+        this.destroyed = true;
+        this.attachmentMenu?.hide();
+        this.attachmentMenu = null;
         this.disposeFilePicker?.();
         // Drag & drop — registered on document with capture: true
         document.removeEventListener('dragenter', this._onDragEnter, true);

@@ -1,3 +1,4 @@
+import { Notice } from 'obsidian';
 /**
  * Zaplecze → zakładka „Szablony subów".
  *
@@ -208,7 +209,6 @@ function renderTemplateCard(list: HTMLElement, tpl: SubAgentTemplateRecord, { pl
             const outcome = await guardTemplateUse(() => useTemplateAtAgent(tpl, agentName, { plugin, store, nav }));
             if (outcome.ok) return;
             log.error('SubAgentsBackstageTab', `useTemplateAtAgent(${tpl.slug} → ${agentName}) padło:`, outcome.error);
-            const { Notice } = await import('obsidian');
             new Notice(t(outcome.messageKey as string, outcome.params));
         })();
     });
@@ -244,7 +244,6 @@ function renderTemplateCard(list: HTMLElement, tpl: SubAgentTemplateRecord, { pl
             // kafel znikałby z widoku po `nav.refresh()`, a szablon zostawałby na dysku.
             const outcome = resolveDeleteOutcome(await store.delete(tpl.slug), tpl.name);
             if (!outcome.ok) {
-                const { Notice } = await import('obsidian');
                 new Notice(t(outcome.messageKey, outcome.params));
                 return;
             }
@@ -270,7 +269,6 @@ async function setGlobalSub(plugin: SubAgentsPlugin, nav: SidebarNav | null, slu
     pkm.globalSubTemplate = slug;
     await plugin.env?.settingsStore?.save?.();
     if (!silent) {
-        const { Notice } = await import('obsidian');
         new Notice(t('backstage.global_sub_set', { name: label }));
     }
     nav?.refresh?.();
@@ -278,7 +276,6 @@ async function setGlobalSub(plugin: SubAgentsPlugin, nav: SidebarNav | null, slu
 
 /** Odlej kopię szablonu suba do Ekipy wybranego agenta. */
 async function useTemplateAtAgent(tpl: SubAgentTemplateRecord, agentName: string, { plugin, store, nav }: { plugin: SubAgentsPlugin; store: SubAgentTemplateStore; nav: SidebarNav }): Promise<void> {
-    const { Notice } = await import('obsidian');
     const agentManager = plugin.agentManager;
     const agent = agentManager?.getAgent?.(agentName);
     if (!agent) {

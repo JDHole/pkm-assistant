@@ -267,6 +267,8 @@ zostaje jako TODO dla kolejnej jednostki.
 
 ## Gotchas
 
+- Dynamiczny import `obsidian` nie działa w paczce CommonJS pluginu; symbole hosta importujemy statycznie, a strażnik AST w `modules/ui-components/hostImports.test.ts` zabrania dynamicznych importów `obsidian` i `electron` w źródłach produkcyjnych.
+
 - `ToolCallDisplay.ts` ma wpis `sub_agent` z ikoną robota. Nagłówek pokazuje etykietę akcji i nazwę odczytaną z poprawnego `sub_id`, a skrót wejścia etykietę akcji; nie pokazują treści `task` ani `text`. Stary lub niepoprawny identyfikator nie daje nazwy.
 
 - ⚠️ **`ToolCallDisplay.ts` jest blisko monolitu** - próg czytelności jeszcze nie przekroczony, ale plik rośnie z każdym nowym narzędziem (katalog `TOOL_INFO` = jeden wpis per narzędzie). Zanim dorzucisz kolejną porcję, rozważ wyniesienie katalogu do osobnego pliku (`toolCatalog.ts`) - sam render bloku jest wtedy krótki.
@@ -370,9 +372,11 @@ galeria `accept="image/*"` z `multiple`; Plik zachowuje dotychczasową listę
 rozszerzeń. Desktop i tablet od razu otwierają dotychczasowy picker.
 Wszystkie wejścia trafiają do `_processFileList`. Pole nie jest dołączane do DOM;
 `change`, `cancel`, następny picker i `destroy()` usuwają jego nasłuchy i referencję.
-Nie ma nasłuchów okna ani zgadywania anulowania timerem. Wymaga to zdarzenia
-`cancel` z WebView; starszy host bez tego zdarzenia zwolni referencję przy następnym
-wyborze lub zamknięciu widoku (pole nadal nie wisi w DOM).
+Nie ma nasłuchów okna ani zgadywania anulowania timerem. Starszy WebView bez
+zdarzenia `cancel` zostawia jedno odłączone pole i dwa nasłuchy do następnego
+otwarcia albo `destroy()`. `destroy()` zamyka również otwarte menu; jego zapisane
+callbacki, callback pola i wynik odczytu pliku po zniszczeniu niczego nie dodają
+ani nie renderują. Ponowny klik spinacza zamyka poprzednie menu.
 
 Rozpoznawanie obrazów nadal używa rozszerzenia lub MIME, więc JPEG/PNG/WebP/GIF
 bez znanego rozszerzenia są przyjmowane. Tylko telefon odrzuca HEIC/HEIF istniejącym
@@ -382,13 +386,18 @@ rozszerzeniem HEIC/HEIF, np. gdy aparat faktycznie zwróci JPEG. Nie ma konwersj
 Desktop/tablet zachowują wcześniejszą akceptację `image/*`.
 
 Na obu platformach `_loadPdfJs()` najpierw używa `window.pdfjsLib`, a przy jego
-braku publicznego `loadPdfJs()` z `obsidian`, odczytywanego leniwie z namespace.
+braku publicznego `loadPdfJs()` ze statycznie importowanego namespace `obsidian`.
+Obecność API sprawdzana jest dopiero przy użyciu: starszy host bez eksportu daje
+fallback. Natywny dynamiczny import nie korzysta z `require` dostarczonego przez
+hosta paczce CommonJS, dlatego nie potrafi znaleźć modułu `obsidian`.
 Opcja konstruktora `loadPdfJs?: () => Promise<PdfJsLib | null>` pozwala testować
 bez prawdziwego hosta. Brak API, null lub wyjątek ładowarki daje dotychczasowy
 `attach.pdf_attached`; wyjątek ma log. Błędy samej ekstrakcji nadal dają
 `attach.pdf_extract_failed`. Limit 50 stron i składanie treści nie zmieniły się.
-Atrapa Obsidiana w harnessie nie eksportuje `loadPdfJs`; F1 nie wymaga jej zmiany,
-bo testuje sukces przez wstrzyknięcie, a brak API przez rzeczywistą atrapę.
+Atrapa Obsidiana w harnessie nie eksportuje `loadPdfJs`; test F1b uzupełnia lokalną
+kopię jej eksportów bez zmiany harnessu i wykonuje domyślną ładowarkę w wrapperze
+CommonJS z `require` hosta. Sprawdza wywołanie API i literalny tekst PDF w wiadomości;
+pozostałe testy zachowują pokrycie braku API oraz wstrzykiwanej ładowarki.
 
 Limity pozostają: obraz do 10 MB, optymalizacja dopiero powyżej 1 MB, dłuższy bok
 1568 px, JPEG 0,85. Z kodu: 4000x3000 px przejdzie do 1568x1176, ale najpierw
@@ -406,3 +415,10 @@ parametry trzech pól, wspólne przetwarzanie, sprzątanie i ponowny wybór, śc
 desktop/tablet, tekst PDF i fallbacki, pierwszeństwo globalu, limit stron oraz MIME
 zdjęć i odmowę HEIC/HEIF. Testy używają rzeczywistego EventTarget i kontrolowanego
 FileReader na granicy środowiska, nie zastępują metod AttachmentManager.
+
+F1b: `hostImports.test.ts` wykonuje także kliknięcie Użyj u agenta dla skilla
+i suba, rzeczywisty zapis kopii przez adapter, przypisanie i literalny Notice.
+Strażnik AST obejmuje pięć drzew produkcyjnych, pomijając testy, komentarze
+i importy typów. Test sprzątania pickera ma własną granicę DOM śledzącą rodzica
+i usuwanie; mutacja usuwająca `input.remove()` powoduje jego porażkę. Macierz
+MIME/rozszerzenia sprawdza telefon, desktop i tablet bez zmiany klasyfikacji.

@@ -1,3 +1,4 @@
+import { Notice } from 'obsidian';
 /**
  * `PluginRuntime` — podłoga runtime'u pluginu.
  *
@@ -419,10 +420,9 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     private async _zaladujNotice(): Promise<void> {
         if (this._noticeCtor) return;
         try {
-            const mod = await import('obsidian');
-            this._noticeCtor = mod.Notice;
+            this._noticeCtor = Notice;
         } catch {
-            // Goły Node — powiadomień po prostu nie ma i nie jest to błąd.
+            // Host bez natywnego UI: powiadomienia pozostają wyłączone.
         }
     }
 }

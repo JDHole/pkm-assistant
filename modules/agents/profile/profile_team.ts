@@ -16,7 +16,7 @@ import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { renderToggle } from './profile_helpers.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { t } from '../../../core/i18n/index.js';
-import type { App } from 'obsidian';
+import { Notice, type App } from 'obsidian';
 import type { ProfileCtx } from './profile_types.js';
 import type { AgentSubAgentAssignment } from '../Agent.js';
 import type { SubAgentData, SubAgentLoader } from '../../sub-agents/index.js';
@@ -249,7 +249,6 @@ function _renderAddFromTemplate(ctx: ProfileCtx, el: HTMLElement) {
         opt.addEventListener('click', () => {
             void (async () => {
                 dropdown.classList.add('cs-collapsed');
-                const { Notice } = await import('obsidian');
                 const result = await store.instantiate(tpl.slug, formData.name, {
                     subAgentLoader: plugin.agentManager.subAgentLoader,
                 });

@@ -1,3 +1,4 @@
+import { Notice } from 'obsidian';
 /**
  * Zaplecze → zakładka „Szablony skilli".
  *
@@ -164,7 +165,6 @@ function renderTemplateCard(list: HTMLElement, tpl: SkillTemplateRecord, { plugi
  * Zapis profilu agenta idzie przez AgentManager (jedyny owner), żeby YAML nie rozjechał się z cache.
  */
 async function useTemplateAtAgent(tpl: SkillTemplateRecord, agentName: string, { plugin, store, nav }: { plugin: SkillsPlugin; store: SkillTemplateStore; nav: SidebarNav }): Promise<void> {
-    const { Notice } = await import('obsidian');
     const agentManager = plugin.agentManager;
     const agent = agentManager?.getAgent?.(agentName);
     if (!agent) {

@@ -236,6 +236,8 @@ MA). Worker jest read-only; raport składa agent główny.
 
 ## Gotchas
 
+- Dynamiczny import `obsidian` nie działa w paczce CommonJS pluginu; symbole hosta importujemy statycznie, a strażnik AST w `modules/ui-components/hostImports.test.ts` zabrania dynamicznych importów `obsidian` i `electron` w źródłach produkcyjnych.
+
 - ⚠️ **Cache klucz to slug, ale `getSkill(skillName)` próbuje najpierw cache.get(skillName)** - działa tylko gdy `skillName === slug`. W innym przypadku fallback przez `Array.from(...).find()`. Niespójność semantyki klucza.
 - ⚠️ **`substituteVariables` ma jedno źródło** - `modules/chat/chat/chat_ui.ts` importuje ją z `modules/skills/index.js` (kanon `SkillVariables.ts`). Nie duplikować lokalnie.
 - ⚠️ **Skan pełny, nie watcher - koszt rośnie z liczbą skilli, nie z rozmiarem vaulta.** Skoro nie ma `watch()` (gotcha wyżej), nie ma co „lagować" w tle. `loadAllSkills()` robi `list('.pkm-assistant/skills/')`, po czym dla KAŻDEGO folderu osobno sprawdza istnienie i czyta `SKILL.md` (`_loadSkillFromFolder`) - zakres na twardo ograniczony do folderu skilli, nie cały vault. Ten pełny skan odpala się tylko w dwóch momentach: raz przy boot pluginu (`AgentManager.initialize`) i raz po KAŻDYM zapisie narzędziem `write`/`vault_write` pod `.pkm-assistant/skills/**` (`chat_streaming.ts` → `agentManager.reloadSkills()`). User z bardzo dużą liczbą skilli poczuje krótkie zamrożenie przy KAŻDYM takim zapisie (skan jest `await`-owany), nie ciągłe obciążenie w tle.

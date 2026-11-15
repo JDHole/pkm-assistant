@@ -189,6 +189,8 @@ Reguła bez zmian dla nowego kodu: core jest u podłogi, moduły stoją na nim.
 
 ## Gotchas (miny)
 
+- Dynamiczny import `obsidian` nie działa w paczce CommonJS pluginu; symbole hosta importujemy statycznie, a strażnik AST w `modules/ui-components/hostImports.test.ts` zabrania dynamicznych importów `obsidian` i `electron` w źródłach produkcyjnych.
+
 ### 1. Dependency injection obowiązuje
 
 `log`, `AccessGuard`, `PermissionSystem` to singletony (lub quasi-singletony). Nie instancjonuj ich ponownie w modułach. Importuj z `core/index.js` i używaj tego samego obiektu.

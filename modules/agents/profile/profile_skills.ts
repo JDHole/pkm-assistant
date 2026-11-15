@@ -15,7 +15,7 @@
 import { IconGenerator, UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { showSkillOverrideForm } from './profile_skills_overrides.js';
 import { t } from '../../../core/i18n/index.js';
-import type { App } from 'obsidian';
+import { Notice, type App } from 'obsidian';
 import type { ProfileCtx, AgentsPlugin } from './profile_types.js';
 import type { AgentSkillAssignment as SkillAssignment } from '../Agent.js';
 import type { SkillData as Skill, SkillInput } from '../../skills/index.js';
@@ -268,7 +268,6 @@ function _renderSkillFromTemplate(ctx: ProfileCtx, el: HTMLElement) {
         opt.addEventListener('click', () => {
             void (async () => {
                 dropdown.classList.add('cs-collapsed');
-                const { Notice } = await import('obsidian');
                 const result = await store.instantiate(tpl.slug, { skillLoader: plugin.agentManager.skillLoader });
                 if (!result?.success) {
                     new Notice(t('backstage.template_use_failed', { error: result?.error || '?' }));

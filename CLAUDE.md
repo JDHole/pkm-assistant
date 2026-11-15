@@ -20,6 +20,8 @@ Stability comes before new features - the plugin is headed for the public Obsidi
 - `CLAUDE.md` - module documentation: what it does, how, and its gotchas.
 - Everything else - private internals.
 
+Dynamiczny import `obsidian` nie działa w paczce CommonJS pluginu; używamy importów statycznych, a `modules/ui-components/hostImports.test.ts` pilnuje źródeł przed dynamicznym importem `obsidian` lub `electron`.
+
 **Golden rule:** outside a module, you may only import from `modules/<name>/index.js`. Never from its internals. Inside a module, files may import each other freely.
 
 **The golden rule also covers `core/`** - its door is `core/index.ts`. Official exceptions, allowed to be deep-imported from anywhere: `core/i18n/index.ts` and `core/utils/Logger.ts` (global utilities with a very large number of importers). The second exception is a single file: `src/main.ts`, the composition root, deep-imports a handful of core Obsidian-facing files (`PluginBase.ts`, `runtime/PluginRuntime.ts`, `runtime/settingsArmor.ts`, `utils/obsidianNav.ts`, `security/MasterPasswordModal.ts`) because they cannot be added to the barrel: `core/index.ts` has to load in plain Node, and the AVA tests have no mock for `obsidian`. Import specifiers still deliberately end in `.js` and point at the physical `.ts` files.

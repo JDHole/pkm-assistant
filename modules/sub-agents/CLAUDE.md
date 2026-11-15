@@ -386,6 +386,8 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
 
 ## Gotchas
 
+- Dynamiczny import `obsidian` nie działa w paczce CommonJS pluginu; symbole hosta importujemy statycznie, a strażnik AST w `modules/ui-components/hostImports.test.ts` zabrania dynamicznych importów `obsidian` i `electron` w źródłach produkcyjnych.
+
 - ⚠️ **Zasada zamrożenia stanu tury: bieg suba NIE CZYTA globalnych luster pluginu.**
   Delegacja z głównego czatu jest zawsze w tle, więc bieg z definicji przeżywa turę i dożywa
   chwili, w której user przełączył zakładkę. `agentManager.activeAgent`, `getActiveMemory()` i

@@ -182,6 +182,8 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
 
 ## Gotchas
 
+- Dynamiczny import `obsidian` nie działa w paczce CommonJS pluginu; symbole hosta importujemy statycznie, a strażnik AST w `modules/ui-components/hostImports.test.ts` zabrania dynamicznych importów `obsidian` i `electron` w źródłach produkcyjnych.
+
 - ⚠️ **Jaskier nie może być usunięty** (systemowy). UI ukrywa „delete agent" dla niego.
 - ⚠️ **`AgentLoader` watch może triggerować podwójne load** - jest debounce, ale uważaj przy zmianach w tej ścieżce.
 - ⚠️ **`activeAgent` w `agentManager` musi być persistowany** - restart Obsidiana = restore z `data.json`.
