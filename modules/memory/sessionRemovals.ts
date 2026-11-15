@@ -1,12 +1,12 @@
 import { SESSION_BLOCK_BOUNDARY } from './activeSessionFormat.js';
 
 /** RAM-only read receipt. Never serialized into vault files or model messages. */
-export interface SessionRemovalContext { readonly length: number; readonly hash: number }
+export interface SessionRemovalContext { readonly length: number; readonly hash: number; readonly hash2: number }
 const reads = new WeakMap<object, SessionRemovalContext>();
 
 export function rememberSessionRead(result: object, messages: readonly object[], source: string): void {
     const body = eventBody(source);
-    const context = { length: body.length, hash: fingerprint(body, body.length) };
+    const context = fingerprint(body, body.length);
     reads.set(result, context);
     reads.set(messages, context);
 }
@@ -27,11 +27,16 @@ function eventBody(source: string): string {
     return start < 0 ? '' : source.slice(start);
 }
 
-/** FNV-1a over UTF-16 code units; synchronous and independent of host APIs. */
-function fingerprint(text: string, length: number): number {
+/** FNV-1a and a separate multiply-add hash over UTF-16, in one synchronous pass. */
+function fingerprint(text: string, length: number): SessionRemovalContext {
     let hash = 0x811c9dc5;
-    for (let i = 0; i < length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
-    return hash >>> 0;
+    let hash2 = 5381;
+    for (let i = 0; i < length; i++) {
+        const code = text.charCodeAt(i);
+        hash = Math.imul(hash ^ code, 0x01000193);
+        hash2 = (Math.imul(hash2, 33) + code) | 0;
+    }
+    return { length, hash: hash >>> 0, hash2: hash2 >>> 0 };
 }
 
 /** Positional identities are safe only while the entire observed log is still a
@@ -44,8 +49,9 @@ export function safeRemovalRanges(source: string, visibleIds: readonly string[],
     const references = [...removed, ...ranges.flatMap(range => [range.from, range.to])];
     if (references.some(id => /^legacy:\d+$/.test(id))) {
         const current = eventBody(source);
-        if (!context?.length || current.length < context.length
-            || fingerprint(current, context.length) !== context.hash) throw new SessionRemovalConflictError();
+        if (!context?.length || current.length < context.length) throw new SessionRemovalConflictError();
+        const prefix = fingerprint(current, context.length);
+        if (prefix.hash !== context.hash || prefix.hash2 !== context.hash2) throw new SessionRemovalConflictError();
     }
     return ranges.filter(range => {
         const from = visibleIds.indexOf(range.from), to = visibleIds.lastIndexOf(range.to);

@@ -1385,6 +1385,61 @@ cichy częściowy zapis, błąd odczytu kontrolnego i dwie awarie odtworzenia.
 `SESSION_BLOCK_BOUNDARY` z `activeSessionFormat.ts`, co parser (również bloki legacy
 bez poprawnego czasu). Escapowanie `## ` przez pisarza chroni treść pól.
 
+**D7e:** kompletność dosłownych bloków nie dowodzi braku konfliktu: zdiff3 przy
+remisie czasu może wyciągnąć wspólny nagłówek i końcowe seq poza blok konfliktu.
+Świadek nie jest wdrożony; 18 kontrprzykładów w `sessionConflict.strict.test.ts`
+pozostaje strażnikami `unresolved`.
+
+W skanerze zmieniono tylko porzucenie oczekującego otwarcia na końcu pliku:
+ustawia `malformed`, ale nie `malformedStructural`. Bez innego dowodu struktury
+wynik to `not-applicable`; przy innym poprawnym bloku strukturalnym nadal odmowa.
+Prawdziwy git zamyka blok wierszem zamknięcia; otwarcie z pytania użytkownika
+może natomiast czekać do EOF także po kolejnych pełnych zdarzeniach. Minimalna
+reprodukcja z samym `<<<<<<< HEAD`, odpowiedzią, dwiema dalszymi turami, save i
+archive przechodzi z zachowaniem bajtów i uporządkowanego I/O względem kontroli.
+
+**Punkt 2 propozycji D7e odrzucony na pomiarze, zgodnie z warunkiem paczki.**
+Nie ograniczamy `malformedStructural` przy nowym otwarciu do bloków, które już
+widziały separator. Pełny przykład po naszej stronie rzeczywistego scalenia
+zmieniał wtedy `unresolved` na `not-applicable`: 6/48 reprodukcji literalnych
+znaczników (merge/diff3/zdiff3, LF/CRLF, obie strony), zero zmian na `merged`.
+Układ: prawdziwe otwarcie, nagłówek zdarzenia A, content z pełnym przykładem,
+prawdziwy separator, nagłówek zdarzenia B, prawdziwe zamknięcie, wspólne seq.
+Literalne otwarcie porzuca prawdziwy blok PRZED jego separatorem, mimo że ten
+blok widział już nagłówek A. Literalny przykład jest niestrukturalny, prawdziwe
+zamknięcie zostaje luźne; bez zapamiętanej struktury skaner uznałby konflikt za
+zwykłą treść. Oryginalny warunek przy nowym otwarciu pozostaje nietknięty.
+
+`sessionConflict.healthy.test.ts` buduje 30 syntetycznych wariantów: native/fallback,
+live/frozen, z id/bez, LF/CRLF (nagłówek i payload; pisarz dopisuje własne LF).
+Z 480 przebiegów 352 kończą trzy tury, save i archive, a 128 odmawia bez zmiany
+pliku. Każdy dopisek ma niezależny literalny wzorzec bajtów, odczyt potwierdza
+wiadomości, a kontrola z neutralnymi znakami tej samej długości porównuje wszystkie
+pliki i uporządkowane operacje, także argumenty write/append i mtime. Osobny pomiar
+z pisarzem kontrolnym z `3b0a672` potwierdza zgodność tego I/O i bajtów. Archive
+zachowuje dotychczasową konwersję do transkryptu LF. To pomiar w Node, nie na telefonie.
+
+Osiem nadal odmawianych zdrowych wariantów (każdy w 16 konfiguracjach) ma poniższe
+payloady pierwszych zdarzeń. `O` = `<<<<<<< HEAD`, `S` = `=======`, `C` =
+`>>>>>>> branch`, `E` = `O\nLeft\nS\nRight\nC`, `fence(x)` = ogrodzenie diff.
+Kolejne tury zawierają zwykłe pytania i odpowiedzi.
+
+| Wariant | User | Assistant | Tool |
+|---|---|---|---|
+| opening then example | O | E | Wynik |
+| opening then tool example | O | Odpowiedź | E |
+| opening then closing | O | C | Wynik |
+| opening then tool closing | O | Odpowiedź | C |
+| three-message pseudo-block | O | S | C |
+| separator then new opening | O\nLeft\nS | O | Wynik |
+| fenced pseudo-block | fence(O) | fence(S) | fence(C) |
+| two openings | O | O | Wynik |
+
+Legacy bez seq: pełny przykład w jednym zdarzeniu nadal daje `not-applicable`;
+samo otwarcie i następne zdarzenie teraz także daje `not-applicable` dzięki EOF;
+otwarcie i zamknięcie w różnych zdarzeniach nadal daje `unresolved`.
+Nie zmieniamy formatu, pisarzy, I/O ani zasad kopii. Nie proponujemy kolejnego świadka.
+
 D7c zastępuje heurystykę pól/ID z D7b następującymi regułami:
 
 - Jeden przebieg wierszy zapisuje granice rozłącznych bloków. Otwarcie `<<<<<<<`,
@@ -1416,7 +1471,8 @@ D7c zastępuje heurystykę pól/ID z D7b następującymi regułami:
   Bez ciągu `<<<<<<<` rozpoznawanie kończy się na `includes`, jak przed D7c.
 
 **Uzasadnione odstępstwo od B z paczki:** niepoprawny blok zawierający strukturę
-również daje `unresolved`, nawet bez innego, poprawnego bloku strukturalnego.
+również daje `unresolved`, nawet bez innego, poprawnego bloku strukturalnego,
+z wyjątkiem porzucenia oczekującego otwarcia na EOF opisanego w D7e.
 Pomiar `sessionConflict.strict.test.ts`: prawdziwy `git merge-file` z dopiskiem
 `before`, literalnym otwarciem/separatorem/pełnym przykładem i `after`, dla
 merge/diff3/zdiff3 oraz LF/CRLF, daje 18 takich przypadków. Dosłowne B zwracało
@@ -1451,7 +1507,8 @@ Tak powstały rozbieżny numer <= maksimum prefiksu nadal daje odmowę: nie ma d
 bezpiecznej kontynuacji, a rozluźnienie tej granicy osłabiłoby rozpoznawanie D7c.
 D7d nie zmienia pisarzy, cache ani I/O zdrowych plików.
 
-**Granice odmowy:** literalny znacznik lub `=======` w rozchodzącej się wiadomości,
+**Granice odmowy:** literalny znacznik lub `=======` w strukturalnym konflikcie
+rozchodzących się wiadomości,
 zagnieżdżony przykład, wspólny przykład o tych samych etykietach co merge,
 przykład o innych etykietach po rozbieżności, niepełne zdarzenie i niezgodny
 prefiks dają `unresolved`. Remis czasu może zostawić wspólny nagłówek przed
@@ -1461,7 +1518,15 @@ wartości pól, bez żadnej struktury, pozostaje `not-applicable` według B: nie
 go odróżnić od zdrowej rozmowy o gicie. Odmowa zostawia plik nietknięty i blokuje
 dalszy zapis; użytkownik zaczyna nową rozmowę. Oryginalny przykład o INNYCH
 etykietach we wspólnej wiadomości, również bez ID, jest teraz zachowany przy
-prawdziwym konflikcie późniejszych dopisków.
+prawdziwym konflikcie późniejszych dopisków. Zdrowe pseudo-bloki obejmujące kilka
+wiadomości nadal odmawiają: otwarcie/separator/zamknięcie, otwarcie/późniejsze
+zamknięcie oraz otwarcie/separator/kolejne otwarcie. Pozostawienie punktu 2 bez
+zmiany utrzymuje także odmowę otwarcie/późniejszy pełny przykład i dwóch otwarć.
+Znane przepuszczenie jak przed D7: remis czasu i literalne otwarcie po naszej
+stronie, bez innego bloku strukturalnego, może dać `not-applicable` (zmierzone
+merge i zdiff3, LF/CRLF; diff3 w tej reprodukcji nadal odmawia). Również rzeczywiście
+ucięty plik bez końcowego zamknięcia i bez innego dowodu struktury może zostać
+uznany za treść; EOF nie jest dowodem zdrowia ani pełnej synchronizacji.
 
 Unia bloków usuwa tylko bajtowo identyczne kopie po przeciwnych stronach; powtórzenia
 wewnątrz jednej strony zostają (maksimum liczności z obu stron). Bloki nie są
@@ -1493,11 +1558,16 @@ adapter. Dla `legacy:N` potrzebny jest dowód, że odczytany przez okno event-lo
 nadal jest prefiksem bieżącego logu (frontmatter pomijamy, dopiski na końcu są
 dozwolone). D7c rejestruje w WeakMap wyniku i tablicy wiadomości wyłącznie długość
 części zdarzeń w jednostkach UTF-16 i 32-bitowy FNV-1a po tych jednostkach.
+D7e dodaje drugi 32-bitowy skrót multiply-add (ziarno 5381, mnożnik 33), liczony
+w tym samym przebiegu; `SessionRemovalContext` niesie `length`, `hash` i `hash2`.
 `sessionRemovalContext` przekazuje ten mały odcisk do okna/pisarza; klucz zapisu
 usunięcia nie serializuje już pełnego źródła. Odczyt liczy skrót raz, liniowo;
 sprawdzenie legacy liczy skrót prefiksu nowego źródła o starej długości. Brak odcisku,
-skrócenie lub różnica skrótu odmawiają. To nie jest dowód kryptograficzny:
-kolizja 32-bitowego skrótu jest możliwa. Brak nowych pól danych użytkownika.
+skrócenie lub różnica któregokolwiek skrótu odmawiają. To nie jest dowód
+kryptograficzny: wspólna kolizja obu skrótów jest nadal możliwa. Brak nowych pól
+danych użytkownika. Test D7e w `sessionConflict.strict.test.ts` używa syntetycznej
+kolizji pierwszego skrótu całego logu: niezmieniony odczyt pozwala usuwać, ale
+podmiana na drugą treść blokuje zapis i pozostawia nową wiadomość widoczną.
 Bez dowodu lub bez jawnych ID usunięcie rzuca `SessionRemovalConflictError` przed
 zapisaniem usunięcia/ogona; wcześniejsza naprawa z kopią może już pozostać na dysku.
 Ślad jest wyłącznie w RAM i nie trafia do modelu ani loga. Zmiana wcześniejszych
@@ -1516,8 +1586,9 @@ także zdarzenia legacy bez ID i dowód identycznych bajtów prefiksu różnych 
 usunięcia na osobnych adapterach nad wspólnym dyskiem przed/po wcześniejszej naprawie,
 odmowa legacy, dokładne bajty zdarzenia i I/O zdrowego usunięcia.
 
-Testy D7c w `sessionConflict.strict.test.ts`: 24 rzeczywiste konflikty z literalnymi
-znacznikami i odmową pierwszego zapisu, 6 wariantów par etykiet, pseudo-blok między
+Testy D7c/D7e w `sessionConflict.strict.test.ts`: 48 rzeczywistych konfliktów z literalnymi
+znacznikami po obu stronach i odmową pierwszego zapisu (w tym pierwotne 18
+uszkodzonych bloków ze strukturą), 6 wariantów par etykiet, pseudo-blok między
 wiadomościami, zdrowe przykłady z dokładnymi bajtami/I/O, błędne znaczniki,
 kompletność/seq/prefiks, odcisk usunięcia i pomiary odczytu 1/5 MB (bez przykładów,
 20 przykładów, gęste przykłady) oraz prawdziwego konfliktu 1 MB, z progiem 2 s.
@@ -1592,6 +1663,24 @@ z niczyjego vaulta). Obejmują literalną rozmowę, surowe bloki, diff3/CRLF,
 metadane, przykłady, trzy strony, seq/ID/usunięcia/epoki, wszystkich pisarzy, błędy
 kopii/zapisu/readbacku/odtworzenia, pull podczas kopii, współdzieloną kolejkę i cache.
 Istniejące golden testy D2 oraz append/P3 nadal sprawdzają dokładne zdrowe bajty i I/O.
+D7e rozszerza macierz review do 288 wejść przez CRLF, a repeated o 24 przebiegi
+po trzy cykle (72 scalenia) z native/fallback i live/frozen. Bez osłabienia odmów
+prawdziwego gita, w tym wszystkich 18 kontrprzykładów świadka. Sześć nowych prób
+gita zaczyna konflikt od pierwszego zdarzenia. Pięć fixture'ów zachowuje wyniki.
+Pomiar porównawczy D7e z kodem sprzed zmiany na tych samych wynikach gita:
+466 wywołań, 162 `merged`, 188 `unresolved`, 116 `not-applicable`, zero zmian
+wyniku (także bajtów każdego `merged`). Review: 288 = 64/112/112; repeated:
+93 = 85/8/0; strict: 85 = 13/68/4, w kolejności merged/unresolved/not-applicable.
+Część `not-applicable` to bezkonfliktowe scalenia 0/1. Wszystkie pięć fixture'ów
+ma także identyczny wynik i bajty jak przed D7e. Mutacje: cofnięcie wyjątku EOF
+wywraca 115 testów; zastosowanie odrzuconego punktu 2 wywraca 55 (w tym 6
+prawdziwych konfliktów); pominięcie porównania drugiego skrótu wywraca 1 test.
+Każdą mutację cofnięto przed bramkami. Punkt 2 nie jest wdrożony, więc nie ma
+osobnej mutacji jego „cofnięcia”.
+Jedyna świadoma zmiana istniejącej asercji w `sessionConflict.test.ts` dotyczy
+ręcznie uciętego bloku bez zamknięcia: `unresolved -> not-applicable`, zgodnie
+z regułą EOF; pozostałe odmowy w tym teście pozostają bez zmian.
+
 
 ## Mobile M2 D4 - dziennik kosztów dopisywany natywnie
 

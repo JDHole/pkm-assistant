@@ -85,12 +85,13 @@ test('D7b removal without explicit IDs refuses after repair, retaining every mes
     t.is(d.files.get(d.path), base + a + b);
 });
 
-for (const numbering of ['original', 'writer']) for (const style of ['merge', 'diff3', 'zdiff3']) for (const [left, right] of [[0, 1], [1, 3], [3, 3]])
+for (const crlf of [false, true]) for (const numbering of ['original', 'writer']) for (const style of ['merge', 'diff3', 'zdiff3']) for (const [left, right] of [[0, 1], [1, 3], [3, 3]])
 for (const tools of [false, true]) for (const tied of [false, true]) for (const legacy of [false, true]) {
-    test(`D7b git merge-file ${style} ${left}/${right}, tools=${tools}, tied=${tied}, legacy=${legacy}, numbering=${numbering}`, t => {
+    test(`D7b git merge-file ${style} ${left}/${right}, tools=${tools}, tied=${tied}, legacy=${legacy}, numbering=${numbering}, CRLF=${crlf}`, t => {
         const dir = mkdtempSync(join(process.cwd(), '.d7b-git-'));
         t.teardown(() => rmSync(dir, { recursive: true, force: true }));
-        const base = header + event('BASE', 0, false, example);
+        const bytes = (s: string) => crlf ? s.replace(/\n/g, '\r\n') : s;
+        const base = bytes(header + event('BASE', 0, false, example));
         const branch = (side: string, count: number, offset: number) => Array.from({ length: count }, (_, n) => {
             const second = 1 + n * 6 + (tied ? 0 : offset);
             const seq = 2 + n * (tools ? 3 : 2);
@@ -100,7 +101,7 @@ for (const tools of [false, true]) for (const tied of [false, true]) for (const 
                 ? formatSessionEvent('tool_result', { ...(!legacy ? { message_id: side + n + 'tool' } : {}), tool: 'read_note', result: side + n + ' result', tool_call_id: side + n, seq: numbering === 'original' ? n + 2 : seq + 1 }, time(second + 1))
                 : '') + formatSessionEvent('agent_message', { ...(!legacy ? { message_id: side + n + 'answer' } : {}), content: side + n + ' answer', seq: numbering === 'original' ? n + 3 : seq + (tools ? 2 : 1) }, time(second + 2));
         }).join('');
-        const a = branch('A', left, 0), b = branch('B', right, 3);
+        const a = bytes(branch('A', left, 0)), b = bytes(branch('B', right, 3));
         for (const [name, bytes] of [['base', base], ['ours', base + a], ['theirs', base + b]]) writeFileSync(join(dir, name), bytes);
         const result = spawnSync('git', ['merge-file', '-p', ...(style === 'merge' ? [] : [`--${style}`]), join(dir, 'ours'), join(dir, 'base'), join(dir, 'theirs')], { encoding: 'utf8' });
         t.true(result.status !== null && result.status >= 0 && result.status < 128, result.stderr);

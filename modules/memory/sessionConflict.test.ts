@@ -19,6 +19,14 @@ const a = '## 2026-11-14T10:00:00.000Z — user message\n\n**content:**\n\nA\n\n
 const b = '## 2026-11-14T10:00:01.000Z — agent message\n\n**content:**\n\nB\n\n**seq:**\n\n1\n\n';
 const wrap = (ours: string, theirs: string) => `<<<<<<< HEAD\n${ours}=======\n${theirs}>>>>>>> remote\n`;
 
+test('D7e all five existing fixtures retain their conflict classification', t => {
+    for (const [name, kind] of [
+        ['sesja_baza', 'not-applicable'], ['sesja_strona_A', 'not-applicable'],
+        ['sesja_strona_B', 'not-applicable'], ['sesja_konflikt_markery', 'merged'],
+        ['sesja_konflikt_po_kolejnej_turze_313df88', 'merged'],
+    ] as const) t.is(mergeSessionConflict(fixture(name)).kind, kind, name);
+});
+
 for (const crlf of [false, true]) for (const diff3 of [false, true]) test(`D7 real libgit2 conflict, raw union, CRLF=${crlf}, diff3=${diff3}`, t => {
     let input = conflict;
     if (diff3) input = input.replace(/^=======$/gm, '||||||| base\nignored base\n=======');
@@ -70,7 +78,7 @@ test('D7c stable ties remain ordered; unnumbered divergent blocks refuse', t => 
     t.deepEqual(mergeSessionConflict(header + wrap(b, a + unknown)), { kind: 'unresolved' });
 });
 
-test('D7d sequential merge accepts repeated seq only in common prefix; malformed conflicts refuse', t => {
+test('D7d sequential merge accepts repeated seq only in common prefix; nested conflicts refuse', t => {
     const first = mergeSessionConflict(header + wrap(a, b));
     t.deepEqual(first, { kind: 'merged', text: header + a + b });
     const c = b.replaceAll('B', 'C').replace('10:00:01', '10:00:02');
@@ -82,7 +90,8 @@ test('D7d sequential merge accepts repeated seq only in common prefix; malformed
     t.deepEqual(mergeSessionConflict(header + a + b + wrap(c2, d2)),
         { kind: 'merged', text: header + a + b + c2 + d2 });
     t.deepEqual(mergeSessionConflict(header + wrap(wrap(a, b), c)), { kind: 'unresolved' });
-    t.deepEqual(mergeSessionConflict(header + '<<<<<<< HEAD\n' + a + '=======\n' + b), { kind: 'unresolved' });
+    // D7e: an opening abandoned at EOF is inconclusive without another structural hunk.
+    t.deepEqual(mergeSessionConflict(header + '<<<<<<< HEAD\n' + a + '=======\n' + b), { kind: 'not-applicable' });
 });
 
 test('D7 already-amplified 313df88 fixture can be read without further amplification', t => {

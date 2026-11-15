@@ -133,3 +133,37 @@ test('D7d identical legacy and decreasing numbered prefix allows gaps above its 
         ['A gap', 7], ['B gap', 9],
     ]);
 });
+
+for (const style of ['merge', 'diff3', 'zdiff3']) for (const native of [true, false])
+for (const crlf of [false, true]) for (const frozen of [false, true]) {
+    test(`D7e three real conflict cycles ${style}, native=${native}, CRLF=${crlf}, frozen=${frozen}`, async t => {
+        const bytes = (s: string) => crlf ? s.replace(/\r?\n/g, '\r\n') : s;
+        let base = bytes(header + block('Base', 1, 0));
+        const d = sharedDisk(base, native);
+        const a = frozen ? d.a.createSessionWriter(d.path, null) : d.a;
+        const b = frozen ? d.b.createSessionWriter(d.path, null) : d.b;
+        const backups: string[] = [];
+        const messages = ['Base'];
+        for (let cycle = 0; cycle < 3; cycle++) {
+            base = bytes(base);
+            const second = cycle * 3 + 1, seq = cycle * 2 + 2;
+            d.files.set(d.path, base);
+            await a.appendToActiveSession({ type: 'user_message', content: `A${cycle}`, timestamp: time(second) });
+            const ours = bytes(d.files.get(d.path)!);
+            d.files.set(d.path, base);
+            await b.appendToActiveSession({ type: 'user_message', content: `B${cycle}`, timestamp: time(second + 1) });
+            const theirs = bytes(d.files.get(d.path)!);
+            const raw = gitMerge(base, ours, theirs, style);
+            const union = base + bytes(block(`A${cycle}`, seq, second) + block(`B${cycle}`, seq, second + 1));
+            t.deepEqual(mergeSessionConflict(raw), { kind: 'merged', text: union });
+            d.files.set(d.path, raw);
+            await a.appendToActiveSession({ type: 'user_message', content: `After${cycle}`, timestamp: time(second + 2) });
+            base = union + block(`After${cycle}`, seq + 1, second + 2);
+            backups.push(raw);
+            messages.push(`A${cycle}`, `B${cycle}`, `After${cycle}`);
+            t.is(d.files.get(d.path), base);
+            t.deepEqual((await d.b.loadActiveSession(d.path)).messages.map(m => m.content), messages);
+            t.deepEqual([...d.files].filter(([p]) => p.includes('/backups/')).map(([, value]) => value), backups);
+        }
+    });
+}

@@ -90,7 +90,8 @@ function splitSessionConflict(text: string): SessionSplit {
         }
         start = end;
     }
-    if (pending) { malformed = true; malformedStructural ||= pending.structural; }
+    // Git closes its hunks. An opening left at EOF alone can be conversation text.
+    if (pending) malformed = true;
     const first = blocks.find(block => block.structural);
     // Real merge-file can wrap event headings and a literal marker in a single
     // malformed hunk. Treating that as healthy would allow destructive appends.
