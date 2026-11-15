@@ -1071,8 +1071,16 @@ restore z wynikiem sondy, cleanup z wynikiem sondy i liczbą issues. Zwraca też
 `present: boolean | undefined` (undefined bez sondy). Callback jedynie obserwuje
 istniejące kroki; nie dodaje await, I/O, retry ani nowej obsługi wyjątków.
 Composition root dodaje etapy not-started, registry (brak rejestru), ports oraz
-ready po zakończeniu runtime i zapamiętuje wyłącznie surowe name/code wyjątku.
-Raport waliduje te pola istniejącym słownikiem D2 modułu diagnostics.
+register (F2f). Ready oznacza ukończony start magazynu i udaną rejestrację wszystkich
+trzech narzędzi: subagent_changes, delegate i sub_agent. Wyjątek rejestracji zapisuje
+register i referencję błędu, po czym propaguje tę samą wartość jak przed diagnostyką.
+Awaria magazynu nadal rejestruje narzędzia delegacji; udana rejestracja po takiej
+awarii nie zastępuje etapu awarii przez ready. Dotyczy to też ponownej próby
+z zachowanym runtime: available może pozostać true przy etapie ports.
+F2f przy starcie zachowuje wyłącznie referencję unknown do złapanego błędu.
+Name/code czyta dopiero komenda diagnostyki, a raport waliduje je istniejącym
+słownikiem D2. Nowa obserwacja nie odczytuje żadnych pól błędu podczas startu;
+dotychczasowe przekazanie do loggera i wszystkie operacje I/O pozostają bez zmian.
 
 Cleanup oznacza podpięcie rejestru i pierwsze prune/collectResolved/oczekiwanie
 na pending. Dotychczasowy catch asynchronicznego collectResolved pozostaje:

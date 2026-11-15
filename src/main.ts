@@ -213,9 +213,9 @@ export default class PkmAssistantPlugin extends PluginBase {
   // Nullowane w `onunload()` - patrz tam.
   private vaultDraftRuntime?: Awaited<ReturnType<typeof initializeVaultDrafts>>;
   private draftStartup: DraftStartupProgress
-    | { stage: 'not-started' | 'registry' | 'ports' }
+    | { stage: 'not-started' | 'registry' | 'ports' | 'register' }
     | { stage: 'ready'; present: boolean | undefined; recoveryIssues: number } = { stage: 'not-started' };
-  private draftStartupError: ReturnType<typeof localErrorFields> | undefined;
+  private draftStartupError: unknown;
   declare subTaskRegistry: SubTaskRegistry | null;
   declare _askUserChannels: AskUserChannels | null;
   declare subTaskNotifier: SubTaskNotifier | null;
@@ -988,6 +988,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       const { userAgent } = navigator;
       const startup = this.diagnosticStartupPhases?.snapshot();
       const drafts = this.draftStartup ?? { stage: 'not-started' };
+      const draftError = localErrorFields(this.draftStartupError);
       const report = await runDeviceDiagnostics({
         adapter: this.app.vault.adapter, settings,
         platform: flags.isAndroidApp ? 'android' : flags.isIosApp ? 'ios' : flags.isMobile ? 'mobile' : 'desktop',
@@ -1006,8 +1007,8 @@ export default class PkmAssistantPlugin extends PluginBase {
           'embedding.status': this.vaultIndexer?.getStatus().status ?? null,
           'drafts.available': !!this.vaultDraftRuntime,
           'drafts.stage': drafts.stage,
-          'drafts.error.name': this.draftStartupError?.name,
-          'drafts.error.code': this.draftStartupError?.code,
+          'drafts.error.name': draftError.name,
+          'drafts.error.code': draftError.code,
           'drafts.present': 'present' in drafts ? drafts.present : undefined,
           'drafts.recoveryIssues': 'recoveryIssues' in drafts ? drafts.recoveryIssues : undefined,
           'vault.markdownCount': this.app.vault.getMarkdownFiles().length,
@@ -1088,10 +1089,9 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.vaultDraftRuntime = await initializeVaultDrafts({ ...ports, registry: this.subTaskRegistry,
         onProgress: progress => { this.draftStartup = progress; },
       });
-      this.draftStartup = { stage: 'ready', present: this.vaultDraftRuntime.present,
-        recoveryIssues: this.vaultDraftRuntime.issues.length };
+      this.draftStartup = { stage: 'register' };
     } catch (error) {
-      this.draftStartupError = localErrorFields(error);
+      this.draftStartupError = error;
       log.error('VaultDrafts', 'Draft runtime unavailable:', error);
       if (!Platform.isMobile) new Notice(t('subagent.draft.unavailable'), 10000);
     }
@@ -1099,13 +1099,23 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.warn('VaultDrafts', 'Recovery issues:', this.vaultDraftRuntime.issues);
       new Notice(t('chat.subdraft.recovery_error', { count: this.vaultDraftRuntime.issues.length }), 10000);
     }
-    if (this.vaultDraftRuntime) toolRegistry.registerTool(this.vaultDraftRuntime.tool);
-    const delegationDeps = {
-      drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' as const },
-      isMobile: !!Platform?.isMobile,
-    };
-    toolRegistry.registerTool(createDelegateTool(this.app, delegationDeps));
-    toolRegistry.registerTool(createSubAgentTool(this.app, delegationDeps));
+    try {
+      if (this.vaultDraftRuntime) toolRegistry.registerTool(this.vaultDraftRuntime.tool);
+      const delegationDeps = {
+        drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' as const },
+        isMobile: !!Platform?.isMobile,
+      };
+      toolRegistry.registerTool(createDelegateTool(this.app, delegationDeps));
+      toolRegistry.registerTool(createSubAgentTool(this.app, delegationDeps));
+    } catch (error) {
+      this.draftStartup = { stage: 'register' };
+      this.draftStartupError = error;
+      throw error;
+    }
+    if (this.draftStartup.stage === 'register' && this.vaultDraftRuntime) {
+      this.draftStartup = { stage: 'ready', present: this.vaultDraftRuntime.present,
+        recoveryIssues: this.vaultDraftRuntime.issues.length };
+    }
   }
 
   async _unlockSecureStorageAtStartup() {

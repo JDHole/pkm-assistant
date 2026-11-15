@@ -251,10 +251,16 @@ Composition root przekazuje migawkę istniejącej pracy startowej, bez nowych I/
 sekcję ZA sekcją pamięci, żeby zachować kolejność wszystkich starszych wierszy
 oraz sekcji. Sekcja pojawia się, gdy wejście zawiera nowe fakty kopii (produkcyjna
 komenda zawsze je przekazuje). Stałe objaśnienie PL/EN odróżnia gotowy magazyn od
-wyłączonych od startu zapisów i podaje zwalidowany literał etapu.
+wyłączonych zapisów na podstawie pary `drafts.available` i `drafts.stage`.
+F2f: tylko true + ready potwierdza zapisy; false + poprawny etap inny niż ready
+potwierdza wyłączenie i podaje etap ostatniej próby startu. Sprzeczność lub brak
+którejkolwiek wartości daje stałe zdanie o niespójnym/niepełnym wyniku, również
+po nieudanej ponownej próbie z zachowanym runtime.
 
-- `drafts.stage`: wyłącznie `not-started/registry/ports/presence/restore/cleanup/ready`,
-  dokładne dopasowanie całego tekstu; reszta daje `Unavailable`.
+- `drafts.stage`: wyłącznie `not-started/registry/ports/presence/restore/cleanup/register/ready`,
+  dokładne dopasowanie całego tekstu; reszta daje `Unavailable` i skipped.
+  F2f: ready ma status ok, każdy inny poprawny etap error i zwiększa licznik
+  błędów raportu oraz Notice. Status i treść `drafts.available` są bez zmian.
 - `drafts.error.name/code`: istniejące funkcje i zbiory D2 `errorName/errorCode`,
   bez drugiego słownika. Nieznana obecna wartość daje `unknown`, brak pola
   `Unavailable`. Liczbowy code zachowuje granice D2 (0-999, liczba całkowita).
@@ -263,9 +269,13 @@ wyłączonych od startu zapisów i podaje zwalidowany literał etapu.
   nigdy ich ścieżki ani komunikaty.
 - `drafts.present`: boolean z istniejącego mobilnego `storagePresent`; brak wiedzy
   daje `Unavailable`, także na desktopie, gdzie nie dokładamy sondy istnienia.
-- Barrel eksportuje `localErrorFields(error)` do migawki surowych `name/code`;
-  używa istniejącego bezpiecznego odczytu pól (także rzucających getterów).
-  Nie czyta `message`, nie przechowuje całego błędu i nie waliduje przedwcześnie.
+- Barrel eksportuje `localErrorFields(error)` do odczytu surowych `name/code`
+  dopiero przy składaniu faktów w komendzie diagnostyki. Start przechowuje w RAM
+  referencję `unknown` do złapanej wartości, bez odczytu jej pól; dotychczasowe
+  przekazanie do loggera pozostaje bez zmian. Bezpieczny odczyt daje `unknown`
+  dla rzucającego gettera, brak pola nadal daje `Unavailable`. Nie czyta `message`.
+  Synchroniczny getter, który nigdy nie wraca, może zatrzymać komendę diagnostyki,
+  ale obserwacja diagnostyczna nie uruchamia go podczas startu.
 
 Nowe próby są częścią dotychczasowego `try/finally` we własnym `tmp-<id>`, na obu
 platformach, bez dostępu do namespace magazynu ani uruchamiania DraftStore.
@@ -293,10 +303,19 @@ wyścigów z synchronizatorem, symlinków ani wydajności dużych plików. Port 
 weryfikuje wynik zapisu, lecz adapter nie zapewnia fsync ani blokady urządzeń.
 Te ograniczenia F2 pozostają bez zmian i wymagają prób na fizycznym telefonie.
 
-Testy F2e w `diagnostics.test.ts`: siedem etapów, poprawne i odrzucone pola w
+Testy F2e/F2f w `diagnostics.test.ts`: osiem etapów, poprawne i odrzucone pola w
 zapisanym raporcie/Markdown, objaśnienia PL/EN, próbki binarne, przekłamane bajty
 lub rozmiar, stat rzucający prywatny komunikat, brak metod binarnych, rename/remove
 bez efektu, błędny typ folderu i pełne sprzątanie w każdym przypadku.
 `src/main.mobile.test.ts` wykonuje produkcyjny start i komendę: ready obu platform,
 ports obu platform, presence/EACCES oraz restore na mobile, literalne fakty,
 brak prywatnego komunikatu, niezmienione I/O i desktopowy Notice.
+
+F2f rozszerza testy objaśnień PL/EN o cztery kombinacje dostępności i gotowości
+oraz brak każdej wartości. `src/main.mobile.test.ts` sprawdza produkcyjny start
+z prawdziwym loggerem i getterami (zero odczytów przy starcie, po jednym przy
+komendzie, literalne unknown lub TypeError/EACCES), propagację tej samej wartości
+wyjątku każdego z trzech registerTool na obu platformach oraz raport po ponownej
+nieudanej próbie. Test liczników wykonuje zapis i showDiagnosticReport:
+ready = 18 OK / 0 errors, presence = 17 OK / 1 errors, także w treści Notice.
+Dotychczasowe literalne ślady I/O pozostają bez zmian.

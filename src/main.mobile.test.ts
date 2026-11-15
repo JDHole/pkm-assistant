@@ -12,10 +12,21 @@ import { setLocale } from '../core/i18n/index.js';
 import { CHAT_PROVIDERS } from '../modules/models/index.js';
 import type { ExecutionContext } from 'ava';
 
-// Replace only browser assets; execute the actual composition root against host ports.
+// Capture the named host Notice used by diagnostics, without changing the harness stub.
+const diagnosticNoticeModule = 'data:text/javascript,' + encodeURIComponent(`
+import { Notice as HostNotice } from 'obsidian';
+export * from 'obsidian';
+export const notices = [];
+export class Notice extends HostNotice {
+    constructor(message, timeout) { super(message, timeout); notices.push(message); }
+}
+`);
+// Supply browser assets and Notice capture; execute the actual composition root against host ports.
 register('data:text/javascript,' + encodeURIComponent(`
 import { readFile } from 'node:fs/promises';
 export async function resolve(specifier, context, next) {
+    if (specifier === 'obsidian' && context.parentURL?.endsWith('/modules/diagnostics/ui.ts'))
+        return { url: ${JSON.stringify(diagnosticNoticeModule)}, shortCircuit: true };
     if (specifier.startsWith('@plugin/')) return next(new URL(specifier.slice(8), ${JSON.stringify(new URL('../', import.meta.url).href)}).href, context);
     return next(specifier, context);
 }
@@ -357,13 +368,13 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         t.is(reports.length, 1);
         const content = await app.vault.adapter.read(reports[0]);
         const draftRows = content.split('\n').filter(line => line.startsWith('| drafts.'))
-            .map(line => line.replace(/\| (OK|SKIPPED) \| \d+ \|/, '| $1 | 0 |'));
+            .map(line => line.replace(/\| (OK|ERROR|SKIPPED) \| \d+ \|/, '| $1 | 0 |'));
         const failed = failure === 'drafts' || failure === 'restore' || failure === 'ports';
         t.deepEqual(draftRows, [
             failed ? '| drafts.available | OK | 0 | false |' : '| drafts.available | OK | 0 | true |',
-            failure === 'drafts' ? '| drafts.stage | OK | 0 | presence |'
-                : failure === 'restore' ? '| drafts.stage | OK | 0 | restore |'
-                : failure === 'ports' ? '| drafts.stage | OK | 0 | ports |' : '| drafts.stage | OK | 0 | ready |',
+            failure === 'drafts' ? '| drafts.stage | ERROR | 0 | presence |'
+                : failure === 'restore' ? '| drafts.stage | ERROR | 0 | restore |'
+                : failure === 'ports' ? '| drafts.stage | ERROR | 0 | ports |' : '| drafts.stage | OK | 0 | ready |',
             failed ? '| drafts.error.name | OK | 0 | Error |' : '| drafts.error.name | SKIPPED | 0 | Unavailable |',
             failure === 'drafts' ? '| drafts.error.code | OK | 0 | EACCES |' : '| drafts.error.code | SKIPPED | 0 | Unavailable |',
             failure === 'restore' ? '| drafts.present | OK | 0 | true |'
@@ -466,6 +477,130 @@ for (const failure of ['none', 'stat', 'missing-stat', 'restore', 'list', 'readB
         t.deepEqual([nodeReads, notices, [...adapter.files]], [0, [], []]);
     });
 }
+
+/** Real draft startup and diagnostic command, with only the host and consent supplied. */
+async function draftDiagnosticFixture(t: ExecutionContext, mobile: boolean) {
+    Platform.isMobile = mobile;
+    const supportDir = process.env.PKM_TEST_SUPPORT_DIR;
+    if (!supportDir) throw new Error('AVA harness preload is required');
+    const { createMockApp } = await import(pathToFileURL(`${supportDir}/../mock/app.ts`).href);
+    const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
+    const app: Obsidian.App = createMockApp(root);
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'require');
+    Object.defineProperty(window, 'require', mobile
+        ? { configurable: true, get() { throw new Error('Node reached on mobile'); } }
+        : { configurable: true, value: () => fs });
+    const { buildRuntimeConfig } = await import('../config/runtimeConfig.js');
+    const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
+    mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: Obsidian.Modal) {
+        this.onOpen(); diagnosticButtons(this)[0].onclick!();
+    });
+    const host = {
+        // Same host boundary as the production constructor: App lacks AppLike's index signatures.
+        app, manifest: { version: '2.4.1' }, runtimeConfig: buildRuntimeConfig({ app: app as unknown as Parameters<typeof buildRuntimeConfig>[0]['app'] }),
+        subTaskRegistry: new SubTaskRegistry(), toolRegistry: new ToolRegistry(),
+        vaultDraftRuntime: undefined as Awaited<ReturnType<typeof import('../modules/tools/index.js').initializeVaultDrafts>> | undefined,
+    };
+    t.teardown(async () => {
+        await host.vaultDraftRuntime?.flush(); host.vaultDraftRuntime?.dispose(); host.subTaskRegistry.dispose();
+        if (descriptor) Object.defineProperty(window, 'require', descriptor); else Reflect.deleteProperty(window, 'require');
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+    return {
+        host,
+        start: () => Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry),
+        report: async () => {
+            await Plugin.prototype.runDeviceDiagnostics.call(host as never);
+            const paths = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
+            t.is(paths.length, 1);
+            return app.vault.adapter.read(paths[0]);
+        },
+    };
+}
+
+test.serial('F2f presence adds exactly one error to report counts and the notification', async t => {
+    const f = await draftDiagnosticFixture(t, true);
+    const { runDeviceDiagnostics, showDiagnosticReport } = await import('../modules/diagnostics/index.js');
+    const { notices: diagnosticNotices } = await import(diagnosticNoticeModule);
+    for (const stage of ['ready', 'presence']) {
+        const report = await runDeviceDiagnostics({
+            adapter: f.host.app.vault.adapter, platform: 'android', settings: {},
+            facts: { 'drafts.available': true, 'drafts.stage': stage },
+            capabilities: { structuredClone: true, MediaRecorder: false }, consent: async () => false,
+            connection: async () => { throw new Error('Unexpected connection'); }, now: () => 10,
+        });
+        t.deepEqual([report.ok, report.errors], stage === 'ready' ? [18, 0] : [17, 1]);
+        showDiagnosticReport(f.host.app, report);
+        t.is(diagnosticNotices.at(-1), stage === 'ready'
+            ? `Diagnostics: 18 OK, 0 errors. File: ${report.path}`
+            : `Diagnostics: 17 OK, 1 errors. File: ${report.path}`);
+        t.true((await f.host.app.vault.adapter.read(report.path)).includes(stage === 'ready'
+            ? '| drafts.stage | OK | 0 | ready |' : '| drafts.stage | ERROR | 0 | presence |'));
+    }
+});
+
+for (const mobile of [true, false]) for (const throwing of [true, false]) {
+    test.serial(`F2f error getters are deferred until diagnostics: mobile=${mobile}, throwing=${throwing}`, async t => {
+        const f = await draftDiagnosticFixture(t, mobile);
+        const reads = { name: 0, code: 0 };
+        // Non-enumerable getters are untouched by the existing production logger.
+        const failure = Object.defineProperties({}, {
+            name: { get() { reads.name++; if (throwing) throw new Error('Synthetic getter'); return 'TypeError'; } },
+            code: { get() { reads.code++; if (throwing) throw new Error('Synthetic getter'); return 'EACCES'; } },
+        });
+        if (mobile) {
+            const stat = f.host.app.vault.adapter.stat.bind(f.host.app.vault.adapter);
+            mock.method(f.host.app.vault.adapter, 'stat', async (path: string) => {
+                if (path === '.pkm-assistant/subagent-drafts/v1') throw failure;
+                return stat(path);
+            });
+        } else Object.defineProperty(f.host.app.vault.adapter, 'getBasePath', { value: () => { throw failure; } });
+        await f.start();
+        t.deepEqual(reads, { name: 0, code: 0 });
+        t.deepEqual(f.host.toolRegistry.getAllTools().map(tool => tool.name), ['delegate', 'sub_agent']);
+        const saved = await f.report();
+        t.deepEqual(reads, { name: 1, code: 1 });
+        t.deepEqual(saved.split('\n').filter(line => line.startsWith('| drafts.error.'))
+            .map(line => line.replace(/\| OK \| \d+ \|/, '| OK | 0 |')), throwing ? [
+                '| drafts.error.name | OK | 0 | unknown |', '| drafts.error.code | OK | 0 | unknown |',
+            ] : ['| drafts.error.name | OK | 0 | TypeError |', '| drafts.error.code | OK | 0 | EACCES |']);
+        t.regex(saved, mobile ? /\| drafts.stage \| ERROR \| \d+ \| presence \|/ : /\| drafts.stage \| ERROR \| \d+ \| ports \|/);
+    });
+}
+
+for (const mobile of [true, false]) for (const failingTool of ['subagent_changes', 'delegate', 'sub_agent']) {
+    test.serial(`F2f registration rejection propagates and reports register: mobile=${mobile}, tool=${failingTool}`, async t => {
+        const f = await draftDiagnosticFixture(t, mobile);
+        const failure = { name: 'TypeError', code: 'EACCES' };
+        const register = f.host.toolRegistry.registerTool.bind(f.host.toolRegistry);
+        mock.method(f.host.toolRegistry, 'registerTool', (tool: Parameters<ToolRegistry['registerTool']>[0]) => {
+            if (tool.name === failingTool) throw failure;
+            return register(tool);
+        });
+        await f.start().then(() => t.fail('Registration must reject'), error => t.is(error, failure));
+        t.deepEqual(f.host.toolRegistry.getAllTools().map(tool => tool.name), failingTool === 'subagent_changes' ? []
+            : failingTool === 'delegate' ? ['subagent_changes'] : ['subagent_changes', 'delegate']);
+        const saved = await f.report();
+        t.regex(saved, /\| drafts.stage \| ERROR \| \d+ \| register \|/);
+        t.regex(saved, /\| drafts.error.name \| OK \| \d+ \| TypeError \|/);
+        t.regex(saved, /\| drafts.error.code \| OK \| \d+ \| EACCES \|/);
+        t.true(saved.includes('The draft storage result is inconsistent or incomplete; sub-agent write availability cannot be confirmed.'));
+    });
+}
+
+test.serial('F2f failed second startup reports the last attempt without denying the retained runtime', async t => {
+    const f = await draftDiagnosticFixture(t, true);
+    await f.start();
+    const runtime = f.host.vaultDraftRuntime;
+    Object.defineProperty(f.host.app.vault.adapter, 'writeBinary', { value: undefined });
+    await f.start();
+    t.is(f.host.vaultDraftRuntime, runtime);
+    t.deepEqual(f.host.toolRegistry.getAllTools().map(tool => tool.name), ['subagent_changes', 'delegate', 'sub_agent']);
+    const saved = await f.report();
+    t.regex(saved, /\| drafts.available \| OK \| \d+ \| true \|/);
+    t.regex(saved, /\| drafts.stage \| ERROR \| \d+ \| ports \|/);
+    t.true(saved.includes('The draft storage result is inconsistent or incomplete; sub-agent write availability cannot be confirmed.'));
+});
 
 test.serial('desktop draft startup restores real storage and registers review alongside delegation', async t => {
     const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
@@ -643,8 +778,8 @@ for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, 
     t.is(requests, action === 'connection' && !missingAbort ? 1 : 0);
     t.is(host.diagnosticController, null);
     t.regex(reportSummary, missingAbort || action === 'connection'
-        ? /Diagnostics: \d+ OK, 1 errors\. File: \.pkm-assistant\/diagnostics\//
-        : /Diagnostics: \d+ OK, 0 errors\. File: \.pkm-assistant\/diagnostics\//);
+        ? /Diagnostics: \d+ OK, 2 errors\. File: \.pkm-assistant\/diagnostics\//
+        : /Diagnostics: \d+ OK, 1 errors\. File: \.pkm-assistant\/diagnostics\//);
     if (missingAbort) t.true(content.includes('| AbortController | ERROR | 0 | Unavailable |'));
 });
 

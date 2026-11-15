@@ -553,7 +553,7 @@ test('D6 deferred facts are collected once after consent and failure does not br
     t.is(f.requests(), 0);
 });
 
-for (const stage of ['not-started', 'registry', 'ports', 'presence', 'restore', 'cleanup', 'ready']) {
+for (const stage of ['not-started', 'registry', 'ports', 'presence', 'restore', 'cleanup', 'register', 'ready']) {
     test(`F2e saves literal draft stage ${stage} with validated measurements`, async t => {
         const f = fixture();
         f.input.facts = { 'drafts.stage': stage, 'drafts.error.name': 'Error', 'drafts.error.code': 'EACCES',
@@ -563,7 +563,7 @@ for (const stage of ['not-started', 'registry', 'ports', 'presence', 'restore', 
         t.is(saved, report.markdown);
         t.deepEqual(saved.split('\n').filter(line => line.startsWith('| drafts.')), [
             stage === 'ready' ? '| drafts.available | OK | 0 | true |' : '| drafts.available | OK | 0 | false |',
-            `| drafts.stage | OK | 0 | ${stage} |`, '| drafts.error.name | OK | 0 | Error |',
+            `| drafts.stage | ${stage === 'ready' ? 'OK' : 'ERROR'} | 0 | ${stage} |`, '| drafts.error.name | OK | 0 | Error |',
             '| drafts.error.code | OK | 0 | EACCES |', '| drafts.recoveryIssues | OK | 0 | 3 |',
             '| drafts.present | OK | 0 | true |',
         ]);
@@ -582,30 +582,44 @@ for (const invalid of ['sekret-probny-F2e', 'ready\n', 'Ready', undefined]) {
                 '| drafts.error.code | OK | 0 | unknown |', '| drafts.recoveryIssues | SKIPPED | 0 | Unavailable |',
                 '| drafts.present | SKIPPED | 0 | Unavailable |',
             ]);
-            t.true(output.includes('Sub-agent writes have been disabled since startup. Stage: Unavailable.'));
+            t.true(output.includes('The draft storage result is inconsistent or incomplete; sub-agent write availability cannot be confirmed.'));
             t.false(output.includes('sekret-probny-F2e'));
             t.false(output.includes('EACCES-secret'));
         }
     });
 }
 
-for (const locale of ['pl', 'en']) for (const ready of [true, false]) test.serial(`F2e draft explanation ${locale}, ready=${ready}`, async t => {
+for (const locale of ['pl', 'en']) for (const ready of [true, false]) for (const available of [true, false, undefined]) test.serial(`F2f draft explanation ${locale}, ready=${ready}, available=${available}`, async t => {
     setLocale(locale);
     const f = fixture();
-    f.input.facts = { 'drafts.stage': ready ? 'ready' : 'presence', 'drafts.present': false,
+    f.input.facts = { 'drafts.available': available, 'drafts.stage': ready ? 'ready' : 'presence', 'drafts.present': false,
         'drafts.recoveryIssues': 0, 'drafts.error.name': 'TypeError', 'drafts.error.code': 7 };
     const report = await runDeviceDiagnostics(f.input);
     const saved = await f.adapter.read(report.path);
     t.is(saved, report.markdown);
     const title = locale === 'pl' ? '## Magazyn kopii roboczych sub-agenta' : '## Sub-agent draft storage';
     t.true(saved.indexOf(title) > saved.indexOf(locale === 'pl' ? '## Ślady konfliktu' : '## Memory synchronization'));
-    t.true(saved.includes(ready
+    t.true(saved.includes(available === undefined || available !== ready
+        ? locale === 'pl' ? 'Wynik magazynu kopii jest niespójny lub niepełny; nie można potwierdzić dostępności zapisów sub-agenta.' : 'The draft storage result is inconsistent or incomplete; sub-agent write availability cannot be confirmed.'
+        : ready
         ? locale === 'pl' ? 'Sub-agent zapisuje przez kopie robocze na tym urządzeniu.' : 'The sub-agent writes through drafts on this device.'
-        : locale === 'pl' ? 'Zapisy sub-agenta są wyłączone od startu. Etap: presence.' : 'Sub-agent writes have been disabled since startup. Stage: presence.'));
+        : locale === 'pl' ? 'Zapisy sub-agenta są wyłączone. Etap ostatniej próby startu: presence.' : 'Sub-agent writes are disabled. Stage of the last startup attempt: presence.'));
     t.true(saved.includes('| drafts.present | OK | 0 | false |'));
     t.true(saved.includes('| drafts.recoveryIssues | OK | 0 | 0 |'));
     t.true(saved.includes('| drafts.error.name | OK | 0 | TypeError |'));
     t.true(saved.includes('| drafts.error.code | OK | 0 | 7 |'));
+});
+
+for (const locale of ['pl', 'en']) for (const available of [true, false]) test.serial(`F2f missing stage ${locale}, available=${available}`, async t => {
+    setLocale(locale);
+    const f = fixture();
+    f.input.facts = { 'drafts.available': available, 'drafts.stage': undefined };
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.true(saved.includes(locale === 'pl'
+        ? 'Wynik magazynu kopii jest niespójny lub niepełny; nie można potwierdzić dostępności zapisów sub-agenta.'
+        : 'The draft storage result is inconsistent or incomplete; sub-agent write availability cannot be confirmed.'));
+    t.is(report.checks.find(c => c.name === 'drafts.stage')?.status, 'skipped');
 });
 
 for (const failure of ['none', 'statMissing', 'binary', 'size', 'writeBinary', 'readBinary', 'renameNested', 'binaryRemove', 'directory'] as const) {

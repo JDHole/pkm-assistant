@@ -250,3 +250,9 @@ Port `AdapterDraftStorage` (podłączony w F2b) zachowuje format kopii i sprawdz
 ## Mobile M4 F2e - diagnostyka magazynu kopii
 
 Raport urządzenia pokazuje etap startu magazynu, zwalidowane name/code błędu i liczbę problemów odzyskiwania, a próby adaptera obejmują binaria oraz przenoszenie między folderami bez dodatkowego I/O przy starcie. Kontrakt raportu i ograniczenia prób opisuje `modules/diagnostics/CLAUDE.md`, etapy oraz odmowę mobile `modules/tools/CLAUDE.md`.
+
+## Mobile M4 F2f - korekta wyniku diagnostyki kopii
+
+Start zapamiętuje referencję błędu bez odczytu pól, a ready oznacza też udaną
+rejestrację narzędzi. Raport łączy etap z dostępnością runtime i liczy niegotowy
+etap jako błąd; kontrakty i testy opisują dokumentacje diagnostics oraz tools.

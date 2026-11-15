@@ -60,9 +60,13 @@ export function renderDiagnosticMarkdown(checks: DiagnosticCheck[], redact: (tex
     const isDraftDetail = (c: DiagnosticCheck) => c.name.startsWith('drafts.') && c.name !== 'drafts.available';
     const drafts = checks.filter(isDraftDetail);
     const stage = drafts.find(c => c.name === 'drafts.stage');
-    const draftSummary = stage?.status === 'ok' && stage.detail === 'ready'
+    const available = checks.find(c => c.name === 'drafts.available');
+    const validStage = stage !== undefined && stage.status !== 'skipped';
+    const draftSummary = available?.status === 'ok' && available.detail === 'true' && validStage && stage.detail === 'ready'
         ? t('diagnostics.drafts.ready')
-        : t('diagnostics.drafts.disabled', { stage: stage?.status === 'ok' ? stage.detail : t('diagnostics.unavailable') });
+        : available?.status === 'ok' && available.detail === 'false' && validStage && stage.detail !== 'ready'
+            ? t('diagnostics.drafts.disabled', { stage: stage.detail })
+            : t('diagnostics.drafts.incomplete');
     const memory = checks.filter(c => c.name.startsWith('memory.conflict.'));
     const memoryCount = (group: string): number | null => {
         const row = memory.find(c => c.name === `memory.conflict.${group}`);

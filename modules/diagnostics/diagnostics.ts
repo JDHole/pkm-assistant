@@ -55,7 +55,10 @@ export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<Diag
     const skipped = (name: string, detail = t('diagnostics.dependency')) => checks.push({ name, status: 'skipped', ms: 0, detail });
     for (const [name, value] of diagnosticFacts(input.facts)) {
         if (value === null) skipped(name, t('diagnostics.unavailable'));
-        else await check(name, () => Promise.resolve(value));
+        else {
+            await check(name, () => Promise.resolve(value));
+            if (name === 'drafts.stage' && value !== 'ready') checks[checks.length - 1].status = 'error';
+        }
     }
     for (const [name, available] of Object.entries(input.capabilities)) {
         if (!capabilities.has(name)) continue;

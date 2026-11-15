@@ -551,3 +551,7 @@ urządzeniu, zamiast o niewdrożonej funkcji; oba języki sprawdza runnerDrafts.
 M4 F2e dodaje PL/EN sekcji diagnostyki magazynu kopii. Nazwa istniejącej komendy
 `diagnostics.run` jest współdzielona w słowniku z nową odmową mobile, żeby wskazanie
 komendy nie rozjechało się z paletą. Tekst odmowy desktopowej pozostaje bez zmian.
+
+M4 F2f dobiera objaśnienie magazynu z dostępności i etapu ostatniej próby startu;
+PL/EN mają osobny stały tekst dla niespójnego lub niepełnego wyniku. Teksty odmów
+z F2e i istniejąca nazwa komendy pozostają bez zmian.
