@@ -1,4 +1,4 @@
-import { parseDeviceId } from '../modules/memory/index.js';
+import { parseDeviceId, scanMemoryConflicts } from '../modules/memory/index.js';
 import type { DeviceId } from '../modules/memory/index.js';
 import Obsidian from "obsidian";
 import type { App, EventRef, PluginManifest, PluginSettingTab } from "obsidian";
@@ -1019,6 +1019,15 @@ export default class PkmAssistantPlugin extends PluginBase {
           consentModal = new DiagnosticsConsentModal(this.app, controller?.signal);
           consentModal.open();
           return consentModal.decision;
+        },
+        memoryFacts: async () => {
+          if (run.cancelled || !consentModal?.memoryScanApproved) return {};
+          const counts = await scanMemoryConflicts(this.app.vault.adapter);
+          return {
+            'memory.conflict.state': counts.state, 'memory.conflict.brain': counts.brain,
+            'memory.conflict.sessions': counts.sessions, 'memory.conflict.costLog': counts.costLog,
+            'memory.conflict.unreadable': counts.unreadable, 'memory.conflict.skipped': counts.skipped,
+          };
         },
         connection: async () => {
           if (!controller || run.cancelled) return { status: 'skipped', reason: 'no_abort_controller' };

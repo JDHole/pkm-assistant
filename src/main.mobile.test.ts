@@ -107,6 +107,21 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         const { shutdownHarnessRuntime } = await import(new URL('obsidian.ts', supportUrl).href);
         const root = fs.mkdtempSync(new URL('../.mobile-test-', import.meta.url).pathname);
         const app: Obsidian.App = createMockApp(root);
+        const diagnosticProbe = '.pkm-assistant/agents/diagnostic-probe/memory/.state.json';
+        const costProbe = '.pkm-assistant/cost_log.jsonl';
+        const diagnosticReads: string[] = [];
+        if (failure === 'none') {
+            for (const dir of ['.pkm-assistant', '.pkm-assistant/agents', '.pkm-assistant/agents/diagnostic-probe', '.pkm-assistant/agents/diagnostic-probe/memory']) {
+                await app.vault.adapter.mkdir(dir);
+            }
+            await app.vault.adapter.write(diagnosticProbe, '<<<<<<< left\n{}\n=======\n{}\n>>>>>>> right\n');
+            await app.vault.adapter.write(costProbe, '<<<<<<< left\n{}\n=======\n{}\n>>>>>>> right\n');
+            const read = app.vault.adapter.read.bind(app.vault.adapter);
+            mock.method(app.vault.adapter, 'read', async (path: string) => {
+                if (path === diagnosticProbe || path === costProbe) diagnosticReads.push(path);
+                return read(path);
+            });
+        }
         let localReads = 0, localWrites = 0;
         if (failure === 'none') {
             app.loadLocalStorage = key => { localReads++; return key === 'pkm-assistant.device-id' ? '0123456789abcdef' : null; };
@@ -162,7 +177,15 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         mock.method(plugin, '_loadCrystalSoulTheme', async () => { await theme(); now += 34; });
         const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
         mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) {
-            this.onOpen(); this.onClose();
+            this.onOpen();
+            if (failure === 'none') {
+                // Choose the local report in the real consent UI; no model request.
+                type ButtonNode = { tagName: string; children: ButtonNode[]; onclick?: () => void };
+                const findButton = (node: ButtonNode): ButtonNode | undefined => node.tagName === 'BUTTON'
+                    ? node : node.children.map(findButton).find(Boolean);
+                findButton(this.contentEl as unknown as ButtonNode)?.onclick?.();
+            }
+            this.onClose();
         });
 
         await plugin.onload();
@@ -172,12 +195,20 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         if (failure === 'none') {
             t.deepEqual([localReads, localWrites], [1, 0]);
             t.is<string | null | undefined, string>(plugin.agentManager?.getActiveMemory()?.deviceId, '0123456789abcdef');
+            t.deepEqual(diagnosticReads, [], 'startup must not scan memory conflict traces');
         }
 
         await plugin.runDeviceDiagnostics();
         const reports = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
         t.is(reports.length, 1);
         const content = await app.vault.adapter.read(reports[0]);
+        if (failure === 'none') {
+            t.deepEqual(diagnosticReads, [diagnosticProbe, costProbe], 'one scan after the local report consent');
+            t.true(content.includes('| memory.conflict.state | OK | 0 | 1 |'));
+            t.true(content.includes('| memory.conflict.costLog | OK | 0 | 1 |'));
+            t.true(content.includes('Files with synchronization conflict traces: 2.'));
+            t.false(content.includes('diagnostic-probe'));
+        }
         t.deepEqual(content.split('\n').filter(line => /^\| (startup\.|plugin.startupMs)/.test(line))
             .map(line => line.replace(/\| OK \| \d+ \|/, '| OK | <collection-ms> |')), [
             {

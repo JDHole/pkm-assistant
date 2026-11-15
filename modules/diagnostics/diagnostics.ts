@@ -16,6 +16,8 @@ export interface DiagnosticInput {
     /** Used only as a redaction dictionary, never serialized into the report. */
     settings: unknown;
     consent: () => Promise<boolean>;
+    /** Called after the consent dialog; the composition root enforces local scan consent. */
+    memoryFacts?: () => Promise<Record<string, unknown>>;
     connection: () => Promise<ConnectionResult>;
     now?: () => number;
     date?: () => Date;
@@ -116,7 +118,20 @@ export async function runDeviceDiagnostics(input: DiagnosticInput): Promise<Diag
             assert(!await adapter.exists(tmp)); return t('diagnostics.cleaned');
         });
     }
-    if (await input.consent()) {
+    const connectionApproved = await input.consent();
+    if (input.memoryFacts) {
+        try {
+            for (const [name, value] of diagnosticFacts(await input.memoryFacts())) {
+                if (!name.startsWith('memory.conflict.')) continue;
+                if (value === null) skipped(name, t('diagnostics.unavailable'));
+                else await check(name, () => Promise.resolve(value));
+            }
+        } catch {
+            // Never include the exception: adapters can expose private paths and content.
+            skipped('memory.conflict.unreadable', t('diagnostics.unavailable'));
+        }
+    }
+    if (connectionApproved) {
         const start = now();
         try {
             const result = await input.connection();

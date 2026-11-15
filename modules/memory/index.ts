@@ -23,6 +23,8 @@
 // parseBrainLog zostaje - importuje go karta „Log wpisow" (agents/profile/profile_memory.js).
 export { AgentMemory, parseBrainLog } from './AgentMemory.js';
 export { StateCorruptionError } from './StateCorruptionError.js';
+export { scanMemoryConflicts } from './conflictScan.js';
+export type { MemoryConflictCounts } from './conflictScan.js';
 export { parseDeviceId, sessionOwnership, ForeignSessionError } from './sessionOwnership.js';
 export type { DeviceId, SessionOwnership } from './sessionOwnership.js';
 export { SessionEpochPersistenceError, parseSessionEpochFailure, sessionEpochFailureReason } from './sessionEpochFailure.js';

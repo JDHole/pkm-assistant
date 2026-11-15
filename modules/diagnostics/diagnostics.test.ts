@@ -103,6 +103,30 @@ test('in-memory diagnostics writes verified results and leaves only its report',
     ]);
     t.is(result.ok, 13); t.is(result.errors, 0);
     const saved = await f.adapter.read(result.path);
+    t.is(saved, [
+        '# Device diagnostics', '',
+        'Local report. No telemetry. Only an explicitly approved connection test contacts the model provider. Missing optional engine capabilities are marked as skipped.', '',
+        'startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself.', '',
+        '| Check | Result | Time (ms) | Detail |', '| --- | --- | ---: | --- |',
+        '| plugin.version | OK | 0 | 2.4.1 |',
+        '| isMobile | OK | 0 | true |',
+        '| structuredClone | OK | 0 | Present |',
+        '| MediaRecorder | SKIPPED | 0 | Unavailable |',
+        '| crypto.roundtrip | OK | 0 | PBKDF2 + AES-GCM round trip verified using disposable test data |',
+        '| fs.mkdir | OK | 0 | Verified |',
+        '| fs.write | OK | 0 | Verified |',
+        '| fs.read | OK | 0 | Verified |',
+        '| fs.append | OK | 0 | Verified |',
+        '| fs.stat | OK | 0 | Verified |',
+        '| fs.rename | OK | 0 | Verified |',
+        '| fs.list | OK | 0 | Verified |',
+        '| fs.remove | OK | 0 | Verified |',
+        '| fs.rmdir | OK | 0 | Temporary folder removed |',
+        '| model.connection | SKIPPED | 0 | No consent; no request sent |', '',
+        '## Memory synchronization conflict traces', '',
+        'The memory scan is incomplete or skipped; absence of synchronization conflict traces cannot be confirmed.', '',
+        memoryScopeEn, '',
+    ].join('\n'));
     t.regex(saved, /\| crypto.roundtrip \| OK \| 0 \| PBKDF2 \+ AES-GCM round trip verified using disposable test data \|/);
     t.regex(saved, /\| fs.append \| OK \| 0 \| Verified \|/);
     t.regex(result.path, /^\.pkm-assistant\/diagnostics\/2026-11-13T12-34-56-000Z-[a-z0-9]+-android.md$/);
@@ -439,4 +463,82 @@ test('invalid version, build, window and provider cannot introduce free text', a
     ]);
     t.is(await f.adapter.read(report.path), report.markdown);
     t.false(report.markdown.includes('kuba'));
+});
+
+const memoryFacts = (state = 0, brain = 0, sessions = 0, costLog = 0, unreadable = 0, skipped = 0) => ({
+    'memory.conflict.state': state, 'memory.conflict.brain': brain,
+    'memory.conflict.sessions': sessions, 'memory.conflict.costLog': costLog,
+    'memory.conflict.unreadable': unreadable, 'memory.conflict.skipped': skipped,
+});
+const memoryScopeEn = "Counts cover files with a conflict opening marker, including examples in message content that need no repair. Repairability is not assessed. Scope: each agent's state and index, up to 50 active sessions per agent in descending filename order, and the shared cost log; no archives or subfolders. Read threshold: 1 MiB per file. unreadable counts file or folder errors, skipped counts files omitted by limits. This is a snapshot, not a check of git status.";
+const memoryScopePl = 'Liczymy pliki ze znacznikiem otwarcia konfliktu, także przykłady w treści wiadomości, które nie wymagają naprawy. Bez oceny naprawialności. Zakres: stan i indeks każdego agenta, do 50 aktywnych sesji na agenta malejąco po nazwie oraz wspólny dziennik kosztów; bez archiwum i podfolderów. Próg odczytu: 1 MiB na plik. unreadable liczy błędy plików lub folderów, skipped pliki pominięte przez limity. Wynik jest migawką, nie sprawdzeniem stanu gita.';
+
+for (const locale of ['pl', 'en']) for (const found of [false, true]) test.serial(`D6 literal memory section in ${locale}, conflicts=${found}`, async t => {
+    setLocale(locale);
+    const f = fixture();
+    f.input.facts = { ...f.input.facts, ...(found ? memoryFacts(1, 2, 3, 1, 2, 4) : memoryFacts()) };
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.is(saved.slice(saved.indexOf('## ')), [
+        locale === 'pl' ? '## Ślady konfliktu synchronizacji pamięci' : '## Memory synchronization conflict traces', '',
+        found ? (locale === 'pl'
+            ? 'Pliki ze śladami konfliktu synchronizacji: 7. Plugin naprawia obsługiwane konflikty przy najbliższym użyciu, a kopie oryginałów zapisuje w .pkm-assistant/backups/. Dziennik kosztów jest odczytywany tolerancyjnie, bez przepisywania pliku. Konflikty nierozwiązywalne wymagają uwagi.'
+            : 'Files with synchronization conflict traces: 7. The plugin repairs supported conflicts on next use and saves copies of the originals in .pkm-assistant/backups/. The cost log is read tolerantly without rewriting the file. Unresolved conflicts require attention.')
+            : (locale === 'pl' ? 'W sprawdzonej pamięci nie ma śladów konfliktu synchronizacji.' : 'No synchronization conflict traces were found in the checked memory.'), '',
+        locale === 'pl' ? memoryScopePl : memoryScopeEn, '',
+        locale === 'pl' ? '| Sprawdzenie | Wynik | Czas (ms) | Szczegół |' : '| Check | Result | Time (ms) | Detail |',
+        '| --- | --- | ---: | --- |',
+        found ? '| memory.conflict.state | OK | 0 | 1 |' : '| memory.conflict.state | OK | 0 | 0 |',
+        found ? '| memory.conflict.brain | OK | 0 | 2 |' : '| memory.conflict.brain | OK | 0 | 0 |',
+        found ? '| memory.conflict.sessions | OK | 0 | 3 |' : '| memory.conflict.sessions | OK | 0 | 0 |',
+        found ? '| memory.conflict.costLog | OK | 0 | 1 |' : '| memory.conflict.costLog | OK | 0 | 0 |',
+        found ? '| memory.conflict.unreadable | OK | 0 | 2 |' : '| memory.conflict.unreadable | OK | 0 | 0 |',
+        found ? '| memory.conflict.skipped | OK | 0 | 4 |' : '| memory.conflict.skipped | OK | 0 | 0 |', '',
+    ].join('\n'));
+    t.true(saved.indexOf('| model.connection |') < saved.indexOf('## '));
+});
+
+for (const invalid of ['2', 'Synthetic private content', NaN, Infinity, -1, undefined, null, true]) test(`D6 rejects nonnumeric memory facts: ${String(invalid)}`, async t => {
+    const f = fixture();
+    f.input.facts = Object.fromEntries(Object.keys(memoryFacts()).map(name => [name, invalid]));
+    f.input.facts['memory.conflict.private-agent'] = 10;
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.deepEqual(saved.split('\n').filter(line => line.startsWith('| memory.')), [
+        '| memory.conflict.state | SKIPPED | 0 | Unavailable |',
+        '| memory.conflict.brain | SKIPPED | 0 | Unavailable |',
+        '| memory.conflict.sessions | SKIPPED | 0 | Unavailable |',
+        '| memory.conflict.costLog | SKIPPED | 0 | Unavailable |',
+        '| memory.conflict.unreadable | SKIPPED | 0 | Unavailable |',
+        '| memory.conflict.skipped | SKIPPED | 0 | Unavailable |',
+    ]);
+    t.true(saved.includes('The memory scan is incomplete or skipped; absence of synchronization conflict traces cannot be confirmed.'));
+    t.false(saved.includes('Synthetic private content'));
+    t.false(saved.includes('private-agent'));
+});
+
+for (const group of ['unreadable', 'skipped']) test(`D6 zero traces with ${group} does not claim clean memory`, async t => {
+    const f = fixture();
+    f.input.facts = { ...memoryFacts(), [`memory.conflict.${group}`]: 1 };
+    const report = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(report.path);
+    t.true(saved.includes(`| memory.conflict.${group} | OK | 0 | 1 |`));
+    t.true(saved.includes('The memory scan is incomplete or skipped; absence of synchronization conflict traces cannot be confirmed.'));
+});
+
+test('D6 deferred facts are collected once after consent and failure does not break the report or leak errors', async t => {
+    const f = fixture();
+    const events: string[] = [];
+    f.input.consent = async () => { events.push('consent'); return false; };
+    f.input.memoryFacts = async () => { events.push('scan'); return { ...memoryFacts(1), 'memory.conflict.secret': 'Synthetic private content' }; };
+    const report = await runDeviceDiagnostics(f.input);
+    t.deepEqual(events, ['consent', 'scan']);
+    t.true((await f.adapter.read(report.path)).includes('| memory.conflict.state | OK | 0 | 1 |'));
+    t.false(report.markdown.includes('Synthetic private content'));
+    f.input.memoryFacts = async () => { throw new Error('Synthetic private content'); };
+    const failed = await runDeviceDiagnostics(f.input);
+    t.true((await f.adapter.read(failed.path)).includes('| memory.conflict.unreadable | SKIPPED | 0 | Unavailable |'));
+    t.true(failed.markdown.includes('The memory scan is incomplete or skipped; absence of synchronization conflict traces cannot be confirmed.'));
+    t.false(failed.markdown.includes('Synthetic private content'));
+    t.is(f.requests(), 0);
 });

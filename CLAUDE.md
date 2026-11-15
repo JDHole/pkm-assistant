@@ -231,3 +231,7 @@ Start dopisuje do istniejącego `.gitignore` wyłącznie regułę kopii `brain.m
 ## Mobile M2 D3 - brain.md po konflikcie gita
 
 Memory scala odczyt indeksu w RAM, a jego przebudowa zachowuje obie strony i zapisuje naprawę po zweryfikowanej kopii oryginału; reguły, testy i ograniczenie legacy bez odczytu celu opisuje `modules/memory/CLAUDE.md`.
+
+## Mobile M2 D6 - diagnostyka śladów konfliktu pamięci
+
+Na obu platformach komenda diagnostyki po zgodzie na lokalny raport zlicza ślady konfliktu przez ograniczony przegląd tylko do odczytu, bez pracy przy starcie; zamknięty słownik, limity i testy opisują `modules/memory/CLAUDE.md` oraz `modules/diagnostics/CLAUDE.md`.

@@ -57,10 +57,25 @@ export function connectionDetail(result: ConnectionResult): string {
 /** Called only after constructing rows from fixed labels and validated values. */
 export function renderDiagnosticMarkdown(checks: DiagnosticCheck[], redact: (text: string) => string): string {
     const cell = (value: string) => value.replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ').replace(/[<>]/g, '');
+    const memory = checks.filter(c => c.name.startsWith('memory.conflict.'));
+    const memoryCount = (group: string): number | null => {
+        const row = memory.find(c => c.name === `memory.conflict.${group}`);
+        return row?.status === 'ok' ? count(Number(row.detail)) : null;
+    };
+    const groups = ['state', 'brain', 'sessions', 'costLog'].map(memoryCount);
+    const total = groups.reduce<number>((sum, n) => sum + (n ?? 0), 0);
+    const complete = groups.every(n => n !== null) && memoryCount('unreadable') === 0 && memoryCount('skipped') === 0;
+    const summary = total > 0 ? t('diagnostics.memory.found', { count: total })
+        : complete ? t('diagnostics.memory.clean') : t('diagnostics.memory.incomplete');
+    const table = (rows: DiagnosticCheck[]) => [
+        `| ${t('diagnostics.columns')} |`, '| --- | --- | ---: | --- |',
+        ...rows.map(c => `| ${cell(redact(c.name))} | ${t(`diagnostics.status.${c.status}`)} | ${count(c.ms) ?? 0} | ${cell(redact(c.detail))} |`), '',
+    ];
     // Filter before Markdown escaping too, so escaping cannot split a known secret.
     return redact([
         `# ${t('diagnostics.title')}`, '', t('diagnostics.privacy'), '', t('diagnostics.startup_explanation'), '',
-        `| ${t('diagnostics.columns')} |`, '| --- | --- | ---: | --- |',
-        ...checks.map(c => `| ${cell(redact(c.name))} | ${t(`diagnostics.status.${c.status}`)} | ${count(c.ms) ?? 0} | ${cell(redact(c.detail))} |`), '',
+        ...table(checks.filter(c => !c.name.startsWith('memory.conflict.'))),
+        `## ${t('diagnostics.memory.title')}`, '', summary, '', t('diagnostics.memory.scope'), '',
+        ...(memory.length ? table(memory) : []),
     ].join('\n'));
 }

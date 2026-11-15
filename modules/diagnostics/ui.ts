@@ -6,10 +6,14 @@ import type { DiagnosticReport } from './diagnostics.js';
 
 export class DiagnosticsConsentModal extends Modal {
     private resolve: ((value: boolean) => void) | null = null;
+    private memoryApproved = false;
+    get memoryScanApproved(): boolean { return this.memoryApproved; }
     readonly decision = new Promise<boolean>(resolve => { this.resolve = resolve; });
     constructor(app: App, private readonly signal?: AbortSignal) { super(app); }
     private readonly abort = () => { this.finish(false); };
-    private finish(value: boolean): void {
+    private finish(value: boolean, memoryApproved = false): void {
+        if (!this.resolve) return;
+        this.memoryApproved = memoryApproved;
         this.resolve?.(value);
         this.resolve = null;
         this.close();
@@ -21,9 +25,9 @@ export class DiagnosticsConsentModal extends Modal {
         this.contentEl.createEl('p', { text: t('diagnostics.consent') });
         const buttons = this.contentEl.createDiv({ cls: 'pkm-diagnostics-actions' });
         const decline = buttons.createEl('button', { text: t('diagnostics.without_connection') });
-        decline.onclick = () => this.finish(false);
+        decline.onclick = () => this.finish(false, true);
         const accept = buttons.createEl('button', { text: t('diagnostics.with_connection'), cls: 'mod-cta' });
-        accept.onclick = () => this.finish(true);
+        accept.onclick = () => this.finish(true, true);
     }
     onClose(): void {
         this.signal?.removeEventListener('abort', this.abort);

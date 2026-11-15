@@ -23,18 +23,22 @@ test('consent offers two explicit choices; refusal resolves false', async t => {
     t.deepEqual(choices.map(b => b.textContent), ['Save without connection test', 'Test connection and save']);
     choices[0].onclick!();
     t.is(await modal.decision, false); modal.onClose();
+    t.true(modal.memoryScanApproved);
 });
 test('only accepting the connection choice resolves true', async t => {
     const { modal } = open();
     buttons(modal)[1].onclick!();
     t.is(await modal.decision, true); modal.onClose();
+    t.true(modal.memoryScanApproved);
 });
 test('closing the dialog denies consent', async t => {
     const { modal } = open(); modal.onClose();
     t.is(await modal.decision, false);
+    t.false(modal.memoryScanApproved);
 });
 test('unload abort denies consent even if a stale accept handler runs later', async t => {
     const { modal, controller } = open(); const accept = buttons(modal)[1].onclick!;
     controller.abort(); accept();
     t.is(await modal.decision, false); modal.onClose();
+    t.false(modal.memoryScanApproved);
 });

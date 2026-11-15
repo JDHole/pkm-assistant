@@ -193,3 +193,41 @@ flagą, nigdy go nie wywołujemy.
 
 AVA nie rozstrzyga działania CapacitorAdapter, CORS, WebCrypto/strumienia w WebView,
 schowka ani wydajności prawdziwego telefonu.
+
+## Mobile M2 D6 - ślady konfliktu pamięci
+
+Zamknięty słownik przyjmuje sześć nowych faktów: `memory.conflict.state`,
+`memory.conflict.brain`, `memory.conflict.sessions`, `memory.conflict.costLog`,
+`memory.conflict.unreadable`, `memory.conflict.skipped`. Wyłącznie skończone
+nieujemne liczby, z dotychczasowym zaokrągleniem liczników; stringi, null, booleany,
+Infinity i ujemne wartości dają Unavailable, nieznane nazwy są pomijane.
+Źródłem jest `scanMemoryConflicts` modułu memory, mapowany w composition root.
+Nie przekazujemy nazw agentów, ścieżek, treści plików ani błędów adaptera.
+
+Opcjonalny callback `DiagnosticInput.memoryFacts` jest wywołany raz po zamknięciu
+okna zgody. Composition root sprawdza `DiagnosticsConsentModal.memoryScanApproved`
+i anulowanie biegu PRZED skanem; oba przyciski zapisu raportu zatwierdzają lokalny
+skan, tylko przycisk połączenia zatwierdza sieć. Zamknięcie/abort nie zatwierdza
+skanu, spóźniony klik nie zmienia decyzji. Opis PL/EN jawnie wyjaśnia ten zakres.
+Odmowa sieci nie blokuje lokalnej diagnostyki pamięci. Callback po zamknięciu bez
+wyboru zwraca pusty zestaw. Wyjątek przeglądu daje unavailable dla unreadable,
+bez treści błędu; reszta raportu i test połączenia działają dalej. Nie ma skanu
+na starcie ani przy imporcie modułu.
+
+Nowa sekcja PL/EN jest ZA dotychczasową tabelą, z niezmienioną kolejnością jej
+wierszy. Ma własną tabelę liczników, opis zakresu i jedno podsumowanie. Wszystkie
+sześć zer daje zdanie o braku śladów w sprawdzonej pamięci. Brak faktu, błąd albo
+pominięcia bez znalezionych śladów daje jawnie niepełny wynik, nigdy zapewnienie
+o czystej pamięci. Wynik dodatni podaje sumę czterech grup i objaśnia naprawę
+obsługiwanych konfliktów przy użyciu po kopii do stałego `.pkm-assistant/backups/`;
+koszty są tylko tolerancyjnie czytane, nierozwiązywalne konflikty wymagają uwagi.
+Stały tekst odróżnia przykłady w wiadomościach od rzeczywistych konfliktów oraz
+podaje limit 50 sesji i próg 1 MiB; unreadable obejmuje pliki i foldery, skipped
+pliki poza limitami. Szczegóły kosztu i wyścigów metadanych: dokumentacja memory.
+
+Testy D6 w `diagnostics.test.ts` sprawdzają literalne sekcje PL/EN (zera i wartości
+dodatnie), odrzucenie nieznanej nazwy i nieliczbowych wartości, niepełny pomiar,
+kolejność zgoda -> callback oraz zapis raportu mimo awarii callbacku, bez wycieku.
+`ui.test.ts` sprawdza zgodę lokalną obu przycisków i odmowę zamknięcia/abort.
+Test produkcyjnego startu w `src/main.mobile.test.ts` mierzy odczyty plików kontrolnych
+na obu platformach: zero przy starcie, po jednym po wyborze lokalnego raportu.

@@ -527,3 +527,7 @@ a synchronizacja pozwala odebrać raport telefonu na innym urządzeniu.
 Testy: `PluginBase.test.ts` (bajty i operacje adaptera z append i bez niego) oraz
 `security/keySanitizer.test.ts` (pełna lista i dopasowanie przez prawdziwy `git check-ignore -v`
 w izolowanym katalogu tymczasowym; Git wymagany wyłącznie przez test).
+
+M2 D6 dodaje PL/EN dla sekcji śladów konfliktu pamięci, limitów i niepełnego wyniku
+oraz rozszerza opis zgody diagnostyki o lokalny przegląd przy wyborze zapisu raportu;
+reguły prywatności i zgody należą do `modules/diagnostics/CLAUDE.md`.

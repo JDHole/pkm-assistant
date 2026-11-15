@@ -1620,3 +1620,53 @@ bajty i uporządkowane I/O zdrowych ścieżek porównane z kodem sprzed D3, w ty
 `updateBrain` oraz bezpośrednie `applyPlan` bez oryginału.
 Pomiar przed zmianą na syntetycznym pliku: prompt niósł 3 bloki konfliktu;
 rebuild zostawiał 2 bloki oraz dwie kopie ręcznego wiersza "Wspólny".
+
+## Mobile M2 D6 - przegląd śladów konfliktu na żądanie
+
+Publiczny `scanMemoryConflicts(adapter)` i typ `MemoryConflictCounts` z barrela
+zwracają wyłącznie sześć liczb: `state`, `brain`, `sessions`, `costLog`, `unreadable`,
+`skipped`. Funkcja nie tworzy AgentMemory, nie zapisuje, nie loguje, nie naprawia
+ani nie zmienia cache. I/O to tylko wstrzyknięte `exists/list/stat/read`.
+Composition root wywołuje ją wyłącznie w komendzie diagnostyki, po jawnym wyborze
+zapisu raportu w oknie zgody; start pluginu nie uruchamia przeglądu.
+
+Katalogi agentów są odkrywane przez adapter w `.pkm-assistant/agents`, niezależnie
+od załadowanych profili. Sprawdzane są `.state.json`, `brain.md`, bezpośrednie
+`sessions/active/*.md` i jeden wspólny `.pkm-assistant/cost_log.jsonl`. Brak rekurencji:
+archiwum, `.discarded`, notatki brain i inne podfoldery pozostają poza zakresem.
+Listing przyjmuje pełne ścieżki lub basenames, odrzuca obce/zagnieżdżone wpisy
+oraz deduplikuje bezpośrednie dzieci.
+
+Limit to 50 sesji na agenta malejąco po nazwie (przy typowych nazwach z datą daje
+pierwszeństwo nowszym, nie jest sortowaniem po mtime). Daje ograniczony koszt bez
+statowania wszystkich sesji. `stat` przed każdym odczytem dopuszcza do 1 MiB
+włącznie; większe pliki oraz sesje poza limitem zwiększają `skipped`. Brak lub
+niewiarygodny rozmiar nie pozwala na odczyt, zwiększa `unreadable`. Błąd odczytu,
+stat, exists lub list zwiększa `unreadable` raz na dany plik/folder i nie przerywa
+innych grup ani agentów. Brak oczekiwanego pliku/folderu nie jest konfliktem ani
+błędem; zniknięcie sesji znanej z listingu jest nieodczytanym plikiem. Metadane
+adaptera są migawką: fałszywe exists=false może pominąć folder, a wzrost pliku
+między stat i read może przekroczyć próg. Bez API częściowego odczytu nie da się
+zagwarantować twardego limitu zaalokowanych bajtów w takim wyścigu.
+
+`gitConflict.ts` udostępnia wspólny `isGitConflictStart` używany również przez
+`splitGitConflict` oraz liniowy `hasGitConflictStart`, bez rekonstrukcji stron.
+Ślad to wiersz zaczynający się od siedmiu `<` i spacji lub równy siedmiu `<`;
+CRLF działa tak jak w dotychczasowym splitterze. Jeden plik liczy się raz, również
+przy niepełnym konflikcie i przy literalnym przykładzie w zdrowej wiadomości lub
+ogrodzeniu kodu. To świadomie licznik śladów, nie dowód uszkodzenia.
+
+Nie klasyfikujemy naprawialności sesji ani indeksów: nie budujemy pełnych projekcji
+scalania do pomiaru liczbowego, a obecny resolver D7b może mieć koszt kwadratowy
+przy gęstych przykładach. Wszystkie cztery grupy mają tę samą tanią definicję.
+Koszt: listing katalogów, sortowanie nazw sesji O(S log S) oraz do 52 odczytów
+na agenta i jeden wspólny, każdy po stat; skan tekstu liniowy, pliki sekwencyjnie,
+bez przechowywania ich treści w wyniku. Nie ma limitu liczby agentów ani liczby
+wpisów zwracanych przez pojedynczy listing. Zero zapisów oznacza też zero kopii.
+D6 nie naprawia nieoznaczonych splotów i nie ustala stanu indeksu gita.
+
+`conflictScan.test.ts`: dwa syntetyczne katalogi agentów, wszystkie grupy, przykład
+w treści, zero mutacji, 50 sesji niezależnie dla każdego agenta, granica 1 MiB,
+awarie folderów i odczytu, nieznany rozmiar, basenames/pełne ścieżki, deduplikacja,
+wykluczenia i definicja znacznika. `src/main.mobile.test.ts` sprawdza produkcyjny
+start oraz jeden odczyt obu plików kontrolnych dopiero po zgodzie na lokalny raport.
