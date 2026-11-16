@@ -3932,6 +3932,9 @@ span.cs-note-link {
 
 /* U20: phone and tablet; width/height limits come from the visible message list. */
 body.is-mobile .pkm-chat-view .cs-selection-menu {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
   box-sizing: border-box;
   width: max-content;
   flex-wrap: wrap;

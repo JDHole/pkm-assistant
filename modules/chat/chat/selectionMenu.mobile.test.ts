@@ -262,6 +262,113 @@ for (const action of ['quote', 'context'] as const) {
     }
 }
 
+for (const [press, release] of [['pointerdown', 'pointerup'], ['mousedown', 'mouseup'], ['touchstart', 'touchend']] as const) {
+    test.serial(`mobile padding: ${press}, ${release}, click and empty selection hide the menu`, t => {
+        const s = setup();
+        try {
+            s.show();
+            const menu = s.menus()[0];
+            t.deepEqual(menu.children.map(child => child.textContent), ['Cytuj', 'Dodaj jako kontekst']);
+            menu.emit(press, { target: menu });
+            s.doc.emit(release, { target: menu });
+            menu.emit('click', { target: menu });
+            s.selection.isCollapsed = true;
+            s.doc.emit('selectionchange');
+            s.clock.advance(249);
+            t.is(s.menus()[0], menu);
+            s.clock.advance(1);
+            t.is(s.menus().length, 0);
+        } finally { s.restore(); }
+    });
+
+    test.serial(`mobile padding: ${press} refreshes retained selection, position and a later quote`, t => {
+        const s = setup();
+        try {
+            s.show();
+            const menu = s.menus()[0];
+            menu.emit(press, { target: menu });
+            s.doc.emit(release, { target: menu });
+            menu.emit('click', { target: menu });
+            s.rectangles([rect(70, 180, 90, 20)]);
+            // Release itself must evaluate the selection even without selectionchange.
+            s.clock.advance(250);
+            t.is(s.menus().length, 1);
+            t.deepEqual(s.menus()[0].style, { maxWidth: '300px', maxHeight: '500px', left: '60px', top: '208px' });
+            s.selectText('Nowy fragment');
+            s.rectangles([rect(90, 220, 80, 20)]);
+            s.show();
+            t.deepEqual(s.menus()[0].style, { maxWidth: '300px', maxHeight: '500px', left: '80px', top: '248px' });
+            s.menus()[0].children[0].emit('click');
+            t.is(s.input.value, '> Nowy fragment\n\n');
+            t.is(s.clears(), 1);
+        } finally { s.restore(); }
+    });
+
+    for (const target of ['padding', 'button'] as const) {
+        test.serial(`mobile ${target}: ${release} without click releases the selection lock`, t => {
+            const s = setup();
+            try {
+                s.show();
+                const menu = s.menus()[0];
+                const element = target === 'padding' ? menu : menu.children[0];
+                t.is(menu.children[0].textContent, 'Cytuj');
+                menu.emit(press, { target: element });
+                s.doc.emit(release, { target: element });
+                s.clock.advance(250);
+                t.is(s.menus().length, 1);
+                s.selection.isCollapsed = true;
+                s.doc.emit('selectionchange');
+                s.clock.advance(250);
+                t.is(s.menus().length, 0);
+            } finally { s.restore(); }
+        });
+    }
+
+    for (const action of ['quote', 'context'] as const) {
+        test.serial(`mobile ${action}: long ${press}, empty selection, ${release}, click acts once`, t => {
+            const s = setup();
+            try {
+                s.show();
+                const menu = s.menus()[0];
+                const button = menu.children[action === 'quote' ? 0 : 1];
+                menu.emit(press, { target: button });
+                s.selection.isCollapsed = true;
+                s.selectText('');
+                s.doc.emit('selectionchange');
+                s.clock.advance(10000);
+                t.is(s.menus()[0], menu);
+                s.doc.emit(release, { target: button });
+                s.clock.advance(249);
+                t.is(s.menus()[0], menu);
+                button.emit('click', { target: button });
+                menu.emit('click', { target: button });
+                s.clock.advance(1000);
+                if (action === 'quote') {
+                    t.is(s.input.value, '> Pierwsza linia\n> Druga linia\n\n');
+                    t.is(s.resized(), 1);
+                    t.is(s.focused(), 1);
+                } else t.deepEqual(s.attachments, ['Pierwsza linia\nDruga linia']);
+                t.is(s.clears(), 1);
+                t.is(s.menus().length, 0);
+            } finally { s.restore(); }
+        });
+    }
+}
+
+test.serial('mobile padding: click without release event also unlocks the menu', t => {
+    const s = setup();
+    try {
+        s.show();
+        const menu = s.menus()[0];
+        t.is(menu.children[0].textContent, 'Cytuj');
+        menu.emit('pointerdown', { target: menu });
+        menu.emit('click', { target: menu });
+        s.selection.isCollapsed = true;
+        s.clock.advance(250);
+        t.is(s.menus().length, 0);
+    } finally { s.restore(); }
+});
+
 test.serial('mobile: scroll hides then restores at current coordinates; offscreen selection stays hidden', t => {
     const s = setup();
     try {

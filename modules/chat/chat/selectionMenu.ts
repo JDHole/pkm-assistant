@@ -273,6 +273,7 @@ export function installSelectionMenu(view: ChatViewLike, options: SelectionMenuO
         menu.addEventListener('pointerdown', press);
         menu.addEventListener('mousedown', press);
         menu.addEventListener('touchstart', press, { passive: true });
+        menu.addEventListener('click', onMobileRelease);
         container.appendChild(menu);
         menuEl = menu;
         const position = mobileSelectionPosition(rects, area, menu.getBoundingClientRect());
@@ -319,8 +320,10 @@ export function installSelectionMenu(view: ChatViewLike, options: SelectionMenuO
         settleSelection();
     }
 
-    function onMobileRelease(e: Event): void {
-        if (pressingMenu && !(e.target instanceof Node && menuEl?.contains(e.target))) onMobileCancel();
+    function onMobileRelease(): void {
+        // Release the lock even on padding or when no click follows. Debouncing
+        // keeps the snapshot button alive for the click after pointerup/touchend.
+        if (pressingMenu) onMobileCancel();
     }
 
     function onContainerScroll(): void {
@@ -333,6 +336,8 @@ export function installSelectionMenu(view: ChatViewLike, options: SelectionMenuO
         document.addEventListener('pointerdown', onMobilePress, true);
         document.addEventListener('touchstart', onMobilePress, true);
         document.addEventListener('pointerup', onMobileRelease);
+        document.addEventListener('mouseup', onMobileRelease);
+        document.addEventListener('touchend', onMobileRelease);
         document.addEventListener('pointercancel', onMobileCancel);
         document.addEventListener('touchcancel', onMobileCancel);
     } else {
@@ -355,6 +360,8 @@ export function installSelectionMenu(view: ChatViewLike, options: SelectionMenuO
         document.removeEventListener('pointerdown', onMobilePress, true);
         document.removeEventListener('touchstart', onMobilePress, true);
         document.removeEventListener('pointerup', onMobileRelease);
+        document.removeEventListener('mouseup', onMobileRelease);
+        document.removeEventListener('touchend', onMobileRelease);
         document.removeEventListener('pointercancel', onMobileCancel);
         document.removeEventListener('touchcancel', onMobileCancel);
         container.removeEventListener('mouseup', onMouseUp);

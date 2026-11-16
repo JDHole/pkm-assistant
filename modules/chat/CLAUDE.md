@@ -2502,7 +2502,8 @@ brak wywołania modelu przy odmowie oraz skuteczną ponowną edycję po otwarciu
 ## Mobile M3 U20 - menu zaznaczenia na dotyk
 
 `chat_ui.ts` przekazuje `Platform.isMobile` do `installSelectionMenu`; telefon i tablet
-używają jednej ścieżki `document.selectionchange`, bez mobilnych `mouseup`/`keyup`.
+używają jednej ścieżki oceny `document.selectionchange`, bez desktopowych wyzwalaczy
+`mouseup`/`keyup` na kontenerze. Mobilny `document.mouseup` tylko zwalnia blokadę menu.
 Opcjonalny port timera pozwala testować 250 ms uspokojenia bez czekania. Zaznaczenie
 musi należeć do treści `.cs-message__text` / `.cs-tile__body` tego kontenera;
 nasłuch dokumentu nie przejmuje zaznaczeń z innego widoku. Pusty tekst, nagłówki
@@ -2520,19 +2521,27 @@ przecięcie z górą panelu pola chroni tablet, który nadal ma panel absolutny.
 
 Mobile pokazuje kolejno istniejące etykiety i18n Cytuj / Dodaj jako kontekst,
 bez Kopiuj. Reguły `body.is-mobile .pkm-chat-view` dają przyciskom minimum
-44 px wysokości i 14 px tekstu; bazowe reguły desktopowe pozostają niezmienione.
+44 px wysokości i 14 px tekstu. U21 wyróżnia sam dymek ramką `--interactive-accent`,
+tłem `--background-secondary` i mocniejszym cieniem; bazowe reguły desktopowe pozostają niezmienione.
 Każdy przycisk przechowuje tekst z chwili pokazania menu. `pointerdown` i `mousedown`
 na menu wywołują `preventDefault`, żeby nie przenosić fokusu. `touchstart` tylko
 blokuje usunięcie menu (passive), ponieważ anulowanie tego zdarzenia może usunąć
 późniejszy `click`. Uspokojenie pustego `selectionchange` podczas naciśnięcia
 nie usuwa przycisku przed akcją. Kliknięcie wykonuje dotychczasową akcję i czyści
-menu oraz zaznaczenie; anulowanie gestu, puszczenie poza menu lub nowe naciśnięcie
-poza nim zwalnia blokadę. Scroll chowa menu od razu i ponawia ocenę po 250 ms.
+menu oraz zaznaczenie. U21 zwalnia blokadę przy każdym `pointerup`, `mouseup` lub
+`touchend`, również wewnątrz menu i bez późniejszego `click`. Klik samego menu
+zwalnia ją także wtedy, gdy nie dotarło zdarzenie puszczenia. Zwolnienie uruchamia
+tę samą ocenę po 250 ms: brak zaznaczenia chowa menu, zachowane zaznaczenie odświeża
+tekst i pozycję. Menu pozostaje przez te 250 ms dla oczekującego kliknięcia przycisku;
+czas przytrzymania przed puszczeniem jest nieograniczony. Akcja sprząta oczekującą
+ocenę, a bąbelkowanie jej kliknięcia nie uruchamia jej ponownie. Anulowanie gestu
+lub nowe naciśnięcie poza menu nadal zwalnia blokadę.
+Scroll chowa menu od razu i ponawia ocenę po 250 ms.
 Escape anuluje oczekującą ocenę. Odpięcie usuwa nasłuchy dokumentu/kontenera,
 kasuje timery obu platform i blokuje spóźnione callbacki przed odczytem DOM.
 Cykl `_selectionMenuDetach` w renderze i zamknięciu pozostaje bez zmian.
 
-`chat/selectionMenu.mobile.test.ts`: 19 testów na syntetycznym DOM i zegarze.
+`chat/selectionMenu.mobile.test.ts`: 38 testów na syntetycznym DOM i zegarze.
 Cztery testy geometrii sprawdzają literalne pozycje pod/nad, obie krawędzie,
 wieloliniowość i niski obszar. PL/EN sprawdzają debounce i dokładnie dwa przyciski;
 desktop sprawdza brak reakcji na selectionchange, trzy etykiety, pozycję oraz
@@ -2540,6 +2549,11 @@ mysz/klawiaturę/scroll. Pozostałe sprawdzają zakres zaznaczenia, sześć komb
 naciśnięcia i akcji po utracie zaznaczenia, powrót po scrollu, panel tabletu
 oraz wysokość listy U7, anulowanie gestu/Escape i sprzątanie na obu platformach.
 Istniejące 10 testów menu pozostaje bez zmian asercji.
+U21 dodaje 19 testów: dla pointer/mouse/touch klik paddingu i zanik zaznaczenia,
+odświeżenie pozycji oraz późniejszy cytat z nowego tekstu, puszczenie bez kliknięcia
+na paddingu i przycisku, a także obie akcje po długim naciśnięciu, utracie zaznaczenia
+i puszczeniu. Osobny test sprawdza klik paddingu bez zdarzenia puszczenia.
+Pierwotne sześć kombinacji naciśnięcia i akcji zachowuje wszystkie asercje.
 
 Pomiar U20 w Chromium 153: produkcyjny kontroler menu i CSS, syntetyczna obudowa
 czatu, PL/EN przy 360x804, 412x880 i 768x804. Sześć wariantów mobile mieści menu
