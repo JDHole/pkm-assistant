@@ -37,7 +37,7 @@ export const pl: Record<string, string> = {
   "diagnostics.drafts.disabled": "Zapisy sub-agenta są wyłączone. Etap ostatniej próby startu: {{stage}}.",
   "diagnostics.drafts.incomplete": "Wynik magazynu kopii jest niespójny lub niepełny; nie można potwierdzić dostępności zapisów sub-agenta.",
   "diagnostics.title": "Diagnostyka urządzenia",
-  "diagnostics.startup_explanation": "startup.layoutWaitMs to oczekiwanie na Obsidiana przed inicjalizacją pluginu; pozostałe fazy startu mierzą sam plugin.",
+  "diagnostics.startup_explanation": "startup.layoutWaitMs to oczekiwanie na Obsidiana przed inicjalizacją pluginu; pozostałe fazy startu mierzą sam plugin. Podetapy zasobów biegną równolegle, więc ich suma może przekraczać resourcesMs.",
   "diagnostics.run": deviceDiagnosticsCommand,
   "diagnostics.settings_desc": "Zapisz prywatny raport urządzenia w vaulcie. Test połączenia z modelem wymaga osobnej zgody.",
   "diagnostics.consent": "Dodać test połączenia? Wyśle on jedną krótką wiadomość testową do dostawcy domyślnego modelu i może naliczyć małą opłatę. Nie wysyła notatek ani rozmów. Możesz zapisać raport lokalny bez tego testu.",

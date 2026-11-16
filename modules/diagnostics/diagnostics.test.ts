@@ -111,7 +111,7 @@ test('in-memory diagnostics writes verified results and leaves only its report',
     t.is(saved, [
         '# Device diagnostics', '',
         'Local report. No telemetry. Only an explicitly approved connection test contacts the model provider. Missing optional engine capabilities are marked as skipped.', '',
-        'startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself.', '',
+        'startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself. Resource sub-stages run in parallel, so their sum may exceed resourcesMs.', '',
         '| Check | Result | Time (ms) | Detail |', '| --- | --- | ---: | --- |',
         '| plugin.version | OK | 0 | 2.4.1 |',
         '| isMobile | OK | 0 | true |',
@@ -668,4 +668,101 @@ for (const failure of ['none', 'statMissing', 'binary', 'size', 'writeBinary', '
         t.deepEqual([...f.binaries], []);
         t.deepEqual([...f.folders], ['', '.pkm-assistant', '.pkm-assistant/diagnostics']);
     });
+}
+
+for (const locale of ['en', 'pl']) {
+    test.serial(`agent startup sub-stages: complete saved report in ${locale}`, async t => {
+        setLocale(locale);
+        const f = fixture();
+        f.input.facts = {
+            'startup.skinMs': 3, 'startup.agentsMs': 95,
+            'startup.agents.loadMs': 10, 'startup.agents.memoryMs': 40,
+            'startup.agents.memoryMaxMs': 39, 'startup.agents.memoryCount': 2,
+            'startup.agents.memoryFailed': 1, 'startup.agents.resourcesMs': 35,
+            'startup.agents.skillsMs': 20, 'startup.agents.subAgentsMs': 30,
+            'startup.agents.templatesMs': 35, 'startup.agents.artifactTypesMs': 25,
+            'startup.agents.komunikatorMs': 10, 'startup.agents.vaultMapMs': 15,
+            'startup.agents.playbooksMs': 7, 'startup.toolsMs': 60,
+            'startup.agents.unknown': 'Synthetic private text',
+        };
+        const result = await runDeviceDiagnostics(f.input);
+        const saved = await f.adapter.read(result.path);
+        t.deepEqual(saved.split('\n').filter(line => line.startsWith('| startup.')), [
+            '| startup.skinMs | OK | 0 | 3 |',
+            '| startup.agentsMs | OK | 0 | 95 |',
+            '| startup.agents.loadMs | OK | 0 | 10 |',
+            '| startup.agents.memoryMs | OK | 0 | 40 |',
+            '| startup.agents.memoryMaxMs | OK | 0 | 39 |',
+            '| startup.agents.memoryCount | OK | 0 | 2 |',
+            '| startup.agents.memoryFailed | OK | 0 | 1 |',
+            '| startup.agents.resourcesMs | OK | 0 | 35 |',
+            '| startup.agents.skillsMs | OK | 0 | 20 |',
+            '| startup.agents.subAgentsMs | OK | 0 | 30 |',
+            '| startup.agents.templatesMs | OK | 0 | 35 |',
+            '| startup.agents.artifactTypesMs | OK | 0 | 25 |',
+            '| startup.agents.komunikatorMs | OK | 0 | 10 |',
+            '| startup.agents.vaultMapMs | OK | 0 | 15 |',
+            '| startup.agents.playbooksMs | OK | 0 | 7 |',
+            '| startup.toolsMs | OK | 0 | 60 |',
+        ]);
+        t.is(saved.split('\n')[4], locale === 'pl'
+            ? 'startup.layoutWaitMs to oczekiwanie na Obsidiana przed inicjalizacją pluginu; pozostałe fazy startu mierzą sam plugin. Podetapy zasobów biegną równolegle, więc ich suma może przekraczać resourcesMs.'
+            : 'startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself. Resource sub-stages run in parallel, so their sum may exceed resourcesMs.');
+        t.false(saved.includes('Synthetic private text'));
+    });
+
+    test.serial(`agent startup sub-stages: partial saved report in ${locale}`, async t => {
+        setLocale(locale);
+        const f = fixture();
+        f.input.facts = {
+            'startup.agentsMs': 10, 'startup.agents.loadMs': 0,
+            'startup.agents.memoryMaxMs': undefined, 'startup.agents.memoryCount': 0,
+            'startup.agents.resourcesMs': undefined, 'startup.toolsMs': 60,
+        };
+        const result = await runDeviceDiagnostics(f.input);
+        t.deepEqual((await f.adapter.read(result.path)).split('\n').filter(line => line.startsWith('| startup.')), [
+            '| startup.agentsMs | OK | 0 | 10 |',
+            '| startup.agents.loadMs | OK | 0 | 0 |',
+            locale === 'pl' ? '| startup.agents.memoryMaxMs | POMINIĘTE | 0 | Niedostępne |' : '| startup.agents.memoryMaxMs | SKIPPED | 0 | Unavailable |',
+            '| startup.agents.memoryCount | OK | 0 | 0 |',
+            locale === 'pl' ? '| startup.agents.resourcesMs | POMINIĘTE | 0 | Niedostępne |' : '| startup.agents.resourcesMs | SKIPPED | 0 | Unavailable |',
+            '| startup.toolsMs | OK | 0 | 60 |',
+        ]);
+    });
+
+    for (const invalid of [-1, 1.5, 'Synthetic private text', Infinity, NaN, null, true]) {
+        test.serial(`agent startup sub-stages reject ${String(invalid)} in ${locale}`, async t => {
+            setLocale(locale);
+            const f = fixture();
+            f.input.facts = {
+                'startup.agents.loadMs': invalid, 'startup.agents.memoryMs': invalid,
+                'startup.agents.memoryMaxMs': invalid, 'startup.agents.memoryCount': invalid,
+                'startup.agents.memoryFailed': invalid, 'startup.agents.resourcesMs': invalid,
+                'startup.agents.skillsMs': invalid, 'startup.agents.subAgentsMs': invalid,
+                'startup.agents.templatesMs': invalid, 'startup.agents.artifactTypesMs': invalid,
+                'startup.agents.komunikatorMs': invalid, 'startup.agents.vaultMapMs': invalid,
+                'startup.agents.playbooksMs': invalid,
+            };
+            const result = await runDeviceDiagnostics(f.input);
+            const saved = await f.adapter.read(result.path);
+            const unavailable = locale === 'pl' ? 'Niedostępne' : 'Unavailable';
+            const skipped = locale === 'pl' ? 'POMINIĘTE' : 'SKIPPED';
+            t.deepEqual(saved.split('\n').filter(line => line.startsWith('| startup.')), [
+                `| startup.agents.loadMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.memoryMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.memoryMaxMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.memoryCount | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.memoryFailed | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.resourcesMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.skillsMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.subAgentsMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.templatesMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.artifactTypesMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.komunikatorMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.vaultMapMs | ${skipped} | 0 | ${unavailable} |`,
+                `| startup.agents.playbooksMs | ${skipped} | 0 | ${unavailable} |`,
+            ]);
+            t.false(saved.includes('Synthetic private text'));
+        });
+    }
 }

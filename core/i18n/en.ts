@@ -37,7 +37,7 @@ export const en: Record<string, string> = {
   "diagnostics.drafts.disabled": "Sub-agent writes are disabled. Stage of the last startup attempt: {{stage}}.",
   "diagnostics.drafts.incomplete": "The draft storage result is inconsistent or incomplete; sub-agent write availability cannot be confirmed.",
   "diagnostics.title": "Device diagnostics",
-  "diagnostics.startup_explanation": "startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself.",
+  "diagnostics.startup_explanation": "startup.layoutWaitMs is the wait for Obsidian before plugin initialization; the remaining startup phases measure the plugin itself. Resource sub-stages run in parallel, so their sum may exceed resourcesMs.",
   "diagnostics.run": deviceDiagnosticsCommand,
   "diagnostics.settings_desc": "Save a private device report in your vault. A model connection test requires separate consent.",
   "diagnostics.consent": "Include a connection test? This sends one short test message to your default model provider and may incur a small charge. No notes or conversations are sent. You can save the local report without this test.",

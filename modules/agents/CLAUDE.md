@@ -272,3 +272,40 @@ anulowania i przejęcia z otwarciem czatu sprawdza `chat/chat/phoneSessionMenu.t
 M2 D3: panel Pamięć przepuszcza już odczytany `brain.md` przez `readBrainContent`
 z barrela memory przed parsowaniem "Na teraz". Odczyt nie zapisuje naprawy ani kopii;
 zdrowy plik zachowuje dotychczasowe `exists` + `read`.
+
+## Mobile M4 S1a - podetapy inicjalizacji
+
+`AgentManager.startupTimings` zwraca niezależną migawkę tylko do odczytu z liczbami
+ostatniego przebiegu `initialize()`. Piąty, opcjonalny argument konstruktora to
+zegar `() => number`, domyślnie `performance.now()` jak w fazach U11. Dotychczasowy
+`log.timing` nadal używa Date.now. Pomiar nie dodaje I/O, await ani logów i nie
+przestawia zależności na żadnej platformie; obserwator komunikatora/mapy zwraca
+oryginalną obietnicę do Promise.all, bez dodatkowego kroku oczekiwania.
+
+- `loadMs`: loadAllAgents; `memoryMs`: cały równoległy blok pamięci.
+- `memoryMaxMs`: największy czas od wejścia w blok pamięci do udanego zakończenia
+  inicjalizacji jednej pamięci, bez tożsamości agenta; brak sukcesów = brak wartości.
+- `memoryCount` / `memoryFailed`: poprawnie zainicjalizowane pamięci / błędy,
+  zerowane po wejściu w blok. Błąd pojedynczego agenta nadal jest logowany i nie
+  blokuje pozostałych agentów ani dalszego startu.
+- `resourcesMs`: cały Promise.all zasobów; `skillsMs`, `subAgentsMs`, `templatesMs`,
+  `artifactTypesMs`, `komunikatorMs`, `vaultMapMs`: od wspólnego początku bloku do
+  końca danej gałęzi. templates obejmuje oba magazyny i ensureFactoryTemplates.
+  Wyłączony komunikator nie ma czasu. Suma równoległych gałęzi nie jest czasem bloku.
+- `playbooksMs`: ensureStarterFiles, bez czasu rejestracji watchera.
+
+Czasy są zaokrąglone do nieujemnych ms. Niezakończona albo rzucająca gałąź nie
+ustawia liczby. Dotychczasowy zewnętrzny catch w initialize nadal loguje tę samą
+wartość wyjątku i kończy metodę bez odrzucenia obietnicy; po awarii zasobów nie
+uruchamia watchera/playbooków. Inne już uruchomione gałęzie nadal mogą się zakończyć
+i uzupełnić pomiar tego przebiegu. Każde initialize od razu zastępuje cały obiekt;
+spóźnione gałęzie poprzedniego przebiegu nie dotykają nowego. `reload()` wywołuje
+initialize, więc również zastępuje pomiar (to ostatnia próba, nie trwała historia
+pierwszego startu). reloadSkills/reloadSubAgents nie zmieniają tych liczb.
+
+`AgentManager.timings.test.ts` wykonuje produkcyjne initialize/reload z zegarem
+sterowanym zakończeniami zależności: pełne czasy, różne końce równoległych gałęzi,
+częściowy błąd pamięci, ta sama wartość błędu zasobów w istniejącym catch, wyłączony
+komunikator, pusty reload, jeden watcher i izolacja migawki. Literalny ślad wywołań
+jest jednakowy z odczytywaniem pomiaru i bez niego. Dotychczasowy test startu
+`AgentManager.startup.test.ts` pozostaje bez zmian.

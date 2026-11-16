@@ -59,6 +59,13 @@ interface PromptRuntimeContext extends AgentPromptContext {
     activeArtifact?: ThinArtifact | null;
 }
 
+/** Numeric-only snapshot of the latest initialize attempt; absent means not completed. */
+type AgentStartupMetrics = Partial<Record<
+    'loadMs' | 'memoryMs' | 'memoryMaxMs' | 'memoryCount' | 'memoryFailed' |
+    'resourcesMs' | 'skillsMs' | 'subAgentsMs' | 'templatesMs' |
+    'artifactTypesMs' | 'komunikatorMs' | 'vaultMapMs' | 'playbooksMs', number
+>>;
+
 /**
  * AgentManager class - manages all agents and their state
  */
@@ -79,12 +86,18 @@ export class AgentManager {
     declare activeAgent: Agent | null;
     declare agentMemories: Map<string, AgentMemory>;
     declare listeners: Array<(event: string, data: Record<string, unknown>) => void>;
+    private startupMetrics: AgentStartupMetrics = {};
+
+    get startupTimings(): Readonly<AgentStartupMetrics> {
+        return { ...this.startupMetrics };
+    }
+
     declare _unwatchAgents: (() => void) | null;
     /**
      * @param {Object} vault - Obsidian Vault object
      * @param {Object} settings - Plugin settings
      */
-    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null, readonly deviceId: DeviceId | null = null) {
+    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null, readonly deviceId: DeviceId | null = null, private readonly startupNow: () => number = () => performance.now()) {
         this.vault = vault;
         this.settings = settings;
         this.plugin = plugin;
@@ -136,22 +149,35 @@ export class AgentManager {
      */
     async initialize() {
         const initStart = Date.now();
+        // Capture a per-run object so late parallel completions cannot overwrite a newer run.
+        const timings: AgentStartupMetrics = {};
+        this.startupMetrics = timings;
+        const elapsed = (start: number) => Math.max(0, Math.round(this.startupNow() - start));
         log.group('AgentManager', 'initialize()');
         try {
+            const loadStart = this.startupNow();
             const allAgents = await this.loader.loadAllAgents();
+            timings.loadMs = elapsed(loadStart);
             log.debug('AgentManager', `Załadowano ${allAgents.length} agentów: ${allAgents.map(a => a.name).join(', ')}`);
 
             // E2: Initialize agent memories in parallel
+            const memoryStart = this.startupNow();
+            timings.memoryCount = 0;
+            timings.memoryFailed = 0;
             await Promise.all(allAgents.map(async (agent) => {
                 try {
                     this.agents.set(agent.name, agent);
                     const memory = await this._initializeMemoryForAgent(agent);
+                    timings.memoryMaxMs = Math.max(timings.memoryMaxMs ?? 0, elapsed(memoryStart));
+                    timings.memoryCount!++;
                     this.agentMemories.set(agent.name, memory);
                     log.debug('AgentManager', `Pamięć ${agent.name}: OK`);
                 } catch (agentError) {
+                    timings.memoryFailed!++;
                     log.error('AgentManager', `Błąd inicjalizacji agenta "${agent.name}" — pomijam, reszta się ładuje:`, agentError);
                 }
             }));
+            timings.memoryMs = elapsed(memoryStart);
 
             // Set default active agent (Jaskier or first available)
             // TS-boundary: `settings` is the open plugin settings bag (SettingsBag index signature
@@ -161,17 +187,26 @@ export class AgentManager {
             log.info('AgentManager', `Aktywny agent: ${this.activeAgent?.name || 'BRAK'}`);
 
             // E1: Load independent resources in parallel
+            const resourcesStart = this.startupNow();
+            const observeResource = (promise: Promise<void> | undefined, phase: 'komunikatorMs' | 'vaultMapMs') => {
+                // Observe completion without replacing the promise awaited by the existing block.
+                // Its rejection still reaches Promise.all and the original catch unchanged.
+                void promise?.then(() => { timings[phase] = elapsed(resourcesStart); }, () => {});
+                return promise;
+            };
             await Promise.all([
                 (async () => {
                     // Plugin nie dostarcza fabrycznych skilli - loadAllSkills() czyta tylko
                     // to, co user sam ma na dysku (znosi brak folderu, patrz SkillLoader.loadAllSkills).
                     await this.skillLoader.loadAllSkills();
                     log.debug('AgentManager', `Skills: ${this.skillLoader.cache?.size || 0} załadowanych`);
+                    timings.skillsMs = elapsed(resourcesStart);
                 })(),
                 (async () => {
                     await this.subAgentLoader.ensureStarterSubAgents();
                     await this.subAgentLoader.loadAllSubAgents();
                     log.debug('AgentManager', `Sub-agents: ${this.subAgentLoader.cache?.size || 0} załadowanych`);
+                    timings.subAgentsMs = elapsed(resourcesStart);
                 })(),
                 // Po loadAll seed fabrycznych szablonów Deep Research (RAZ, marker;
                 // kasacja usera szanowana - patrz factoryTemplates.js).
@@ -184,16 +219,19 @@ export class AgentManager {
                         subAgentTemplateStore: this.subAgentTemplateStore,
                     });
                     log.debug('AgentManager', `Szablony: ${this.skillTemplateStore.count()} skilli / ${this.subAgentTemplateStore.count()} subów`);
+                    timings.templatesMs = elapsed(resourcesStart);
                 })(),
                 (async () => {
                     // Brak pola oznacza default UI, nie zgodę na przepisanie wspólnych typów.
                     await this.artifactTypeLoader.ensureBuiltinTypes(this.settings.pkmAssistant?.language);
                     await this.artifactTypeLoader.loadAllTypes();
                     log.debug('AgentManager', `Artifact types: ${this.artifactTypeLoader.cache?.size || 0} załadowanych`);
+                    timings.artifactTypesMs = elapsed(resourcesStart);
                 })(),
-                this.komunikatorManager?.ensureFolder(),
-                this.vaultMap.initialize(),
+                observeResource(this.komunikatorManager?.ensureFolder(), 'komunikatorMs'),
+                observeResource(this.vaultMap.initialize(), 'vaultMapMs'),
             ]);
+            timings.resourcesMs = elapsed(resourcesStart);
 
             if (!this._unwatchAgents) {
                 // emit `agents:changed` skasowany - grep po calym repo (core/modules/src/config/
@@ -208,7 +246,9 @@ export class AgentManager {
             // TS-boundary: Agent.focusFolders (AgentFocusFolder - path/access/group all optional
             // on one shape) vs VaultMapFocusFolder (string | {path,access} | {group}, path
             // required in the object branch) - same runtime entries, stricter union on this side.
+            const playbooksStart = this.startupNow();
             await this.playbookManager.ensureStarterFiles(allAgents as VaultMapAgent[]);
+            timings.playbooksMs = elapsed(playbooksStart);
 
             this._emit('agents:loaded', { count: this.agents.size });
 

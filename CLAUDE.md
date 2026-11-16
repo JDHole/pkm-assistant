@@ -264,3 +264,7 @@ etap jako błąd; kontrakty i testy opisują dokumentacje diagnostics oraz tools
 ## Mobile M4 F2g - host kopii bez przejścia vaulta
 
 Host kopii na obu platformach od F2i odtwarza w RAM migawkę starego przejścia z indeksu Obsidiana i zmian kopii po każdym udanym zapisie/mkdir, przygotowuje ukryte cele leniwie, a listing nie wykonuje stat per dziecko; port, granicę świeżości i testy kosztu opisują `modules/tools/CLAUDE.md` oraz `modules/vault-drafts/CLAUDE.md`.
+
+## Mobile M4 S1a - podetapy fazy agentów w diagnostyce
+
+Raport obu platform pokazuje 13 liczbowych podetapów i liczników ostatniej inicjalizacji agentów bez zmiany kolejności startu; źródło, obsługę błędów i reload opisuje `modules/agents/CLAUDE.md`, a zamknięty słownik i równoległość zasobów `modules/diagnostics/CLAUDE.md`.

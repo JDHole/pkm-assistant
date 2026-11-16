@@ -64,6 +64,8 @@ export function count(value: unknown): number | null {
 }
 const booleanFact = (value: unknown) => typeof value === 'boolean' ? String(value) : null;
 const numberFact = (value: unknown) => { const n = count(value); return n === null ? null : String(n); };
+// Agent sub-stages are already rounded by their producer; reject malformed samples.
+const integerFact = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0 ? String(value) : null;
 const versionFact = (value: unknown) => shaped(value, /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:[-+][A-Za-z0-9.-]{1,32})?$/, 64);
 const providers = new Set(Object.keys(PROVIDER_INFO));
 const factFormats: Record<string, (value: unknown) => string | null> = {
@@ -79,7 +81,21 @@ const factFormats: Record<string, (value: unknown) => string | null> = {
     'plugin.ready': booleanFact, 'plugin.startupMs': numberFact,
     'startup.layoutWaitMs': numberFact, 'startup.runtimeMs': numberFact,
     'startup.secretsMs': numberFact, 'startup.skinMs': numberFact,
-    'startup.agentsMs': numberFact, 'startup.toolsMs': numberFact, 'startup.finishMs': numberFact,
+    'startup.agentsMs': numberFact,
+    'startup.agents.loadMs': integerFact,
+    'startup.agents.memoryMs': integerFact,
+    'startup.agents.memoryMaxMs': integerFact,
+    'startup.agents.memoryCount': integerFact,
+    'startup.agents.memoryFailed': integerFact,
+    'startup.agents.resourcesMs': integerFact,
+    'startup.agents.skillsMs': integerFact,
+    'startup.agents.subAgentsMs': integerFact,
+    'startup.agents.templatesMs': integerFact,
+    'startup.agents.artifactTypesMs': integerFact,
+    'startup.agents.komunikatorMs': integerFact,
+    'startup.agents.vaultMapMs': integerFact,
+    'startup.agents.playbooksMs': integerFact,
+    'startup.toolsMs': numberFact, 'startup.finishMs': numberFact,
     'agents.count': numberFact, 'tools.count': numberFact,
     'memory.conflict.state': numberFact, 'memory.conflict.brain': numberFact,
     'memory.conflict.sessions': numberFact, 'memory.conflict.costLog': numberFact,

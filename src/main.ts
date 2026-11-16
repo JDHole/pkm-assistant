@@ -987,6 +987,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // Raw engine identification only; all platform decisions use Platform above.
       const { userAgent } = navigator;
       const startup = this.diagnosticStartupPhases?.snapshot();
+      const agentStartup = this.agentManager?.startupTimings;
       const drafts = this.draftStartup ?? { stage: 'not-started' };
       const draftError = localErrorFields(this.draftStartupError);
       const report = await runDeviceDiagnostics({
@@ -999,7 +1000,21 @@ export default class PkmAssistantPlugin extends PluginBase {
           'plugin.ready': this._ready, 'plugin.startupMs': this.diagnosticStartupMs,
           'startup.layoutWaitMs': startup?.layoutWaitMs, 'startup.runtimeMs': startup?.runtimeMs,
           'startup.secretsMs': startup?.secretsMs, 'startup.skinMs': startup?.skinMs,
-          'startup.agentsMs': startup?.agentsMs, 'startup.toolsMs': startup?.toolsMs,
+          'startup.agentsMs': startup?.agentsMs,
+          'startup.agents.loadMs': agentStartup?.loadMs,
+          'startup.agents.memoryMs': agentStartup?.memoryMs,
+          'startup.agents.memoryMaxMs': agentStartup?.memoryMaxMs,
+          'startup.agents.memoryCount': agentStartup?.memoryCount,
+          'startup.agents.memoryFailed': agentStartup?.memoryFailed,
+          'startup.agents.resourcesMs': agentStartup?.resourcesMs,
+          'startup.agents.skillsMs': agentStartup?.skillsMs,
+          'startup.agents.subAgentsMs': agentStartup?.subAgentsMs,
+          'startup.agents.templatesMs': agentStartup?.templatesMs,
+          'startup.agents.artifactTypesMs': agentStartup?.artifactTypesMs,
+          'startup.agents.komunikatorMs': agentStartup?.komunikatorMs,
+          'startup.agents.vaultMapMs': agentStartup?.vaultMapMs,
+          'startup.agents.playbooksMs': agentStartup?.playbooksMs,
+          'startup.toolsMs': startup?.toolsMs,
           'startup.finishMs': startup?.finishMs,
           'agents.count': this.agentManager?.agents.size ?? null, 'tools.count': this.toolRegistry?.getAllTools().length ?? null,
           'mcp.total': servers?.length ?? null, 'mcp.stdio': servers?.filter(server => server.transport === 'stdio').length ?? null,

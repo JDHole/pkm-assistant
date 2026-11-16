@@ -319,3 +319,36 @@ wyjątku każdego z trzech registerTool na obu platformach oraz raport po ponown
 nieudanej próbie. Test liczników wykonuje zapis i showDiagnosticReport:
 ready = 18 OK / 0 errors, presence = 17 OK / 1 errors, także w treści Notice.
 Dotychczasowe literalne ślady I/O pozostają bez zmian.
+
+## Mobile M4 S1a - podetapy fazy agentów
+
+Composition root przekazuje migawkę `AgentManager.startupTimings` na obu platformach
+bez pracy dyskowej przy starcie. Zamknięty słownik dodaje, w tej kolejności tuż po
+`startup.agentsMs`:
+`startup.agents.loadMs`, `startup.agents.memoryMs`, `startup.agents.memoryMaxMs`,
+`startup.agents.memoryCount`, `startup.agents.memoryFailed`, `startup.agents.resourcesMs`,
+`startup.agents.skillsMs`, `startup.agents.subAgentsMs`, `startup.agents.templatesMs`,
+`startup.agents.artifactTypesMs`, `startup.agents.komunikatorMs`, `startup.agents.vaultMapMs`,
+`startup.agents.playbooksMs`.
+
+Te nowe fakty dopuszczają wyłącznie nieujemne liczby całkowite (integerFact):
+ułamek, tekst, null, boolean, NaN, Infinity, liczba ujemna i undefined dają
+skipped/Unavailable, bez interpolowania odrzuconej wartości. Nieobecny klucz jest
+pomijany jak dotąd; komenda przekazuje wszystkie 13 kluczy także przed gotowością.
+Stare fakty zachowują zaokrąglenia i bajty wierszy. Żadnych nazw agentów, ścieżek
+ani treści błędów. Dodatkowe zdanie i18n PL/EN na górze raportu wyjaśnia, że
+podetapy zasobów biegną równolegle i ich suma może przekraczać resourcesMs.
+
+Źródło opisuje ostatnią próbę initialize, także po reload, podczas gdy agentsMs
+nadal opisuje pierwszy start pluginu. Podetapy nie muszą sumować się do agentsMs:
+ta faza obejmuje dodatkowo pracę composition root, a sam manager również watcher
+oraz logowanie. Brak czasu gałęzi nie oznacza 0 ms. memoryMaxMs obejmuje tylko
+pamięci zakończone powodzeniem; memoryFailed ujawnia częściowe niepowodzenie.
+Obsługa wyjątków pozostaje własnością agents i nie zmienia się.
+
+Testy S1a w diagnostics.test.ts sprawdzają zapisane literalne wiersze PL/EN,
+komplet, częściowy pomiar, zerowe wartości, obce nazwy i odrzucenie niepoprawnych
+kształtów dla każdego nowego faktu. main.mobile.test.ts rozszerza literalny raport
+produkcyjnego startu i komendy o nowe wiersze, zachowując wszystkie stare wiersze,
+czasy i asercje I/O. Zegar w testach nie mierzy wydajności Androida ani iOS;
+wybór optymalizacji startu wymaga raportu z fizycznego telefonu.
