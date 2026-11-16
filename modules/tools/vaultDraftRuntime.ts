@@ -23,11 +23,16 @@ export async function initializeVaultDrafts(input: {
     storagePresent?: () => Promise<boolean>;
     onProgress?: (progress: DraftStartupProgress) => void;
 }) {
+    const registry = input.registry;
+    const keepPlan = (planId: string | undefined) => !!planId && registry.list().some(task =>
+        task.plan?.planId === planId && ['waiting', 'running'].includes(task.status));
+    const keepRun = (id: string) => keepPlan(registry.getTask(id)?.plan?.planId);
+    const keepThread = (id: string) => { const thread = registry.getThread(id); return !!thread && thread.phase !== 'closed'; };
     const persistence = new DraftPersistence(input.storage, input.hasher);
     const store = new DraftStore(persistence, input.vault, input.clock ?? { now: () => Date.now() }, manifest => {
-        const task = input.registry.getTask(manifest.runId);
-        const thread = input.registry.getThread(manifest.threadId);
-        return !!task && ['waiting', 'running'].includes(task.status) || !!thread && thread.phase !== 'closed';
+        const task = registry.getTask(manifest.runId);
+        return !!task && ['waiting', 'running'].includes(task.status)
+            || keepPlan(manifest.plan?.planId ?? task?.plan?.planId) || keepThread(manifest.threadId);
     });
     input.onProgress?.({ stage: 'presence' });
     const present = input.storagePresent ? await input.storagePresent() : true;
@@ -36,12 +41,7 @@ export async function initializeVaultDrafts(input: {
     const recovered = present ? await store.restore() : { issues: [] };
     input.onProgress?.({ stage: 'cleanup', present: observedPresence, recoveryIssues: recovered.issues.length });
     const drafts = new SubRunDrafts(store, persistence, input.vault, () => parseDraftId(crypto.randomUUID()));
-    const registry = input.registry;
-    drafts.setRetention(id => {
-        const task = registry.getTask(id);
-        return !!task?.plan && registry.list().some(other => other.plan?.planId === task.plan?.planId
-            && ['waiting', 'running'].includes(other.status));
-    }, id => { const thread = registry.getThread(id); return !!thread && thread.phase !== 'closed'; });
+    drafts.setRetention(keepRun, keepThread);
     registry.attachDraftStore(store);
     let pending: Promise<void> = Promise.resolve();
     let running = false, requested = false;

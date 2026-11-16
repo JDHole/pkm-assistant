@@ -2,7 +2,7 @@ import test, { type ExecutionContext } from 'ava';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { AdapterDraftStorage, DesktopDraftStorage, DRAFT_ROOT, DraftPersistence, DraftStore, DraftReview, parseDraftId, parseVaultPath } from './index.js';
-import type { DraftManifest, DraftStorageIO, DraftReviewIO, DraftReviewContext } from './index.js';
+import type { DraftManifest, DraftRef, DraftStorageIO, DraftReviewIO, DraftReviewContext } from './index.js';
 import { MemoryAdapter } from './test-support/MemoryAdapter.js';
 
 const DAY = 86400000;
@@ -39,6 +39,14 @@ function fixture(t: ExecutionContext, mobile: boolean) {
         return { store, persistence, review: new DraftReview(store, persistence, vault), storage };
     };
     const current = make();
+    const propose = async (id: string, inheritedFrom: readonly DraftRef[] = []) => {
+        const draft = await current.store.create({ draftId: id, runId: id, threadId: id, owner });
+        await current.store.mutate(draft.draftId, { path: parseVaultPath('Notatki/Przyklad.md'),
+            source: { tool: 'write', callId: 'call' }, value: { kind: 'text', text: 'Proposal' } }, inheritedFrom);
+        return current.store.seal(draft.draftId, 'finished');
+    };
+    const reject = (draft: DraftManifest) => current.store.setReview(draft.draftId,
+        draft.changes[0].id, draft.changes[0].revision, { kind: 'rejected' });
     const seed = async (id: string, age: number, kind: 'pending' | 'accepted' | 'rejected' | 'destructive' | 'applying' | 'recovery-required' = 'rejected', collect = true) => {
         now = (100 - age) * DAY;
         const path = parseVaultPath(`${id}.md`);
@@ -62,11 +70,133 @@ function fixture(t: ExecutionContext, mobile: boolean) {
     const paths = () => mobile ? [...adapter.files.keys()].filter(p => p.startsWith(`${DRAFT_ROOT}/`)).map(p => p.slice(DRAFT_ROOT.length + 1)).sort()
         : fs.existsSync(`${root}/${DRAFT_ROOT}`) ? fs.readdirSync(`${root}/${DRAFT_ROOT}`, { recursive: true, withFileTypes: true })
             .filter(e => e.isFile()).map(e => `${e.parentPath}/${e.name}`.slice(`${root}/${DRAFT_ROOT}/`.length)).sort() : [];
-    return { ...current, port, make, seed, paths, adapter, files, root, setNow: (value: number) => { now = value; } };
+    return { ...current, port, make, seed, propose, reject, paths, adapter, files, root, setNow: (value: number) => { now = value; } };
 }
 
 for (const mobile of [false, true]) {
     const label = mobile ? 'mobile' : 'desktop';
+    test(`F2l ${label}: pending successor preserves its parent's receipt across two restarts`, async t => {
+        const f = fixture(t, mobile);
+        f.setNow(0);
+        const parent = await f.propose('parent');
+        await f.propose('child', [{ draftId: parent.draftId, revision: parent.revision }]);
+        await f.reject(parent);
+        const first = f.make();
+        t.deepEqual((await first.store.restore()).issues, []);
+        await first.store.collectResolved();
+        f.setNow(31 * DAY);
+        const second = f.make();
+        t.deepEqual((await second.store.restore()).issues, []);
+        await second.store.collectResolved();
+        t.deepEqual(f.paths(), [
+            'child/blobs/5d42766c7ecac46c344f7ed2f8940a0054b00641cb56876ceb30c9eab50159b0',
+            'child/manifests/000001.json', 'child/manifests/000002.json', 'parent/manifests/000004.json',
+        ]);
+        t.deepEqual(second.store.snapshot(parseDraftId('child')).changes[0].inheritedFrom, [{ draftId: 'parent', revision: 1 }]);
+        t.deepEqual(await second.review.decide(context, { action: 'reject', draftId: parseDraftId('parent'),
+            changeId: parent.changes[0].id, revision: parent.revision }), { kind: 'rejected' });
+    });
+
+    for (const scenario of ['pending-C', 'all-old', 'fresh-B'] as const) test(`F2l ${label}: A <- B <- C, ${scenario}`, async t => {
+        const f = fixture(t, mobile);
+        f.setNow(0);
+        const a = await f.propose('A');
+        const b = await f.propose('B', [{ draftId: a.draftId, revision: a.revision }]);
+        const c = await f.propose('C', [{ draftId: b.draftId, revision: b.revision }]);
+        await f.reject(a);
+        if (scenario !== 'pending-C') await f.reject(c);
+        if (scenario === 'fresh-B') f.setNow(20 * DAY);
+        await f.reject(b);
+        await f.store.collectResolved();
+        f.setNow(31 * DAY);
+        const fresh = f.make();
+        t.deepEqual((await fresh.store.restore()).issues, []);
+        await fresh.store.collectResolved();
+        if (scenario === 'pending-C') {
+            t.deepEqual(f.paths(), ['A/manifests/000004.json', 'B/manifests/000004.json',
+                'C/blobs/5d42766c7ecac46c344f7ed2f8940a0054b00641cb56876ceb30c9eab50159b0',
+                'C/manifests/000001.json', 'C/manifests/000002.json']);
+            t.deepEqual(fresh.store.list().map(m => [m.draftId, m.changes[0].review.kind]),
+                [['A', 'rejected'], ['B', 'rejected'], ['C', 'pending']]);
+        } else if (scenario === 'fresh-B') {
+            t.deepEqual(f.paths(), ['A/manifests/000004.json', 'B/manifests/000004.json']);
+            t.deepEqual(fresh.store.snapshot(parseDraftId('B')).changes[0].inheritedFrom, [{ draftId: 'A', revision: 1 }]);
+            f.setNow(51 * DAY);
+            const later = f.make(); await later.store.restore(); await later.store.collectResolved();
+            t.deepEqual(await later.storage.list(DRAFT_ROOT), []);
+        } else {
+            t.deepEqual(f.paths(), []);
+            t.deepEqual(await fresh.storage.list(DRAFT_ROOT), []);
+        }
+    });
+
+    test(`F2l ${label}: expiry uses resolution time, not creation time`, async t => {
+        const f = fixture(t, mobile);
+        f.setNow(60 * DAY);
+        const recent = await f.propose('recent-resolution');
+        f.setNow(90 * DAY);
+        await f.reject(recent);
+        await f.store.collectResolved();
+        f.setNow(100 * DAY);
+        const fresh = f.make();
+        const restored = await fresh.store.restore();
+        t.deepEqual(restored.drafts.map(m => [m.draftId, m.createdAt / DAY, m.updatedAt / DAY]),
+            [['recent-resolution', 60, 90]]);
+        await fresh.store.collectResolved();
+        t.deepEqual(f.paths(), ['recent-resolution/manifests/000004.json']);
+        t.deepEqual(await fresh.review.decide(context, { action: 'reject', draftId: recent.draftId,
+            changeId: recent.changes[0].id, revision: recent.revision }), { kind: 'rejected' });
+    });
+
+    test(`F2l ${label}: interrupted chain expiry removes successors before predecessors`, async t => {
+        const f = fixture(t, mobile);
+        f.setNow(0);
+        const a = await f.propose('A');
+        const b = await f.propose('B', [{ draftId: a.draftId, revision: a.revision }]);
+        const c = await f.propose('C', [{ draftId: b.draftId, revision: b.revision }]);
+        for (const draft of [a, b, c]) await f.reject(draft);
+        await f.store.collectResolved();
+        f.setNow(31 * DAY);
+        const port = f.port();
+        const interrupted = f.make({ list: p => port.list(p), read: p => port.read(p),
+            writeBlob: (p, bytes) => port.writeBlob(p, bytes), publish: (p, bytes, gate) => port.publish(p, bytes, gate),
+            remove: async path => {
+                await port.remove!(path);
+                if (path.endsWith('/manifests/000004.json')) throw new Error('Power lost');
+            },
+        });
+        await interrupted.store.restore();
+        await t.throwsAsync(interrupted.store.collectResolved(), { message: 'Power lost' });
+        t.deepEqual(f.paths(), ['A/manifests/000004.json', 'B/manifests/000004.json']);
+        const fresh = f.make();
+        const recovered = await fresh.store.restore();
+        t.deepEqual(recovered.issues, []);
+        t.deepEqual(recovered.drafts.map(m => [m.draftId, m.changes[0].inheritedFrom]),
+            [['A', []], ['B', [{ draftId: 'A', revision: 1 }]]]);
+        await fresh.store.collectResolved();
+        t.deepEqual(await fresh.storage.list(DRAFT_ROOT), []);
+    });
+
+    test(`F2l ${label}: recent creation with old updatedAt is invalid and blocks expiry`, async t => {
+        const f = fixture(t, mobile);
+        await f.seed('old', 31);
+        const reversed = await f.seed('reversed', 10);
+        // External corruption: the public writer correctly refuses this order.
+        const invalid = { ...reversed, generation: 5, updatedAt: 69 * DAY };
+        await t.throwsAsync(f.persistence.save(invalid, () => true), { code: 'invalid-manifest', message: 'Invalid timestamp order' });
+        const payload = JSON.stringify(invalid);
+        await f.storage.publish(`${DRAFT_ROOT}/reversed/manifests/000005.json`,
+            encode(JSON.stringify({ payload, checksum: await hasher.sha256(encode(payload)) })), () => true);
+        const fresh = f.make();
+        const recovered = await fresh.store.restore();
+        t.deepEqual(recovered.issues.map(issue => [issue.path, issue.code]),
+            [[`${DRAFT_ROOT}/reversed/manifests/000005.json`, 'invalid-manifest']]);
+        await fresh.store.collectResolved();
+        t.deepEqual(f.paths(), ['old/manifests/000004.json', 'reversed/manifests/000004.json', 'reversed/manifests/000005.json']);
+        t.deepEqual(fresh.store.list().map(m => [m.draftId, m.createdAt / DAY, m.updatedAt / DAY]),
+            [['old', 69, 69], ['reversed', 90, 90]]);
+    });
+
     test(`F2k ${label}: 29/30 days stay, 31 days expires only at startup`, async t => {
         const f = fixture(t, mobile);
         await f.seed('young', 29); await f.seed('boundary', 30); await f.seed('old', 31);

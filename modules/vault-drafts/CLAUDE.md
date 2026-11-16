@@ -447,7 +447,8 @@ zewnętrznym procesem zapisującym poza portem.
 
 Przed usuwaniem każdej kopii ponownie sprawdzamy stan w kolejce publikacji,
 referencje oraz opcjonalny `isProtected(manifest)` dostarczony przez runtime
-(dla żywego biegu lub niezamkniętego wątku). `collecting` blokuje nową retencję
+(dla biegu waiting/running, planu z takim biegiem lub niezamkniętego wątku).
+Runtime współdzieli reguły planu i wątku z retencją payloadu. `collecting` blokuje nową retencję
 w trakcie usuwania. Sieroty sprawdzają żywe ID przy każdej operacji; katalog
 bez manifestu powstały w bieżącym store pozostaje chroniony jego wpisem aż do
 restartu. Persistence pamięta możliwe sieroty po próbach zapisu blobów.
@@ -456,8 +457,16 @@ Udane GC nie przegląda ponownie zebranych pokwitowań po każdym zdarzeniu.
 
 **Decyzja Kuby z 16.11.2026:** stała `RECEIPT_RETENTION_MS` to 30 dni.
 Tylko pierwsze sprzątanie po restore może wygasić pokwitowanie: musi mieć
-payloadCollected, sealed, wyłącznie accepted/rejected, brak referencji i żywego
-biegu/wątku, rozpoznany układ, czysty skan oraz updatedAt starsze niż 30 dni.
+payloadCollected, sealed, wyłącznie accepted/rejected, brak referencji w RAM,
+żywego biegu/planu oraz niezamkniętego wątku, rozpoznany układ, czysty skan
+oraz updatedAt starsze niż 30 dni. F2l dodatkowo chroni trwałe referencje:
+każde inheritedFrom w pozostającym manifeście chroni poprzednika i jego przodków.
+Graf powstaje w RAM ze wszystkich manifestów tego samego skanu, bez dodatkowego I/O.
+Usuwamy najpierw kopie bez wskazujących je następników; dopiero skuteczne usunięcie
+zwalnia ich krawędzie. Stary rozstrzygnięty łańcuch może zniknąć w jednym przebiegu,
+ale pending, świeża kopia, nierozpoznany układ lub inna ochrona następników zachowuje
+cały wskazywany łańcuch. Cykl referencji pozostaje chroniony. Awaria przerywa przebieg
+przed usunięciem poprzedników pozostającego manifestu. Start nadal poprzedza admisję biegów.
 Dokładnie 30 dni, czas z przyszłości i zegar wcześniejszy od createdAt/updatedAt
 nie kwalifikują kopii. Nie ma TTL nierozstrzygniętych zmian ani applying/recovery-required.
 Accepted po operacji destrukcyjnej zachowuje recoveryBlob: taki katalog nie wygasa
@@ -481,4 +490,11 @@ usuwania katalogu. Lista plików po accept/release została odtworzona na 39e588
 zostaje wyłącznie manifests/000005.json. `DraftStorage.contract.test.ts` sprawdza
 odmowę usunięcia niepustego katalogu i idempotentne usunięcie pustego na obu portach.
 Testy runtime i runnera z licznikami opisuje `../tools/CLAUDE.md`.
+F2l w `DraftStore.gc.test.ts` sprawdza na obu portach dwa restarty parent/child,
+łańcuch A <- B <- C (C pending, wszystkie stare, B świeże), przerwanie usuwania
+łańcucha oraz createdAt=60/updatedAt=90 przy dniu 100. Odwrotne znaczniki
+createdAt=90/updatedAt=69 naruszają istniejący walidator: zapis odmawia, a obcy
+manifest z takim układem powoduje issue i blokuje GC. Nie osłabiamy walidacji czasu.
+Liczniki F2k pozostają bez zmian: start 1/20 pokwitowań to 5/81 operacji portu
+oraz 12/145 adaptera mobile; delegacja 11/11 portu i 54/54 adaptera mobile.
 Testy offline nie dowodzą trwałości rmdir/rename ani czasu I/O na Androidzie/iOS.

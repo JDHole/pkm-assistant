@@ -1,11 +1,54 @@
 import test from 'ava';
+import * as fs from 'node:fs';
 import { SubTaskRegistry } from '../sub-agents/index.js';
-import { AdapterDraftStorage, DRAFT_ROOT, parseDraftId } from '../vault-drafts/index.js';
+import { activatePlanTask, planInput, planResult } from '../sub-agents/test-support/planFixture.js';
+import { AdapterDraftStorage, DRAFT_ROOT, DraftPersistence, DraftStore, parseDraftId, parseVaultPath } from '../vault-drafts/index.js';
 import { getLocale, setLocale } from '../../core/i18n/index.js';
 import { MemoryAdapter } from '../vault-drafts/test-support/MemoryAdapter.js';
 import { initializeVaultDrafts } from './index.js';
 import { draftFixture } from './test-support/vaultDraftFixture.js';
 import { seedReceipts, traceStorage } from './test-support/draftGCFixture.js';
+
+for (const mobile of [false, true]) for (const next of ['running', 'waiting', 'finished'] as const) {
+    test(`F2l ${mobile ? 'mobile' : 'desktop'}: old receipt in a plan with ${next} successor`, async t => {
+        const f = await draftFixture(t);
+        const adapter = new MemoryAdapter();
+        const storage = mobile ? new AdapterDraftStorage(adapter) : f.storage;
+        const persistence = new DraftPersistence(storage, f.ports.hasher);
+        let now = 0;
+        const clock = { now: () => now };
+        const store = new DraftStore(persistence, f.ports.vault, clock);
+        const owner = { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) };
+        const old = await store.create({ draftId: 'old', runId: 'old', threadId: 'old', owner,
+            plan: { planId: 'plan-p4', nodeId: 'old' } });
+        const changed = await store.mutate(old.draftId, { path: parseVaultPath('Notatki/Przyklad.md'),
+            source: { tool: 'write', callId: 'call' }, value: { kind: 'text', text: 'Proposal' } });
+        await store.seal(old.draftId, 'finished');
+        await store.setReview(old.draftId, changed.changes[0].id, changed.revision, { kind: 'rejected' });
+        await store.collectResolved();
+        now = 31 * 86400000;
+        const registry = new SubTaskRegistry();
+        registry.reservePlan(planInput(owner, undefined, [['old', []], ['next', ['old']]]));
+        registry.finish(activatePlanTask(registry, 'old', owner), planResult());
+        registry.endRun('old', { successful: false });
+        if (next !== 'waiting') {
+            const task = activatePlanTask(registry, 'next', owner);
+            if (next === 'finished') {
+                registry.finish(task, planResult());
+                registry.endRun('next', { successful: false });
+            }
+        }
+        t.deepEqual([registry.getTask('old')?.status, registry.getThread('old')?.phase, registry.getTask('next')?.status],
+            ['done', 'closed', next === 'finished' ? 'done' : next]);
+        const boot = await initializeVaultDrafts({ ...f.ports, storage, registry, clock });
+        t.teardown(() => { boot.dispose(); registry.dispose(); });
+        const paths = mobile ? [...adapter.files.keys()].filter(path => path.startsWith(`${DRAFT_ROOT}/`)).map(path => path.slice(DRAFT_ROOT.length + 1)).sort()
+            : fs.readdirSync(`${f.root}/${DRAFT_ROOT}`, { recursive: true, withFileTypes: true })
+                .filter(entry => entry.isFile()).map(entry => `${entry.parentPath}/${entry.name}`.slice(`${f.root}/${DRAFT_ROOT}/`.length)).sort();
+        t.deepEqual(paths, next === 'finished' ? [] : ['old/manifests/000004.json']);
+        t.deepEqual(boot.store.list().map(m => [m.draftId, m.changes[0].review.kind]), next === 'finished' ? [] : [['old', 'rejected']]);
+    });
+}
 
 for (const mobile of [false, true]) for (const count of [1, 20]) {
     test(`F2k receipt startup ${mobile ? 'mobile' : 'desktop'} ${count}`, async t => {

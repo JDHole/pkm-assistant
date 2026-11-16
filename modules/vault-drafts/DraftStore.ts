@@ -59,6 +59,7 @@ export class DraftStore {
         this.startupScan = undefined;
         this.startupCleanup = false;
         if (scan.issues.length) return;
+        if (startup) await this.expireReceipts(scan);
         for (const [id, entry] of this.entries) {
             if (!this.eligible(id, entry)) continue;
             await this.publish(entry, async () => {
@@ -68,14 +69,6 @@ export class DraftStore {
                 this.collecting.add(id);
                 try {
                     const layout = scan.receipts.get(id);
-                    const now = this.clock.now();
-                    if (startup && old.payloadCollected && layout
-                        && now >= old.createdAt && now - old.updatedAt > RECEIPT_RETENTION_MS
-                        && !old.changes.some(c => 'recoveryBlob' in c.review && c.review.recoveryBlob)) {
-                        if (await this.persistence.expire(old, layout)) this.entries.delete(id);
-                        this.cleanupPending.delete(id);
-                        return;
-                    }
                     this.cleanupPending.add(id);
                     if (!old.payloadCollected) {
                         entry.manifest = await this.persistence.save({ ...old, payloadCollected: true }, () => !this.references.has(id));
@@ -86,6 +79,42 @@ export class DraftStore {
             });
         }
         await this.persistence.collectOrphans(scan, id => this.entries.has(id));
+    }
+    private async expireReceipts(scan: DraftScan): Promise<void> {
+        // Every remaining successor protects its predecessors, transitively. Start
+        // with unreferenced drafts and release their edges only after deletion.
+        // This also keeps an interrupted chain safe, regardless of scan order.
+        const predecessors = new Map<DraftId, DraftId[]>();
+        const incoming = new Map<DraftId, number>();
+        for (const manifest of scan.manifests) {
+            const ids = [...new Set(manifest.changes.flatMap(change => change.inheritedFrom.map(ref => ref.draftId)))];
+            predecessors.set(manifest.draftId, ids);
+            for (const id of ids) incoming.set(id, (incoming.get(id) ?? 0) + 1);
+        }
+        const queue = scan.manifests.filter(manifest => !incoming.has(manifest.draftId)).map(manifest => manifest.draftId);
+        for (const id of queue) {
+            const entry = this.entries.get(id), layout = scan.receipts.get(id);
+            if (!entry || !layout) continue;
+            const expired = await this.publish(entry, async () => {
+                const old = entry.manifest, now = this.clock.now();
+                if (!this.eligible(id, entry) || !old.payloadCollected
+                    || !(now >= old.createdAt && now - old.updatedAt > RECEIPT_RETENTION_MS)
+                    || old.changes.some(c => 'recoveryBlob' in c.review && c.review.recoveryBlob)) return false;
+                this.collecting.add(id);
+                try {
+                    if (!await this.persistence.expire(old, layout)) return false;
+                    this.entries.delete(id);
+                    this.cleanupPending.delete(id);
+                    return true;
+                } finally { this.collecting.delete(id); }
+            });
+            if (!expired) continue;
+            for (const predecessor of predecessors.get(id) ?? []) {
+                const count = incoming.get(predecessor)! - 1;
+                incoming.set(predecessor, count);
+                if (!count) queue.push(predecessor);
+            }
+        }
     }
     private changed(entry: Entry): void { this.events.emit('draft:changed', structuredClone(entry.manifest)); }
     private readonly entries = new Map<DraftId, Entry>();

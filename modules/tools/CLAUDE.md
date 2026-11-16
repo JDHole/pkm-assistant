@@ -1247,9 +1247,18 @@ Runtime obu platform scala zdarzenia thread:closed/task:finished/task:plan/draft
 jeden aktywny przebieg i jedna flaga oczekującego, bez kolejki N identycznych zadań.
 Prune nadal zwalnia referencje; store decyduje w RAM, czy potrzebny jest skan.
 `flush()` czeka także na przebieg dołączony w trakcie oczekiwania. Błędy GC nadal
-mają log i nie odmawiają startu. Runtime przekazuje store predykat ochrony żywego
-biegu i niezamkniętego wątku; przy starcie wygasza tylko niechronione pokwitowania
-starsze niż 30 dni. Szczegóły bezpieczeństwa i przerwań: `../vault-drafts/CLAUDE.md`.
+mają log i nie odmawiają startu. Runtime przekazuje store predykat ochrony biegu
+waiting/running, planu z dowolnym takim biegiem oraz niezamkniętego wątku.
+Od F2l reguły `keepPlan` i `keepThread` są wspólne dla tego predykatu i
+`SubRunDrafts.setRetention`; zakończony własny bieg i zamknięty własny wątek nie
+odbierają ochrony żywego planu. Plan kopii pochodzi z trwałego manifestu, z fallbackiem
+do metadanych biegu dla starszych wywołań. Przy starcie wygasają tylko pokwitowania
+starsze niż 30 dni według updatedAt, sealed, payloadCollected, wyłącznie
+accepted/rejected, bez recoveryBlob, powyższej ochrony i referencji RAM, po czystym
+skanie i przy rozpoznanym układzie. Każdy pozostający manifest chroni też trwałymi
+inheritedFrom wszystkich wskazywanych przodków; store usuwa następników przed
+poprzednikami w ramach tego samego skanu. Szczegóły granic zegara, bezpieczeństwa
+i przerwań: `../vault-drafts/CLAUDE.md`.
 Desktop wymaga dodatkowo rmdirSync do usuwania pustych katalogów; mobile używa
 opcjonalnego rmdir adaptera wyłącznie przy GC katalogu. Brak tej zdolności nie
 zmienia uruchamiania ani zapisu kopii, ale pozostawia katalog do ponowienia.
@@ -1267,6 +1276,10 @@ F2e: jedna pending propozycja kosztuje 9 zamiast 23 wywołań adaptera mobile;
 pusty namespace nadal 1. F2g: 104/123/8 spada do 62/75/2 mobile dla
 create/patch/read-list; desktopowe 4/6/1 wywołań adaptera pozostaje bez zmian.
 Testy zachowują literalne ślady i pełne asercje treści, bazy i przeglądu.
+F2l w `vaultDraftRuntime.gc.test.ts` rezerwuje rzeczywisty plan: pokwitowanie
+zamkniętego węzła zostaje przy następniku running albo waiting, a wygasa po końcu
+planu. Każdy wariant sprawdza listę plików na obu portach po starcie przy dniu 31.
+Liczniki startu i delegacji F2k pozostają bez zmian; graf ochrony nie dodaje odczytów.
 Nie zmieniono hosta kopii, schematów, uprawnień ani odpowiedzi review.
 Próba fizycznego urządzenia nadal potrzebna do oceny czasu startu i trwałości
 przy ubiciu procesu; test pamięciowy nie modeluje zachowania CapacitorAdapter.
