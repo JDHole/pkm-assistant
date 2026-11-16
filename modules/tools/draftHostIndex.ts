@@ -45,8 +45,14 @@ export class DraftHostIndex {
         }
         return true;
     }
+    private technicalFolder(path: string): LocalFile | undefined {
+        const entry = this.entries.get(path);
+        return this.technicalFolders.has(path) && entry && 'children' in entry ? entry : undefined;
+    }
     get(path: string): LocalFile | null {
-        if (!this.reachable(path)) return null;
+        // Legacy refresh appends technical folders after walking the proposal tree.
+        // They remain visible even when that walk cannot descend through a tombstone.
+        if (!this.reachable(path)) return this.technicalFolder(path) ?? null;
         if (!path) return this.makeFolder('');
         if (this.entries.has(path)) return this.entries.get(path) ?? null;
         const entry = this.base.get(path);
@@ -118,19 +124,22 @@ export class DraftHostIndex {
     }
     list(path: string): LocalFile[] {
         // Historical host excludes hidden entries even from a hidden folder's children.
-        if (isHiddenVaultPath(path) || this.blockedParents.has(path)) return [];
-        const base = this.base.get(path), values = new Map<string, LocalFile>();
+        if (isHiddenVaultPath(path)) return [];
+        const base = this.reachable(path) && !this.blockedParents.has(path) ? this.base.get(path) : null;
+        const values = new Map<string, LocalFile>();
         if (base?.kind === 'folder') for (const child of base.children()) {
             if (!isHiddenVaultPath(child.path)) values.set(child.path, this.fromBase(child));
         }
         for (const child of this.children.get(path) ?? []) {
             if (isHiddenVaultPath(child)) continue;
+            if (!this.reachable(child) && !this.technicalFolder(child)) { values.delete(child); continue; }
             const entry = this.entries.get(child);
             if (entry) values.set(child, entry); else values.delete(child);
         }
         const technicalOrder = new Map([...this.technicalFolders].map((folder, i) => [folder, i]));
-        const technicalOnly = (entry: LocalFile): boolean => technicalOrder.has(entry.path)
-            && ![...this.proposed].some(path => path === entry.path || path.startsWith(`${entry.path}/`));
+        const technicalOnly = (entry: LocalFile): boolean => 'children' in entry && technicalOrder.has(entry.path)
+            && (this.blockedParents.has(entry.path) || !this.reachable(entry.path)
+                || ![...this.proposed].some(path => path === entry.path || path.startsWith(`${entry.path}/`)));
         const normal: LocalFile[] = [], technical: LocalFile[] = [];
         for (const entry of values.values()) (technicalOnly(entry) ? technical : normal).push(entry);
         return [...normal.sort((a, b) => rank(a) - rank(b) || compare(a.path, b.path)),

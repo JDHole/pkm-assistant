@@ -643,3 +643,70 @@ test('F2g technical folder still follows legacy visibility over a file tombstone
     t.deepEqual(indexed, await exercise(false));
     t.deepEqual(indexed, { root: ['base.md'], children: [], files: [], child: null, read: 'Child' });
 });
+
+// Literal results below were replayed against the complete f5f13b6 tree,
+// including its DraftView.list, not just today's no-index fallback.
+for (const descendant of [false, true]) test(`F2h technical descendants survive a tombstone: proposal=${descendant}`, async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ A: 'Base', 'B/file.md': 'Other' }, indexed), view = await f.view('technical');
+        const h = await createDraftToolHost(view, { writable: true, source });
+        await h.vault.delete({ path: 'A' });
+        if (descendant) await h.vault.create('A/child.md', 'child');
+        await h.vault.createFolder('A/deep');
+        return { root: h.vault.getRoot().children!.map(entry => entry.path),
+            a: h.vault.getAbstractFileByPath('A'), deep: h.vault.getAbstractFileByPath('A/deep'),
+            child: h.vault.getAbstractFileByPath('A/child.md'), files: h.vault.getFiles().map(entry => entry.path),
+            exists: await h.vault.adapter.exists('A/deep') };
+    };
+    const indexed = await exercise(true);
+    t.deepEqual(indexed, await exercise(false));
+    t.deepEqual(indexed, {
+        root: ['B', 'A'],
+        a: { path: 'A', name: 'A', basename: 'A', extension: '', stat: { size: 0, mtime: 0, ctime: 0 }, children: [
+            { path: 'A/deep', name: 'deep', basename: 'deep', extension: '', stat: { size: 0, mtime: 0, ctime: 0 }, children: [] },
+        ] },
+        deep: { path: 'A/deep', name: 'deep', basename: 'deep', extension: '', stat: { size: 0, mtime: 0, ctime: 0 }, children: [] },
+        child: null, files: ['B/file.md'], exists: true,
+    });
+});
+
+test('F2h rejected mkdir preserves the synchronous view under a tombstone', async t => {
+    for (const indexed of [false, true]) {
+        const f = await fixture({ A: 'Base' }, indexed), view = await f.view('failed');
+        const h = await createDraftToolHost(view, { writable: true, source });
+        await h.vault.delete({ path: 'A' });
+        await h.vault.create('A/child.md', 'child');
+        const snapshot = () => ({ a: h.vault.getAbstractFileByPath('A'), child: h.vault.getAbstractFileByPath('A/child.md'),
+            root: h.vault.getRoot().children!.map(entry => entry.path), files: h.vault.getFiles().map(entry => entry.path) });
+        t.deepEqual(snapshot(), { a: null, child: null, root: [], files: [] });
+        await t.throwsAsync(h.vault.createFolder('A/child.md'), { code: 'invalid-transition' });
+        t.deepEqual(snapshot(), { a: null, child: null, root: [], files: [] });
+        t.is(await h.vault.adapter.read('A/child.md'), 'child');
+        // Legacy mkdir records technical parents even on failure, but refreshes only on success.
+        t.true(await h.vault.adapter.exists('A'));
+    }
+});
+
+test('F2h root and folder children preserve technical insertion and proposal ordering', async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ 'base.md': 'Base', 'Notes/z.md': 'Z', 'Notes/a.md': 'A' }, indexed), view = await f.view('ordering');
+        const h = await createDraftToolHost(view, { writable: true, source });
+        await h.vault.createFolder('Z/Child');
+        await h.vault.createFolder('A/Child');
+        await h.vault.createFolder('Notes/Z/Child');
+        await h.vault.createFolder('Notes/A/Child');
+        const snapshot = () => ({ root: h.vault.getRoot().children!.map(entry => entry.path),
+            notes: h.vault.getAbstractFileByPath('Notes')!.children!.map(entry => entry.path) });
+        const before = snapshot();
+        await h.vault.create('A/Child/new.md', 'New');
+        await h.vault.create('Notes/A/Child/new.md', 'New');
+        await h.vault.create('Notes/m.md', 'M');
+        return { before, after: snapshot() };
+    };
+    const indexed = await exercise(true);
+    t.deepEqual(indexed, await exercise(false));
+    t.deepEqual(indexed, {
+        before: { root: ['base.md', 'Notes', 'Z', 'A'], notes: ['Notes/a.md', 'Notes/z.md', 'Notes/Z', 'Notes/A'] },
+        after: { root: ['base.md', 'A', 'Notes', 'Z'], notes: ['Notes/a.md', 'Notes/m.md', 'Notes/z.md', 'Notes/A', 'Notes/Z'] },
+    });
+});

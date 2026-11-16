@@ -392,11 +392,13 @@ roota sam list, dla nieistniejącego folderu sam stat. Potem nakłada zmiany i s
 jak wcześniej; prywatny namespace nigdy nie trafia do widoku. Kontrakt DraftViewIO
 wymaga pełnych ścieżek logicznych bezpośrednich dzieci, nie samych nazw (inaczej niż
 DraftStorageIO). Niepoprawny wpis nadal daje invalid-path. Nie weryfikujemy ponownie
-rodzaju każdego dziecka po listingu.
+rodzaju każdego dziecka osobnym stat: od F2g rodzaj wpisu pochodzi z listingu portu,
+również gdy listing i stat adaptera podają sprzeczne rodzaje.
 
 Synchroniczne istnienie i metadane hosta mogą minimalnie odbiegać od dysku przed
-odświeżeniem indeksu Obsidiana. Odczyt treści, baza pierwszego dotknięcia i kontrola
-integralności nadal korzystają z dotychczasowego adapterowego stat -> bajty -> stat.
+odświeżeniem indeksu Obsidiana. Zwykły odczyt bajtów bazowego pliku wykonuje jeden
+read portu vaulta, bez stat. Przechwycenie bazy przy pierwszym dotknięciu oraz
+kontrole integralności bazy podczas przeglądu zachowują adapterowe stat -> bajty -> stat.
 Nie zmienia się format, trwałość, DraftStore, host review ani decyzje przeglądu.
 Leniwe przygotowanie ukrytych celów i ograniczenie metadanych artefaktów opisuje
 `../tools/CLAUDE.md`. Testy: F2g w subToolExecution.test.ts i runnerDrafts.test.ts.

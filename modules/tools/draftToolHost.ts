@@ -98,13 +98,17 @@ export async function createDraftToolHost(view: DraftView, options: {
         if (!options.writable) denied();
         parseVaultPath(path);
         const segments = path.split('/');
+        const missing: string[] = [];
         for (let i = 1; i <= segments.length; i++) {
             const parent = segments.slice(0, i).join('/'), stat = await view.stat(parent);
             if (stat.kind === 'file') throw new DraftError('invalid-transition', 'Folder collides with file');
-            if (stat.kind === 'missing') { technicalFolders.add(parent); index?.update(parent); }
+            if (stat.kind === 'missing') { technicalFolders.add(parent); missing.push(parent); }
         }
-        if (path === options.explicitFolderPath && (await view.stat(path)).kind === 'missing') await write(path, { kind: 'folder' }, 'create');
-        else await refreshPath(path);
+        if (path === options.explicitFolderPath && (await view.stat(path)).kind === 'missing')
+            await view.mutate(path, options.source, { kind: 'folder' }, 'create');
+        // Like legacy refresh, publish the synchronous projection only after mkdir succeeds.
+        for (const parent of missing) index?.update(parent);
+        await refreshPath(path);
     };
     const binary = async (path: string): Promise<ArrayBuffer> => (await view.readBinary(path)).slice().buffer;
     const remove = (path: string, disposition: 'trash' | 'permanent') => write(path, { kind: 'deleted', disposition }, 'file');

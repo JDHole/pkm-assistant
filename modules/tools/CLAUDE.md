@@ -1154,3 +1154,18 @@ także kolizji pliku przodka z potomkiem oraz technicznego folderu nad tombstone
 Dodatkowo mierzą listing 50/500 plików, metadane przy 30/3000 obcych plików oraz
 sprawdzają first-touch przy nieaktualnym indeksie. syntheticVaultIndex jest wyłącznie
 syntetyczną atrapą indeksu w testach; nie zastępuje produkcyjnego składania portów.
+
+F2h: projekcja dołącza foldery techniczne po drzewie propozycji, jak dawny refresh.
+Tombstone nadal blokuje potomne propozycje, ale nie techniczne foldery; te zachowują
+kolejność utworzenia także pod tombstone. Nieudane mkdir zachowuje poprzedni widok
+synchroniczny: rodzice są aktualizowani dopiero po walidacji całej operacji i udanej
+mutacji jawnego folderu. Historyczny adapter może nadal widzieć technicznego rodzica
+zapamiętanego przed odmową mkdir; nie oznacza to opublikowania go w widoku hosta.
+Poprawki dotyczą obu platform, bez dodatkowego I/O ani skanowania vaulta.
+
+Testy F2h w `subToolExecution.test.ts` przypinają literalnie oba warianty folderu
+technicznego pod tombstone, widok po odrzuconym mkdir oraz kolejność dzieci roota
+i folderu z propozycjami. Oczekiwania odtworzono na pełnym kodzie f5f13b6, łącznie
+z ówczesnym DraftView.list; testy porównują też obecną ścieżkę bez indeksu.
+`draftFileIndex.test.ts` podaje produkcyjnemu portowi nieprzefiltrowaną atrapę vaulta
+i sprawdza osobno get/files/children, w tym segmenty z kropką i prywatny magazyn.
