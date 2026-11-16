@@ -1137,7 +1137,10 @@ widoczny dla get. Jak wcześniej, ukryte wpisy nie trafiają do children ani get
 a prywatny magazyn jest odmawiany i pomijany w listingach, także dla administratora.
 
 Metadane są wczytywane wyłącznie z metadataFolder, również dla jego ukrytych wpisów.
-Po zapisie odświeża się tylko metadane celu. ArtifactStore.forHost dostaje dodatkowo
+Od F2j każde odświeżenie porównuje stat i pochodzenie propozycji plików w tym
+poddrzewie migawki. Wczytuje nowe/zmienione metadane, usuwa cache znikających
+plików, tombstones i niejednoznaczności, również po mutacji przez drugi host.
+Niezmienione wpisy nie powodują ponownego read. ArtifactStore.forHost dostaje dodatkowo
 enumerację Markdown ograniczoną do swojego poddrzewa, więc jego wewnętrzny filtr
 nie dodaje kolejnej enumeracji całego indeksu. Publiczny host narzędzia nadal zwraca
 pełne getMarkdownFiles. I/O metadanych artefaktów jest proporcjonalne do ich folderu;
@@ -1194,3 +1197,44 @@ obie ścieżki, a osobny test sprawdza granice migawki. Pomiar 20000 plików w 3
 folderach raportuje czas tworzenia i odświeżenia po mutacji, bez progu czasowego;
 sprawdza 0 operacji adaptera przy tworzeniu i 4 stat całego create z odświeżeniem.
 Liczniki runnera F2g oraz asercje F2g/F2h pozostają bez zmian.
+
+## Mobile M4 F2j - dwa hosty wspólnego widoku
+
+Przygotowanie ukrytego celu rejestruje tylko ścieżkę i jej ukrytych rodziców.
+Asynchroniczny refresh odczytuje każdy z tych celów raz przez `DraftView.statBase`,
+czyli port vaulta bez nakładki. Dopiero na tę bazę nakłada aktualne resolvedChanges.
+Anulowana propozycja nie wraca z cache, a zmiana stat ukrytego pliku na dysku
+staje się widoczna po udanej operacji tego hosta. Punkty odświeżenia nie zmieniły
+się: start oraz await po udanym write/mkdir, nigdy po odmowie mutacji.
+Koszt I/O wynosi jeden stat na unikalną przygotowaną ścieżkę/ukrytego rodzica
+przy każdym odświeżeniu, bez listowania ukrytych drzew i bez przejścia vaulta.
+Host bez takich celów zachowuje dotychczasowy koszt.
+
+Indeks przechowuje dodatkowo relacje rodzic-dzieci z ukrytymi wpisami, używane
+wyłącznie do enumeracji metadanych pod metadataFolder. Publiczne children/getFiles
+nadal pomijają ukryte wpisy. Początkowy listing przygotowuje bazowe ukryte artefakty;
+dalsze odświeżenia biorą ścieżki z migawki, w tym nowe propozycje innych hostów.
+Odciski wersji obejmują stat i rozwiązane pochodzenie, więc wycofanie propozycji
+do bazy albo podmiana propozycji o tej samej długości unieważnia cache.
+Nie dodajemy listingu metadanych przy każdym zapisie ani odczytu obcych plików.
+
+`draftHostProjection.test.ts` dodaje 300 deterministycznych sekwencji dwóch hostów
+na jednym DraftView oraz dwóch starych hostów na równoległym widoku. Po każdym
+kroku porównuje wynik operacji i oba hosty: get/children, getFiles/getMarkdownFiles,
+adapter.exists/stat/list i metadane. Przeplot zawiera ukryte cele przygotowane
+w obu hostach, anulowanie propozycji, zmianę ukrytej bazy, dodanie/zmianę/usunięcie
+artefaktów i tombstones, zarówno w widocznym, jak i ukrytym metadataFolder.
+Wyrocznia zachowuje stary walk i niezależny listing ze stat per dziecko.
+Sześć testów literalnych (trzy przypadki na obu ścieżkach) przypina anulowaną
+ukrytą propozycję, metadane zmienione przez drugi host oraz zmianę ukrytej bazy
+z zachowaniem starej migawki po odrzuconym zapisie.
+
+Dwa testy kosztu (30/3000 obcych plików) dla przygotowanego `.hidden/data.md`
+mierzą 2 stat na start, 5 stat przy create pliku w root oraz 6 stat + 1 read
+przy modify ukrytego pliku, bez list. Pomiar tej samej sekwencji na cee4d99:
+2, 3 oraz 5 stat + 1 read. Przyrost create to dwa ponowne stat (cel i rodzic);
+przy modify to jeden dodatkowy stat bazy celu, bo rodzic był już czytany wcześniej.
+Liczniki runnera bez ukrytych celów pozostają 104/123/8 mobile i 4/6/1 desktop
+dla obu rozmiarów. Mutacje wyłączające ponowny odczyt ukrytej bazy oraz
+ograniczające odświeżenie metadanych do lokalnego celu są wykrywane przez
+generator (ziarno 15867904, odpowiednio krok 6 i 4) oraz testy literalne.

@@ -415,3 +415,13 @@ rozmiaru indeksu, ale liczba wywołań adaptera pozostaje niezależna od niego.
 f5f13b6 ze stat per dziecko, również po odmowach i ponownym utworzeniu hosta.
 Pięć literalnych reprodukcji, test granic migawki i pomiar indeksu 20000/3700
 uzupełniają niezmienione liczniki i zachowania F2g/F2h.
+
+F2j dodaje `DraftView.statBase(path): Promise<VaultStat>`: waliduje logiczną
+ścieżkę przez parseVaultPath i wywołuje wyłącznie stat portu vaulta. Wynik nie
+zawiera propozycji ani rodziców implicit. Host używa tej metody przy każdym
+odświeżeniu wyłącznie dla zarejestrowanych ukrytych celów i ich ukrytych rodziców,
+a następnie nakłada bieżące resolvedChanges. Zapobiega traktowaniu anulowanej
+propozycji jako bazy i odświeża stat po zewnętrznej zmianie ukrytego pliku.
+Nie zmienia stat/read/mutate, przechwycenia first-touch ani formatu magazynu.
+Testy dwóch hostów, metadanych oraz kosztu przygotowanych celów opisuje
+`../tools/CLAUDE.md`, sekcja F2j. Ograniczenia prób na urządzeniu pozostają aktualne.

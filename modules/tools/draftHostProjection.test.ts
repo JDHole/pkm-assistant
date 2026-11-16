@@ -92,7 +92,12 @@ function fixture(initial: Record<string, string>, folderPaths: string[] = []) {
         result.list = legacyList(result, io);
         return result;
     };
-    return { io, index, entries, counts, store, view, oracle };
+    const updateBase = (path: string, text: string, mtime: number): void => {
+        const value = new TextEncoder().encode(text);
+        bytes.set(path, value);
+        entries.get(path)!.stat = { size: value.length, mtime };
+    };
+    return { io, index, entries, counts, store, view, oracle, updateBase };
 }
 const options = { writable: true, source, explicitFolderPath: 'Explicit/deep',
     requestedPaths: ['.hidden', '.hidden/data.md', '.hidden/deep', '.hidden/deep/new.md'] };
@@ -252,4 +257,123 @@ test('F2i CPU measurement: 20000 files in 3700 folders, no adapter I/O for proje
     t.is(host.vault.getFiles().length, 20001);
     t.is(host.vault.getAbstractFileByPath('Folder0/new.md')?.stat.size, 3);
     t.log(`20000 files / 3700 folders: create=${createdMs.toFixed(2)}ms refresh=${refreshedMs.toFixed(2)}ms`);
+});
+
+const artifact = (kind: string) => `---\nkind: ${kind}\n---\nBody`;
+for (const size of [30, 3000]) test(`F2j prepared hidden base cost with ${size} unrelated files`, async t => {
+    const initial: Record<string, string> = { '.hidden/data.md': 'Base' };
+    for (let i = 0; i < size; i++) initial[`Unrelated/n${i}.md`] = 'Other';
+    const f = fixture(initial), view = await f.view('hidden-cost', true);
+    const host = await createDraftToolHost(view, { writable: true, source, requestedPaths: ['.hidden/data.md', '.hidden/data.md'] });
+    t.deepEqual(f.counts, { stat: 2, list: 0, read: 0 });
+    Object.assign(f.counts, { stat: 0, list: 0, read: 0 });
+    await host.vault.create('local.md', 'Local');
+    t.deepEqual(f.counts, { stat: 5, list: 0, read: 0 });
+    t.deepEqual(host.vault.getAbstractFileByPath('.hidden/data.md')?.stat, { size: 4, mtime: 7, ctime: 7 });
+    Object.assign(f.counts, { stat: 0, list: 0, read: 0 });
+    await host.vault.modify({ path: '.hidden/data.md' }, 'Changed');
+    t.deepEqual(f.counts, { stat: 6, list: 0, read: 1 });
+    t.is(await host.vault.read({ path: '.hidden/data.md' }), 'Changed');
+});
+for (const indexed of [false, true]) {
+    test(`F2j cancelled hidden proposal disappears after the other host refreshes indexed=${indexed}`, async t => {
+        const f = fixture({ 'base.md': 'Base' }), view = await f.view('cancelled', indexed);
+        await view.mutate('.hidden/new.md', source, { kind: 'text', text: 'Proposal' });
+        const opts = { writable: true, source, requestedPaths: ['.hidden/new.md'] };
+        const h1 = await createDraftToolHost(view, opts), h2 = await createDraftToolHost(view, opts);
+        await h2.vault.delete({ path: '.hidden/new.md' });
+        t.deepEqual(h1.vault.getAbstractFileByPath('.hidden/new.md')?.stat, { size: 8, mtime: 1, ctime: 1 });
+        await h1.vault.create('local.md', 'Local');
+        for (const host of [h1, h2, await createDraftToolHost(view, opts)]) {
+            t.is(host.vault.getAbstractFileByPath('.hidden/new.md'), null);
+            t.is(host.vault.getAbstractFileByPath('.hidden'), null);
+            t.is(await host.vault.read({ path: 'local.md' }), 'Local');
+        }
+        t.deepEqual(root(h1), ['base.md', 'local.md']);
+    });
+    test(`F2j shared artifact metadata follows the refreshed snapshot indexed=${indexed}`, async t => {
+        const f = fixture({ 'base.md': 'Base' }), view = await f.view('metadata-shared', indexed);
+        await view.mutate('Artifacts/a.md', source, { kind: 'text', text: artifact('old') });
+        const opts = { writable: true, source, metadataFolder: 'Artifacts' };
+        const h1 = await createDraftToolHost(view, opts), h2 = await createDraftToolHost(view, opts);
+        await h2.vault.modify({ path: 'Artifacts/a.md' }, artifact('changed'));
+        t.deepEqual(h1.metadataCache.getFileCache({ path: 'Artifacts/a.md' }), { frontmatter: { kind: 'old' } });
+        await h1.vault.create('local.md', 'Local');
+        t.deepEqual(h1.metadataCache.getFileCache({ path: 'Artifacts/a.md' }), { frontmatter: { kind: 'changed' } });
+        t.deepEqual(h1.vault.getAbstractFileByPath('Artifacts/a.md')?.stat, { size: 26, mtime: 2, ctime: 2 });
+        t.is(await h1.vault.read({ path: 'Artifacts/a.md' }), '---\nkind: changed\n---\nBody');
+    });
+    test(`F2j prepared hidden base is re-read only at successful refresh indexed=${indexed}`, async t => {
+        const f = fixture({ '.hidden/data.md': 'Base', 'base.md': 'Base' }), view = await f.view('base-change', indexed);
+        const host = await createDraftToolHost(view, { writable: true, source, requestedPaths: ['.hidden/data.md'] });
+        f.updateBase('.hidden/data.md', 'Changed on disk', 42);
+        await t.throwsAsync(host.vault.create('base.md', 'Rejected'), { code: 'invalid-transition' });
+        t.deepEqual(host.vault.getAbstractFileByPath('.hidden/data.md')?.stat, { size: 4, mtime: 7, ctime: 7 });
+        await host.vault.create('local.md', 'Local');
+        t.deepEqual(host.vault.getAbstractFileByPath('.hidden/data.md')?.stat, { size: 15, mtime: 42, ctime: 42 });
+        t.is(await host.vault.read({ path: '.hidden/data.md' }), 'Changed on disk');
+    });
+}
+
+// Return the actual operation result too, including create's LocalFile and process's text.
+async function performShared(host: Host, operation: Operation) {
+    switch (operation.kind) {
+        case 'create': return host.vault.create(operation.path, operation.text ?? 'New');
+        case 'replace': return host.vault.modify({ path: operation.path }, operation.text ?? 'Replaced');
+        case 'patch': return host.vault.process({ path: operation.path }, text => `${text} patched`);
+        case 'delete': return host.vault.delete({ path: operation.path });
+        case 'mkdir': return host.vault.createFolder(operation.path);
+    }
+}
+for (let batch = 0; batch < 12; batch++) test.serial(`F2j two-host sequences ${batch * 25}-${batch * 25 + 24}: both snapshots and metadata after every operation`, async t => {
+    t.timeout(60000);
+    for (let sequence = batch * 25; sequence < (batch + 1) * 25; sequence++) {
+        const seed = 0xf2_2000 + sequence, next = random(seed);
+        const metadataFolder = sequence % 2 ? '.artifacts' : 'Artifacts';
+        const a = `${metadataFolder}/a.md`, b = `${metadataFolder}/b.md`, c = `${metadataFolder}/deep/c.md`;
+        const initial = { 'base.md': 'Base', 'Branch/file.md': 'Branch', '.hidden/data.md': 'Hidden',
+            [a]: artifact('base'), [b]: artifact('base-b') };
+        const targets = ['base.md', 'Branch', 'Branch/file.md', 'Branch/child.md', 'Tech/deep', 'Explicit/deep',
+            '.hidden/data.md', '.hidden/deep/new.md', '.cancel/new.md', 'local.md', a, b, c, metadataFolder];
+        const paths = new Set(['', ...Object.keys(initial), ...targets]);
+        for (const path of [...paths]) for (let parent = parentOf(path); parent; parent = parentOf(parent)) paths.add(parent);
+        const known = [...paths], metadataPaths = known.filter(path => path.startsWith(`${metadataFolder}/`) && path.endsWith('.md'));
+        const fixtures = [fixture(initial), fixture(initial)];
+        const opts = { ...options, metadataFolder,
+            requestedPaths: known.filter(path => path.split('/').some(part => part.startsWith('.'))) };
+        const pairs: Host[][] = [];
+        for (const [i, f] of fixtures.entries()) {
+            const view = await f.view('shared', i === 0);
+            await view.mutate('.cancel/new.md', source, { kind: 'text', text: 'Proposal' });
+            await view.mutate(a, source, { kind: 'text', text: artifact('old') });
+            pairs.push([await createDraftToolHost(view, opts), await createDraftToolHost(view, opts)]);
+        }
+        // Each sequence guarantees the two review regressions, additions, cancellation and tombstones.
+        const operations: Operation[] = [
+            { kind: 'delete', path: '.cancel/new.md' }, { kind: 'create', path: 'local.md', text: 'Local' },
+            { kind: 'replace', path: a, text: artifact('changed') }, { kind: 'mkdir', path: 'Tech/deep' },
+            { kind: 'create', path: c, text: artifact('new') }, { kind: 'patch', path: 'local.md' },
+            { kind: 'delete', path: c }, { kind: 'patch', path: 'local.md' },
+            { kind: 'delete', path: b }, { kind: 'patch', path: 'local.md' },
+        ];
+        const kinds: Operation['kind'][] = ['create', 'replace', 'patch', 'delete', 'mkdir'];
+        for (let step = 0; step < 8 + next(5); step++) operations.push({ kind: kinds[next(kinds.length)],
+            path: targets[next(targets.length)], text: artifact(`value-${step}`) });
+        const history: { host: number; operation: Operation; baseChange?: string }[] = [];
+        for (const [step, operation] of operations.entries()) {
+            const actor = (step + 1) % 2;
+            // External base mutation while both hosts have the hidden file prepared.
+            const baseChange = step === 5 ? 'Changed on disk' : undefined;
+            if (baseChange) for (const f of fixtures) f.updateBase('.hidden/data.md', baseChange, 42);
+            history.push({ host: actor + 1, operation, ...(baseChange ? { baseChange } : {}) });
+            const context = `seed=${seed} sequence=${JSON.stringify(history)}`;
+            t.deepEqual(await outcome(() => performShared(pairs[0][actor], operation)),
+                await outcome(() => performShared(pairs[1][actor], operation)), context);
+            for (let host = 0; host < 2; host++) {
+                t.deepEqual(await snapshot(pairs[0][host], known), await snapshot(pairs[1][host], known), `H${host + 1} ${context}`);
+                const metadata = (h: Host) => metadataPaths.map(path => ({ path, cache: h.metadataCache.getFileCache({ path }) }));
+                t.deepEqual(metadata(pairs[0][host]), metadata(pairs[1][host]), `metadata H${host + 1} ${context}`);
+            }
+        }
+    }
 });

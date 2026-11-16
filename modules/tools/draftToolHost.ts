@@ -32,6 +32,7 @@ export async function createDraftToolHost(view: DraftView, options: {
 }) {
     const files = new Map<string, LocalFile>();
     const metadata = new Map<string, { frontmatter: ArtifactFrontmatter }>();
+    const metadataVersions = new Map<string, string>();
     const technicalFolders = new Set<string>();
     const file = localFile;
     const index = view.index ? new DraftHostIndex(view, view.index, technicalFolders) : undefined;
@@ -65,25 +66,42 @@ export async function createDraftToolHost(view: DraftView, options: {
         }
     };
     if (index) {
-        for (const path of options.requestedPaths ?? []) await index.prepareHidden(path);
-        const metadataPaths: string[] = [];
+        for (const path of options.requestedPaths ?? []) index.prepareHidden(path);
         const prepareFolderMetadata = async (path: string): Promise<void> => {
             const listed = await view.list(path);
             for (const child of listed.files) if (child.endsWith('.md')) {
-                await index.prepareHidden(child);
-                metadataPaths.push(child);
+                index.prepareHidden(child);
             }
             for (const child of listed.folders) await prepareFolderMetadata(child);
         };
         if (options.metadataFolder) await prepareFolderMetadata(options.metadataFolder);
-        index.refresh();
-        for (const path of metadataPaths) await loadMetadata(path);
-    } else await refresh(); // Legacy DI only: no synchronous host index was supplied.
+    }
+    const refreshIndex = async (): Promise<void> => {
+        if (!index) return refresh();
+        await index.refresh();
+        if (!options.metadataFolder) return;
+        const changed = view.resolvedChanges();
+        const remaining = new Set(metadata.keys());
+        for (const entry of index.filesUnder(options.metadataFolder)) {
+            if (entry.status || !entry.path.endsWith('.md')) continue;
+            const resolved = changed.get(parseVaultPath(entry.path));
+            // The draft-wide revision also changes for unrelated writes; only this path's
+            // proposal and base stat determine whether its parsed metadata needs reloading.
+            const proposals = resolved?.kind === 'proposal'
+                ? resolved.sources.map(({ ref, change }) => [ref.draftId, change.revision, change.proposed]) : null;
+            const version = JSON.stringify([entry.stat, proposals]);
+            remaining.delete(entry.path);
+            if (metadataVersions.get(entry.path) === version) continue;
+            await loadMetadata(entry.path);
+            metadataVersions.set(entry.path, version);
+        }
+        for (const path of remaining) { metadata.delete(path); metadataVersions.delete(path); }
+    };
+    await refreshIndex(); // Legacy DI without an index retains the original walker.
     const refreshPath = async (path: string): Promise<void> => {
         if (!index) return refresh();
-        await index.prepareHidden(path);
-        index.refresh();
-        await loadMetadata(path);
+        index.prepareHidden(path);
+        await refreshIndex();
     };
     const get = (path: string): LocalFile | null => {
         if (!path || path === '/') return index?.get('') ?? files.get('')!;

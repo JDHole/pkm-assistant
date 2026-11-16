@@ -1,6 +1,6 @@
 import { sanitizePath } from '../../core/index.js';
 import { DraftError, parseVaultPath } from '../vault-drafts/index.js';
-import type { DraftFileIndex, DraftRef, DraftView } from '../vault-drafts/index.js';
+import type { DraftFileIndex, DraftRef, DraftView, VaultStat } from '../vault-drafts/index.js';
 import { isHiddenVaultPath } from './vault_adapter_io.js';
 
 export interface LocalFile {
@@ -17,12 +17,15 @@ const parentOf = (path: string) => path.includes('/') ? path.slice(0, path.lastI
 /** A snapshot of the legacy walk, rebuilt from memory at the legacy refresh points. */
 export class DraftHostIndex {
     private snapshot = new Map<string, LocalFile>();
+    private descendants = new Map<string, LocalFile[]>();
     // Only explicitly requested hidden paths use adapter I/O. Never enumerate hidden trees.
-    private readonly hidden = new Map<string, LocalFile | null>();
+    private readonly hidden = new Map<string, VaultStat>();
     constructor(private readonly view: DraftView, private readonly base: DraftFileIndex,
         private readonly technicalFolders: Set<string>) {}
 
-    refresh(): void {
+    async refresh(): Promise<void> {
+        // Re-read only prepared base paths. An overlay result must never become a cached base.
+        for (const path of this.hidden.keys()) this.hidden.set(path, await this.view.statBase(path));
         const changed = this.view.resolvedChanges();
         const candidates = new Map<string, Set<string>>();
         const liveAncestors = new Set<string>();
@@ -49,7 +52,8 @@ export class DraftHostIndex {
             const entry = this.base.get(path);
             if (entry) return entry.kind === 'folder' ? localFile(path, true) : localFile(path, false, entry.bytes, entry.mtime);
             const hidden = this.hidden.get(path);
-            if (hidden) return localFile(path, 'children' in hidden, hidden.stat.size, hidden.stat.mtime);
+            if (hidden?.kind === 'file') return localFile(path, false, hidden.bytes, hidden.mtime);
+            if (hidden?.kind === 'folder') return localFile(path, true);
             return liveAncestors.has(path) ? localFile(path, true) : null;
         };
         const files = new Map<string, LocalFile>([['', localFile('', true)]]);
@@ -71,12 +75,30 @@ export class DraftHostIndex {
         for (const entry of files.values()) if (entry.path && !isHiddenVaultPath(entry.path))
             files.get(parentOf(entry.path))?.children?.push(entry);
         this.snapshot = files;
+        this.descendants = new Map();
+        for (const entry of files.values()) if (entry.path) {
+            const parent = parentOf(entry.path);
+            if (!this.descendants.has(parent)) this.descendants.set(parent, []);
+            this.descendants.get(parent)!.push(entry);
+        }
     }
     get(path: string): LocalFile | null { return this.snapshot.get(path) ?? null; }
     files(): LocalFile[] { return [...this.snapshot.values()].filter(entry => !('children' in entry) && !isHiddenVaultPath(entry.path)); }
+    /** Includes prepared hidden entries without scanning unrelated snapshot paths. */
+    filesUnder(path: string): LocalFile[] {
+        const result: LocalFile[] = [];
+        const walk = (parent: string): void => {
+            for (const entry of this.descendants.get(parent) ?? []) {
+                if ('children' in entry) walk(entry.path);
+                else result.push(entry);
+            }
+        };
+        walk(path);
+        return result;
+    }
 
     /** Hidden targets are prepared before synchronous tools run; no unrelated directory is visited. */
-    async prepareHidden(input: string): Promise<void> {
+    prepareHidden(input: string): void {
         const path = sanitizePath(input);
         if (!path || !isHiddenVaultPath(path)) return;
         // Malformed/private arguments still belong to the tool's existing validation.
@@ -85,10 +107,7 @@ export class DraftHostIndex {
         if (this.view.resolve(path).kind === 'ambiguous-input') return;
         for (let target = path; target; target = parentOf(target)) {
             if (!isHiddenVaultPath(target) || this.view.resolve(target).kind === 'ambiguous-input') continue;
-            const stat = await this.view.stat(target);
-            if (stat.kind === 'file' && target === path) this.hidden.set(target, localFile(target, false, stat.bytes, stat.mtime));
-            else if (stat.kind === 'folder') this.hidden.set(target, localFile(target, true));
-            else if (stat.kind === 'missing') this.hidden.set(target, null);
+            if (!this.hidden.has(target)) this.hidden.set(target, { kind: 'missing' });
         }
     }
 }

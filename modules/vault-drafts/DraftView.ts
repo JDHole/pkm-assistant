@@ -52,6 +52,8 @@ export class DraftView {
         private readonly vault: DraftViewIO, readonly draftId: DraftId | null,
         readonly predecessors: readonly FrozenDraftView[] = []) { this.predecessors = Object.freeze([...predecessors]); }
     get index(): DraftFileIndex | undefined { return this.vault.index; }
+    /** Base-only stat for prepared host paths; never includes proposals or implicit parents. */
+    statBase(input: string): Promise<VaultStat> { return this.vault.stat(parseVaultPath(input)); }
     freeze(): FrozenDraftView { return FrozenDraftView.from(this); }
     private resolutionContext() {
         const own = this.draftId ? this.store.snapshot(this.draftId) : null;
