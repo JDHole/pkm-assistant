@@ -218,6 +218,8 @@
 
 /* ---- Message card ---- */
 .cs-comm-msg {
+    /* Keep full cards on both platforms; the message list owns scrolling. */
+    flex-shrink: 0;
     border-radius: 3px;
     border: 1px solid var(--background-modifier-border);
     overflow: hidden;

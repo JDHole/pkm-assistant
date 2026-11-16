@@ -320,8 +320,11 @@ wyzwalacze oraz szczegóły szablonów. Przycisk Wstecz dobiera zakres przez
 bieżącą treść widoku. U14/U16/U17, DOM, handlery, desktop i tablet bez zmian.
 
 Tekst i etykiety mają 14 px, tytuły sekcji oraz pomocnicze liczniki/plakietki
-12 px, pola 16 px. Cele dotyku mają minimum 44 px wysokości, przyciski ikon
-również 44 px szerokości. Siatka agentów ma dwie kolumny `minmax(0, 1fr)`,
+12 px, pola 16 px. Zweryfikowane przyciski, pola, karty i wiersze nawigacji
+mają minimum 44 px wysokości, przyciski ikon również 44 px szerokości.
+Znany wyjątek: liniowe linki w treści podglądu Markdown szablonu nie mają
+gwarantowanych 44 px, bo `min-height` nie działa na zwykłym elemencie inline.
+Ich wygląd pozostaje bez zmian. Siatka agentów ma dwie kolumny `minmax(0, 1fr)`,
 aby długie nazwy mieściły się także w węższej szufladzie. Paski komunikatora
 i filtrów zawijają się zamiast przewijać poziomo. Trzy zakładki Zaplecza
 mają trzy kolumny z zawijanymi etykietami. Menu „Użyj u agenta” po otwarciu
@@ -345,9 +348,11 @@ natywnych kontrolek wymagających wyjątku od minimum 44 px.
 Dodatkowo 16 prób na produkcyjnych rendererach z syntetycznymi danymi w RAM:
 osiem widoków przy dwóch szerokościach, długie nazwy bez spacji, rozwinięta
 wiadomość, menu wyboru agenta, rozwinięte narzędzia konektora i oba szczegóły
-szablonów. Wszystkie bez małego tekstu/celów, obcięcia tekstu i poziomego
-overflow. Dotyk przez CDP przeszedł kartę, prezentację, profil, potwierdzenie
-usunięcia i anulowanie, cztery wiersze zaplecza oraz żeton komunikatora.
+szablonów. W badanych próbkach bez małego tekstu/celów, obcięcia tekstu i poziomego
+overflow; wynik nie obejmuje liniowych linków Markdown ani pionowego obcięcia
+kart w dużej skrzynce (naprawa U23 poniżej). Dotyk przez CDP przeszedł kartę,
+prezentację, profil, potwierdzenie usunięcia i anulowanie, cztery wiersze zaplecza
+oraz żeton komunikatora.
 Nie wykonywano usuwania ani wysyłania. Po zatrzymaniu animacji 12 porównań
 geometrii i stylów sześciu widoków dało identyczne wyniki: desktop bez emulacji
 960 px oraz wariant CSS tabletu bez `is-phone` przy 768 px. Profil U14 również
@@ -357,3 +362,35 @@ lub iOS; dotyk, klawiatura, większa czcionka systemowa i przewijanie pozostają
 do odbioru na urządzeniu. Nowe widoki/klasy kontrolek wymagają ponownego
 pomiaru; szczególnie nie należy współdzielić ich z profilem bez sprawdzenia
 zakresu istniejących reguł U14.
+
+## M3 U23 - komunikator bez zgniatania kart na obu platformach
+
+Zastana lista `.cs-comm-messages` jest kolumną flex z `max-height: 400px`.
+Karty `.cs-comm-msg` miały domyślne `flex-shrink: 1` i `overflow: hidden`,
+więc duża skrzynka kurczyła karty zamiast przewijać listę. Bazowe
+`flex-shrink: 0` na karcie naprawia telefon i desktop, zgodnie z zakresem U23.
+Limit listy, odstęp 3 px, kolory, DOM i handlery pozostają bez zmian.
+Także rozwinięta karta wyższa niż 400 px zachowuje całą treść; przewija ją lista.
+
+Weryfikacja U23 [measured]: podmiana arkusza przed/po w działającym Obsidianie,
+produkcyjny renderer komunikatora z syntetycznymi wiadomościami wyłącznie w RAM,
+bez buildu i zapisu wiadomości do vaulta. 18 porównań (36 pomiarów): telefon
+360x804 i 412x880 oraz desktop 960x880 z wyłączoną emulacją mobile.
+Przy 74 wiadomościach liczba kart z `scrollHeight > clientHeight + 1` spadła
+z 74 do 0 na każdej platformie. `clientHeight` listy pozostało 400 px,
+a `scrollHeight` wzrosło z 400 do odpowiednio 9289, 8616 i 3327 px.
+Przewinięcie odsłoniło dół ostatniej karty w każdym wariancie.
+Skrzynki po 1, 2 i 3 krótkie wiadomości: 0 obciętych kart przed/po, identyczne
+wysokości kart (104,375 px na telefonie, 42 px na desktopie) i list.
+Kliknięcie rozwijające ostatnią wiadomość z 30 wierszami treści sprawdzono
+osobno przy 1 i 74 wiadomościach: po zmianie 0 obciętych kart i dostępny koniec treści.
+
+Przegląd pozostałych limitów wysokości w arkuszu: podobny kontener flex ma
+`.cs-picker__dropdown`, ale jego `.cs-picker__options` to przewijany blok,
+więc opcje nie są kurczącymi się elementami flex. Dodatkowe 14 pomiarów
+syntetycznego DOM z produkcyjnym CSS (7 wariantów po 74 pozycje, telefon/desktop)
+objęło picker z wyszukiwaniem i bez, `.cs-focus-dropdown`, `.cs-mem-card__content`,
+`.sidebar-detail-prompt`, `.cs-prompt-preview` i `.cs-template-use__menu`:
+0 zgniecionych pozycji, listy przewijalne do końca. Nie wymagają zmian U23.
+Nie dodano testów AVA ani asercji na tekst CSS. Pomiary geometrii nie zastępują
+próby przewijania dotykiem na Androidzie/iOS i przy większej czcionce systemowej.
