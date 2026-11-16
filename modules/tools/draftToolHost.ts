@@ -2,13 +2,14 @@ import { parseYaml, stringifyYaml } from '../../core/index.js';
 import { DraftError, parseVaultPath } from '../vault-drafts/index.js';
 import type { Change, DraftRef, DraftView } from '../vault-drafts/index.js';
 import type { SearchToolPlugin } from './SearchTool.js';
+import { DraftHostIndex, localFile } from './draftHostIndex.js';
+import type { LocalFile } from './draftHostIndex.js';
 import type { ArtifactFrontmatter } from '../artifacts/index.js';
 
 const searchBases = new WeakMap<object, SearchToolPlugin>();
 export function bindDraftSearchPlugin(local: object, base: SearchToolPlugin): void { searchBases.set(local, base); }
 export function draftSearchBase(local: object): SearchToolPlugin | undefined { return searchBases.get(local); }
 
-interface LocalFile { status?: 'ambiguous-input'; sources?: readonly DraftRef[]; path: string; name: string; basename: string; extension: string; stat: { size: number; mtime: number; ctime: number }; children?: LocalFile[]; }
 const denied = (): never => { throw new DraftError('mutation-denied', 'Unsupported draft host operation'); };
 /** No prototype/global fallthrough: an unknown method is an explicit refusal. */
 function closed<T extends object>(surface: T): T {
@@ -27,15 +28,17 @@ function frontmatter(text: string): { front: ArtifactFrontmatter; body: string }
 
 /** A new host per invocation gives keyword scans a distinct identity for every revision. */
 export async function createDraftToolHost(view: DraftView, options: {
-    writable: boolean; source: Change['source']; explicitFolderPath?: string; metadataFolder?: string; configDir?: string;
+    writable: boolean; source: Change['source']; explicitFolderPath?: string; metadataFolder?: string; configDir?: string; requestedPaths?: readonly string[];
 }) {
     const files = new Map<string, LocalFile>();
     const metadata = new Map<string, { frontmatter: ArtifactFrontmatter }>();
     const technicalFolders = new Set<string>();
-    const file = (path: string, folder: boolean, size = 0, mtime = 0): LocalFile => {
-        const name = path.split('/').pop() ?? '', dot = name.lastIndexOf('.');
-        return { path, name, basename: dot < 0 ? name : name.slice(0, dot), extension: dot < 0 ? '' : name.slice(dot + 1),
-            stat: { size, mtime, ctime: mtime }, ...(folder ? { children: [] } : {}) };
+    const file = localFile;
+    const index = view.index ? new DraftHostIndex(view, view.index, technicalFolders) : undefined;
+    const loadMetadata = async (path: string): Promise<void> => {
+        metadata.delete(path);
+        const entry = index ? index.get(path) : files.get(path);
+        if (entry && !entry.status && !('children' in entry) && path.endsWith('.md') && options.metadataFolder && path.startsWith(`${options.metadataFolder}/`)) metadata.set(path, { frontmatter: frontmatter(await view.read(path)).front });
     };
     const refresh = async (): Promise<void> => {
         files.clear(); metadata.clear(); files.set('', file('', true));
@@ -61,18 +64,35 @@ export async function createDraftToolHost(view: DraftView, options: {
             if (!entry.path.split('/').some(part => part.startsWith('.'))) files.get(parent)?.children?.push(entry);
         }
     };
-    await refresh();
+    if (index) {
+        for (const path of options.requestedPaths ?? []) await index.prepareHidden(path);
+        const loadFolderMetadata = async (path: string): Promise<void> => {
+            const listed = await view.list(path);
+            for (const child of listed.files) if (child.endsWith('.md')) {
+                await index.prepareHidden(child);
+                await loadMetadata(child);
+            }
+            for (const child of listed.folders) await loadFolderMetadata(child);
+        };
+        if (options.metadataFolder) await loadFolderMetadata(options.metadataFolder);
+    } else await refresh(); // Legacy DI only: no synchronous host index was supplied.
+    const refreshPath = async (path: string): Promise<void> => {
+        if (!index) return refresh();
+        index.update(path);
+        await index.prepareHidden(path);
+        await loadMetadata(path);
+    };
     const get = (path: string): LocalFile | null => {
-        if (!path || path === '/') return files.get('')!;
+        if (!path || path === '/') return index?.get('') ?? files.get('')!;
         parseVaultPath(path);
         const resolved = view.resolve(path);
         if (resolved.kind === 'ambiguous-input') throw new DraftError('ambiguous-input', `Ambiguous input ${path}: ${resolved.sources.map(source => source.ref.draftId).join(', ')}`);
-        return files.get(path) ?? null;
+        return index ? index.get(path) : files.get(path) ?? null;
     };
     const write = async (path: string, value: Parameters<DraftView['mutate']>[2], expectation: 'create' | 'file' | 'any' = 'any'): Promise<void> => {
         if (!options.writable) denied();
         await view.mutate(path, options.source, value, expectation);
-        await refresh();
+        await refreshPath(path);
     };
     const mkdir = async (path: string): Promise<void> => {
         if (!options.writable) denied();
@@ -81,10 +101,10 @@ export async function createDraftToolHost(view: DraftView, options: {
         for (let i = 1; i <= segments.length; i++) {
             const parent = segments.slice(0, i).join('/'), stat = await view.stat(parent);
             if (stat.kind === 'file') throw new DraftError('invalid-transition', 'Folder collides with file');
-            if (stat.kind === 'missing') technicalFolders.add(parent);
+            if (stat.kind === 'missing') { technicalFolders.add(parent); index?.update(parent); }
         }
         if (path === options.explicitFolderPath && (await view.stat(path)).kind === 'missing') await write(path, { kind: 'folder' }, 'create');
-        else await refresh();
+        else await refreshPath(path);
     };
     const binary = async (path: string): Promise<ArrayBuffer> => (await view.readBinary(path)).slice().buffer;
     const remove = (path: string, disposition: 'trash' | 'permanent') => write(path, { kind: 'deleted', disposition }, 'file');
@@ -119,9 +139,9 @@ export async function createDraftToolHost(view: DraftView, options: {
         trashLocal: (path: string) => remove(path, 'trash'),
     });
     const vault = closed({
-        adapter, configDir: options.configDir, getAbstractFileByPath: get, getRoot: () => files.get('')!,
-        getFiles: () => [...files.values()].filter(entry => !entry.children && visible(entry)),
-        getMarkdownFiles: () => [...files.values()].filter(entry => !entry.children && entry.extension === 'md' && visible(entry)),
+        adapter, configDir: options.configDir, getAbstractFileByPath: get, getRoot: () => get('')!,
+        getFiles: () => (index ? index.files() : [...files.values()]).filter(entry => !('children' in entry) && visible(entry)),
+        getMarkdownFiles: () => (index ? index.files() : [...files.values()]).filter(entry => !('children' in entry) && entry.extension === 'md' && visible(entry)),
         read: (entry: { path: string }) => view.read(entry.path), cachedRead: (entry: { path: string }) => view.read(entry.path),
         readBinary: (entry: { path: string }) => binary(entry.path),
         create: async (path: string, text: string) => { await write(path, { kind: 'text', text }, 'create'); return get(path)!; },

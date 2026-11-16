@@ -9,7 +9,7 @@ export { parseDraftId, parseChangeId, parseBlobId, parseContentHash, parseRevisi
     parseVaultPath, parseDraftManifest, parseDraftMutation } from './schema.js';
 
 export { DraftView, FrozenDraftView } from './DraftView.js';
-export type { DraftViewIO, DraftResolution } from './DraftView.js';
+export type { DraftViewIO, DraftResolution, DraftFileIndex, DraftIndexEntry } from './DraftView.js';
 export { DraftReview } from './DraftReview.js';
 export type { DraftReviewIO, DraftReviewContext, DraftPreview, ReviewDecision, ChangeSummary } from './DraftReview.js';
 export { DesktopDraftStorage } from './DesktopDraftStorage.js';

@@ -1,3 +1,5 @@
+import { syntheticVaultIndex } from './test-support/syntheticVaultIndex.js';
+import { createDraftFileIndex } from './draftFileIndex.js';
 import test from 'ava';
 import { create, insert } from '@orama/orama';
 import { createHash } from 'node:crypto';
@@ -31,7 +33,7 @@ function storage(): DraftStorageIO {
         publish: async (path, bytes, allowed) => { if (!allowed()) return 'cancelled'; files.set(path, bytes.slice()); return 'published'; },
     };
 }
-async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }) {
+async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }, indexed = false) {
     const files = new Map(Object.entries(initial).map(([path, text]) => [path, encode(text)]));
     const folders = new Set<string>();
     const io: DraftViewIO = {
@@ -78,6 +80,10 @@ async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }) {
             renameFile: async () => { throw new Error('Live rename forbidden'); },
         },
     };
+    if (indexed) {
+        Object.assign(app.vault, syntheticVaultIndex(files, folders));
+        Object.assign(io, { index: createDraftFileIndex(app as never) });
+    }
     const persistence = new DraftPersistence(storage(), { sha256: async bytes => createHash('sha256').update(bytes).digest('hex') });
     const store = new DraftStore(persistence, io, { now: () => 100 });
     const artifactStore = new ArtifactStore({ app, getArtifactsFolder: () => 'Artifacts', now: () => new Date('2026-11-07T12:00:00Z'),
@@ -341,4 +347,299 @@ test('P2 predecessor tombstones and folders are visible without a writable works
     t.is(await h.app.vault.cachedRead({ path: 'Nowy/b.md' }), 'Poprzednik');
     await t.throwsAsync(h.app.vault.create('new.md', 'Nie'), { code: 'mutation-denied' });
     t.is(await f.app.vault.read({ path: 'a.md' }), 'Baza');
+});
+
+
+for (const indexed of [false, true]) test(`F2g hidden host contract indexed=${indexed}`, async t => {
+    const f = await fixture({ 'Notes/a.md': 'Visible', '.hidden/data.md': 'Hidden', '.pkm-assistant/subagent-drafts/v1/private.md': 'Private' }, indexed);
+    const view = await f.view('hidden-contract');
+    const h = await createDraftToolHost(view, { writable: true, source, requestedPaths: ['.hidden/data.md'] });
+    t.deepEqual(h.vault.getAbstractFileByPath('.hidden/data.md'), { path: '.hidden/data.md', name: 'data.md', basename: 'data', extension: 'md', stat: { size: 6, mtime: 7, ctime: 7 } });
+    t.deepEqual(h.vault.getAbstractFileByPath('.hidden')?.children, []);
+    t.deepEqual(h.vault.getFiles().map(f => f.path), ['Notes/a.md']);
+    t.deepEqual(await h.vault.adapter.list('.hidden'), { files: ['.hidden/data.md'], folders: [], ambiguous: [] });
+    t.deepEqual(await h.vault.adapter.stat('.hidden/data.md'), { type: 'file', size: 6, mtime: 7, ctime: 0 });
+    t.is(await h.vault.adapter.read('.hidden/data.md'), 'Hidden');
+    await h.vault.adapter.write('.hidden/new.md', 'Draft');
+    t.is(h.vault.getAbstractFileByPath('.hidden/new.md')?.stat.size, 5);
+    t.is(await h.vault.adapter.read('.hidden/new.md'), 'Draft');
+    t.deepEqual(await h.vault.adapter.list('.pkm-assistant'), { files: [], folders: [], ambiguous: [] });
+    t.throws(() => h.vault.getAbstractFileByPath('.pkm-assistant/subagent-drafts/v1/private.md'), { code: 'invalid-path' });
+});
+
+// Exercise both compositions on identical synthetic bytes, then pin key results literally.
+test('F2g indexed and legacy hosts return the same tool results and proposal bytes', async t => {
+    const execute = async (indexed: boolean) => {
+        const f = await fixture({ 'Notes/base.md': 'Base', 'Notes/nested/leaf.md': 'Leaf',
+            '.pkm-assistant/custom/data.md': 'Hidden' }, indexed);
+        const view = await f.view('equivalence');
+        const results: unknown[] = [];
+        const call = async (name: string, args: Record<string, unknown>) => {
+            const h = await f.prepare(view, name, args);
+            const tool = { read: createReadTool(), list: createListTool(), search: createSearchTool(), write: createWriteTool(),
+                delete: createDeleteTool(), create_folder: createCreateFolderTool(h.app) }[name];
+            if (!tool) throw new Error('Unknown test tool');
+            const value = await tool.execute(args, h.app, h.plugin, context);
+            results.push(value);
+            return value;
+        };
+        await call('read', { path: 'Notes/base.md' });
+        await call('list', { folder: 'Notes', scope: 'vault' });
+        await call('list', { folder: 'Notes', scope: 'vault', recursive: true });
+        await call('write', { path: 'Notes/new.md', mode: 'create', content: 'New' });
+        await call('write', { path: 'Notes/base.md', mode: 'replace', content: 'Replacement' });
+        await call('write', { path: 'Notes/base.md', mode: 'patch', old_text: 'Replacement', new_text: 'Patched' });
+        await call('write', { path: 'Notes/base.md', mode: 'append', content: ' tail' });
+        await call('search', { scope: 'vault', mode: 'keyword', query: 'Patched' });
+        await call('search', { scope: 'vault', mode: 'text', query: 'Patched', where: { folder: 'Notes', glob: '*.md' } });
+        await call('create_folder', { path: 'Created/Nested' });
+        await call('delete', { path: 'Notes/nested/leaf.md' });
+        // Admin tools take their existing adapter branch after normal validation.
+        const admin = { name: 'Tester', admin_access: true };
+        Object.assign(f.plugin.agentManager, { getActiveAgent: () => admin, getAgent: () => admin });
+        await call('read', { path: '.pkm-assistant/custom/data.md' });
+        await call('write', { path: '.pkm-assistant/custom/data.md', content: 'Hidden draft' });
+        await call('list', { scope: 'vault', folder: '.pkm-assistant/custom', recursive: true });
+        await call('read', { path: '.pkm-assistant/custom' });
+        await call('write', { path: '.pkm-assistant/custom/new.md', mode: 'create', content: 'New hidden' });
+        await call('read', { path: '.pkm-assistant/subagent-drafts/v1/private.md' });
+        const bytes = await Promise.all(['Notes/base.md', 'Notes/new.md', '.pkm-assistant/custom/data.md', '.pkm-assistant/custom/new.md'].map(path => view.read(path)));
+        return { results, bytes, manifest: f.store.snapshot(view.draftId!) };
+    };
+    const legacy = await execute(false), indexed = await execute(true);
+    t.deepEqual(indexed, legacy);
+    t.deepEqual(indexed.bytes, ['Patched tail', 'New', 'Hidden draft', 'New hidden']);
+    t.deepEqual(indexed.results[0], { success: true, path: 'Notes/base.md', content: 'Base' });
+    t.like(indexed.results[7], { success: true, results: [{ path: 'Notes/base.md', excerpt: 'Patched tail' }] });
+    t.like(indexed.results[8], { success: true, mode_used: 'text', results: [{ path: 'Notes/base.md' }] });
+    t.like(indexed.results[14], { success: false });
+    t.deepEqual(indexed.manifest.changes.map(change => [change.path, change.proposed.kind]), [
+        ['Notes/new.md', 'text'], ['Notes/base.md', 'text'], ['Created/Nested', 'folder'],
+        ['Notes/nested/leaf.md', 'deleted'], ['.pkm-assistant/custom/data.md', 'text'], ['.pkm-assistant/custom/new.md', 'text'],
+    ]);
+});
+
+test('F2g synchronous index updates only the touched path and parents, including technical folders', async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ 'Notes/base.md': 'Base', 'z.txt': 'Text' }, indexed), view = await f.view('sync');
+        const h = await createDraftToolHost(view, { writable: true, source });
+        const before = h.vault.getAbstractFileByPath('Notes');
+        await h.vault.create('Notes/new.md', 'New');
+        const created = h.vault.getAbstractFileByPath('Notes/new.md');
+        const children = h.vault.getAbstractFileByPath('Notes')!.children!.map(child => child.path);
+        const files = h.vault.getFiles().map(file => file.path), markdown = h.vault.getMarkdownFiles().map(file => file.path);
+        await h.vault.createFolder('Technical/Parent');
+        await h.vault.create('Technical/Parent/new.md', 'Technical');
+        await h.vault.delete({ path: 'Notes/base.md' });
+        return { created, children, files, markdown, root: h.vault.getRoot().children!.map(child => child.path),
+            after: h.vault.getAbstractFileByPath('Notes')!.children!.map(child => child.path),
+            technical: h.vault.getAbstractFileByPath('Technical')!.children!.map(child => child.path),
+            changes: f.store.snapshot(view.draftId!).changes.map(change => [change.path, change.proposed.kind]),
+            base: before!.path };
+    };
+    const legacy = await exercise(false), indexed = await exercise(true);
+    t.deepEqual(indexed, legacy);
+    t.deepEqual(indexed, {
+        created: { path: 'Notes/new.md', name: 'new.md', basename: 'new', extension: 'md', stat: { size: 3, mtime: 1, ctime: 1 } },
+        children: ['Notes/base.md', 'Notes/new.md'], files: ['z.txt', 'Notes/base.md', 'Notes/new.md'],
+        markdown: ['Notes/base.md', 'Notes/new.md'], root: ['z.txt', 'Notes', 'Technical'], after: ['Notes/new.md'],
+        technical: ['Technical/Parent'], changes: [['Notes/new.md', 'text'], ['Technical/Parent/new.md', 'text'], ['Notes/base.md', 'deleted']], base: 'Notes',
+    });
+});
+
+test('F2g predecessor proposals, tombstones and A/B ambiguity retain host results', async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ 'Notes/base.md': 'Base', 'Notes/remove.md': 'Remove' }, indexed);
+        const a = await f.view('a'), b = await f.view('b');
+        await a.mutate('Notes/base.md', source, { kind: 'text', text: 'A' });
+        await a.mutate('Notes/remove.md', source, { kind: 'deleted', disposition: 'trash' });
+        await a.mutate('New/Deep/new.md', source, { kind: 'text', text: 'Ancestor' });
+        await b.mutate('Notes/base.md', source, { kind: 'text', text: 'B' });
+        await f.store.seal(a.draftId!, 'finished'); await f.store.seal(b.draftId!, 'finished');
+        const c = await f.view('c', [a.freeze()]);
+        const inherited = await f.prepare(c, 'read', { path: 'New/Deep/new.md' });
+        const read = await createReadTool().execute({ path: 'New/Deep/new.md' }, inherited.app, inherited.plugin);
+        const paths = inherited.app.vault.getFiles().map(file => file.path);
+        const d = await f.view('d', [a.freeze(), b.freeze()]);
+        const ambiguous = await f.prepare(d, 'list', { folder: 'Notes', scope: 'vault' });
+        const listed = await createListTool().execute({ folder: 'Notes', scope: 'vault' }, ambiguous.app, ambiguous.plugin);
+        const adapter = await ambiguous.app.vault.adapter.list('Notes');
+        t.throws(() => ambiguous.app.vault.getAbstractFileByPath('Notes/base.md'), { code: 'ambiguous-input' });
+        await t.throwsAsync(ambiguous.app.vault.cachedRead({ path: 'Notes/base.md' }), { code: 'ambiguous-input' });
+        await t.throwsAsync(ambiguous.app.vault.modify({ path: 'Notes/base.md' }, 'No winner'), { code: 'ambiguous-input' });
+        await c.mutate('New/Deep/new.md', source, { kind: 'deleted', disposition: 'trash' });
+        const tombstone = await f.prepare(c);
+        return { read, paths, listed, adapter, remaining: tombstone.app.vault.getFiles().map(file => file.path) };
+    };
+    const legacy = await exercise(false), indexed = await exercise(true);
+    t.deepEqual(indexed, legacy);
+    t.deepEqual(indexed.read, { success: true, path: 'New/Deep/new.md', content: 'Ancestor' });
+    t.deepEqual(indexed.paths, ['New/Deep/new.md', 'Notes/base.md']);
+    t.deepEqual(indexed.remaining, ['Notes/base.md']);
+    t.like(indexed.listed, { success: true, files: [{ path: 'Notes/base.md', status: 'ambiguous-input', sources: [
+        { draftId: 'draft-a', revision: 3 }, { draftId: 'draft-b', revision: 1 },
+    ] }], count: 1 });
+});
+
+test('F2g artifact create, update, read and list are equivalent and metadata stays inside its folder', async t => {
+    const execute = async (indexed: boolean) => {
+        const f = await fixture({ 'Outside.md': 'Unrelated' }, indexed), view = await f.view('artifacts');
+        const createdHost = await f.prepare(view, 'artifact_create');
+        const created = await artifact(createArtifactCreateTool(), { typ: 'plan', tytul: 'Example', pola: { cel: 'Base' } }, createdHost);
+        if (created === null || typeof created !== 'object' || !('id' in created) || typeof created.id !== 'string') throw new Error(JSON.stringify(created));
+        const updateHost = await f.prepare(view, 'artifact_update');
+        const update = await artifact(createArtifactUpdateTool(), { id: created.id, ops: [{ op: 'set_field', key: 'status', value: 'closed' }] }, updateHost);
+        const readHost = await f.prepare(view, 'artifact_read');
+        const read = await artifact(createArtifactReadTool(), { id: created.id }, readHost);
+        const list = await artifact(createArtifactListTool(), {}, readHost);
+        return { created, update, read, list, text: await view.read('Artifacts/Tester/2026-11-07 Example.md') };
+    };
+    const legacy = await execute(false), indexed = await execute(true);
+    // Artifact IDs are intentionally random. Normalize only that identifier in all fields and bytes.
+    const normalize = (value: unknown) => JSON.parse(JSON.stringify(value).replace(/art-20261107-[a-f0-9]+/g, 'ARTIFACT'));
+    t.deepEqual(normalize(indexed), normalize(legacy));
+    t.like(indexed.update, { applied: 1, errors: [], artifact: { frontmatter: { status: 'closed' } } });
+    t.like(indexed.list, { artifacts: [{ path: 'Artifacts/Tester/2026-11-07 Example.md', status: 'closed' }] });
+    t.true(indexed.text.includes('cel: Base'));
+});
+
+for (const size of [50, 500]) test(`F2g view listing ${size} files needs one stat and one list`, async t => {
+    const initial: Record<string, string> = {};
+    const paths = Array.from({ length: size }, (_, i) => `Listed/n${String(i).padStart(3, '0')}.md`);
+    for (const path of paths) initial[path] = 'Text';
+    const f = await fixture(initial, true), view = await f.view('listing');
+    const counts = { stat: 0, list: 0, read: 0 }, original = { ...f.io };
+    f.io.stat = path => { counts.stat++; return original.stat(path); };
+    f.io.list = path => { counts.list++; return original.list(path); };
+    f.io.read = path => { counts.read++; return original.read(path); };
+    t.deepEqual(await view.list('Listed'), { files: paths, folders: [], ambiguous: [] });
+    t.deepEqual(counts, { stat: 1, list: 1, read: 0 });
+    // DraftViewIO requires full logical child paths, unlike private storage's name-only port.
+    f.io.list = async () => ({ files: ['n000.md'], folders: [] });
+    await t.throwsAsync(view.list('Listed'), { code: 'invalid-path', message: 'Listing returned a non-child path' });
+});
+
+for (const size of [30, 3000]) test(`F2g artifact metadata reads only its subtree with ${size} unrelated files`, async t => {
+    const initial: Record<string, string> = {
+        'Artifacts/Tester/a.md': '---\nstatus: draft\n---\nBody',
+        'Artifacts/Tester/b.md': '---\nstatus: closed\n---\nOther',
+    };
+    for (let i = 0; i < size; i++) initial[`Unrelated/n${i}.md`] = 'Unrelated';
+    const f = await fixture(initial, true), view = await f.view('metadata');
+    const trace: string[] = [], original = { ...f.io };
+    f.io.stat = path => { trace.push(`stat:${path}`); return original.stat(path); };
+    f.io.list = path => { trace.push(`list:${path}`); return original.list(path); };
+    f.io.read = path => { trace.push(`read:${path}`); return original.read(path); };
+    Object.assign(f.io.index!, { files: () => { throw new Error('Metadata must not enumerate the vault'); } });
+    const h = await createDraftToolHost(view, { writable: true, source, metadataFolder: 'Artifacts' });
+    t.deepEqual(h.metadataCache.getFileCache({ path: 'Artifacts/Tester/a.md' }), { frontmatter: { status: 'draft' } });
+    t.deepEqual(trace, ['stat:Artifacts', 'list:Artifacts', 'stat:Artifacts/Tester', 'list:Artifacts/Tester',
+        'read:Artifacts/Tester/a.md', 'read:Artifacts/Tester/b.md']);
+    await h.vault.modify({ path: 'Artifacts/Tester/a.md' }, '---\nstatus: closed\n---\nChanged');
+    t.deepEqual(h.metadataCache.getFileCache({ path: 'Artifacts/Tester/a.md' }), { frontmatter: { status: 'closed' } });
+    t.is(await h.vault.cachedRead({ path: 'Artifacts/Tester/a.md' }), '---\nstatus: closed\n---\nChanged');
+    t.deepEqual(trace.slice(6), ['stat:Artifacts/Tester/a.md', 'stat:Artifacts', 'stat:Artifacts/Tester',
+        'stat:Artifacts/Tester/a.md', 'read:Artifacts/Tester/a.md', 'stat:Artifacts/Tester/a.md']);
+});
+
+test('F2g stale index metadata never supplies first-touch bytes or version', async t => {
+    const f = await fixture({ 'Notes/base.md': 'Base' }, true), view = await f.view('stale');
+    const original = f.io.index!.get;
+    Object.assign(f.io.index!, { get: (path: string) => path === 'Notes/base.md'
+        ? { kind: 'file', path, bytes: 1, mtime: 0 } : original(path) });
+    const h = await createDraftToolHost(view, { writable: true, source });
+    t.deepEqual(h.vault.getAbstractFileByPath('Notes/base.md')?.stat, { size: 1, mtime: 0, ctime: 0 });
+    t.is(await h.vault.cachedRead({ path: 'Notes/base.md' }), 'Base');
+    await h.vault.process({ path: 'Notes/base.md' }, text => `${text} changed`);
+    t.is(await h.vault.cachedRead({ path: 'Notes/base.md' }), 'Base changed');
+    t.deepEqual(f.store.snapshot(view.draftId!).firstTouches, [{ id: 'change-1', path: 'Notes/base.md', base: {
+        kind: 'file', blob: '7b47361aad19bb483aeab081a7df0a55f7cb0fdb3327efe6dd016e6353a17880',
+        version: { kind: 'file', hash: '7b47361aad19bb483aeab081a7df0a55f7cb0fdb3327efe6dd016e6353a17880', bytes: 4, mtime: 7 },
+    } }]);
+});
+
+test('F2g create then delete removes implicit parents in visible and hidden paths', async t => {
+    for (const indexed of [false, true]) {
+        const f = await fixture({ 'base.md': 'Base' }, indexed), view = await f.view(`net-${indexed}`);
+        const h = await createDraftToolHost(view, { writable: true, source });
+        for (const path of ['New/Deep/new.md', '.hidden/Deep/new.md']) {
+            await h.vault.adapter.write(path, 'Draft');
+            t.is(h.vault.getAbstractFileByPath(path)?.stat.size, 5);
+            await h.vault.adapter.remove(path);
+            t.is(h.vault.getAbstractFileByPath(path), null);
+            t.is(h.vault.getAbstractFileByPath(path.slice(0, path.lastIndexOf('/'))), null);
+        }
+        t.deepEqual(h.vault.getRoot().children!.map(entry => entry.path), ['base.md']);
+        t.is(await h.vault.cachedRead({ path: 'base.md' }), 'Base');
+    }
+});
+
+test('F2g hidden metadata folder keeps historical cache and visibility', async t => {
+    const read = async (indexed: boolean) => {
+        const f = await fixture({ 'visible.md': 'Visible', '.hidden/artifacts/a.md': '---\nstatus: draft\n---\nBody' }, indexed);
+        const view = await f.view('hidden-metadata');
+        const h = await createDraftToolHost(view, { writable: true, source, metadataFolder: '.hidden/artifacts' });
+        return { cache: h.metadataCache.getFileCache({ path: '.hidden/artifacts/a.md' }),
+            files: h.vault.getMarkdownFiles().map(file => file.path),
+            hidden: h.vault.getAbstractFileByPath('.hidden/artifacts/a.md') };
+    };
+    const indexed = await read(true);
+    t.deepEqual(indexed, await read(false));
+    t.deepEqual(indexed.cache, { frontmatter: { status: 'draft' } });
+    t.deepEqual(indexed.files, ['visible.md']);
+    t.is(indexed.hidden?.path, '.hidden/artifacts/a.md');
+});
+
+test('F2g technical folder ordering survives refresh and promotion to a proposal parent', async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ 'base.md': 'Base' }, indexed), view = await f.view('technical-order');
+        const h = await createDraftToolHost(view, { writable: true, source });
+        await h.vault.createFolder('Z/Child');
+        await h.vault.createFolder('A/Child');
+        const technical = h.vault.getRoot().children!.map(entry => entry.path);
+        await h.vault.create('A/Child/new.md', 'New');
+        return { technical, proposed: h.vault.getRoot().children!.map(entry => entry.path),
+            changes: f.store.snapshot(view.draftId!).changes.map(change => change.path) };
+    };
+    const indexed = await exercise(true);
+    t.deepEqual(indexed, await exercise(false));
+    t.deepEqual(indexed, { technical: ['base.md', 'Z', 'A'], proposed: ['base.md', 'A', 'Z'], changes: ['A/Child/new.md'] });
+});
+
+for (const root of ['Branch', '.pkm-assistant/custom/Branch']) test(`F2g ancestor file or ambiguity retains descendant visibility: ${root}`, async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ 'base.md': 'Base' }, indexed), a = await f.view('a'), b = await f.view('b');
+        await a.mutate(root, source, { kind: 'text', text: 'File' });
+        await b.mutate(`${root}/child.md`, source, { kind: 'text', text: 'Child' });
+        await f.store.seal(a.draftId!, 'finished'); await f.store.seal(b.draftId!, 'finished');
+        const other = await f.view('other');
+        await other.mutate(root, source, { kind: 'text', text: 'Different file' });
+        await f.store.seal(other.draftId!, 'finished');
+        const ambiguous = await f.view('ambiguous', [a.freeze(), b.freeze(), other.freeze()]);
+        const ambiguousHost = await f.prepare(ambiguous, 'read', { path: `${root}/child.md` });
+        t.is(ambiguousHost.app.vault.getAbstractFileByPath(`${root}/child.md`), null);
+        t.is(await ambiguousHost.app.vault.adapter.read(`${root}/child.md`), 'Child');
+        const c = await f.view('c', [a.freeze(), b.freeze()]), h = await f.prepare(c, 'read', { path: `${root}/child.md` });
+        return { paths: h.app.vault.getFiles().map(file => file.path), child: h.app.vault.getAbstractFileByPath(`${root}/child.md`),
+            adapterRead: await h.app.vault.adapter.read(`${root}/child.md`) };
+    };
+    const indexed = await exercise(true);
+    t.deepEqual(indexed, await exercise(false));
+    t.deepEqual(indexed, { paths: root === 'Branch' ? ['Branch', 'base.md'] : ['base.md'], child: null, adapterRead: 'Child' });
+});
+
+test('F2g technical folder still follows legacy visibility over a file tombstone', async t => {
+    const exercise = async (indexed: boolean) => {
+        const f = await fixture({ 'base.md': 'Base' }, indexed), view = await f.view('technical-tombstone');
+        const h = await createDraftToolHost(view, { writable: true, source });
+        await h.vault.delete({ path: 'base.md' });
+        await h.vault.createFolder('base.md');
+        await h.vault.create('base.md/child.md', 'Child');
+        return { root: h.vault.getRoot().children!.map(file => file.path), children: h.vault.getAbstractFileByPath('base.md')?.children,
+            files: h.vault.getFiles().map(file => file.path), child: h.vault.getAbstractFileByPath('base.md/child.md'),
+            read: await h.vault.adapter.read('base.md/child.md') };
+    };
+    const indexed = await exercise(true);
+    t.deepEqual(indexed, await exercise(false));
+    t.deepEqual(indexed, { root: ['base.md'], children: [], files: [], child: null, read: 'Child' });
 });

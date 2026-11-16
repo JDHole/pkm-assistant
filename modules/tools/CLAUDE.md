@@ -1100,3 +1100,57 @@ a także rzeczywiście odtworzoną propozycję. Ślady porównano z runtime sprz
 propozycji nowego pliku z istniejącym pustym stagingiem, bez zapisów przy starcie.
 `src/main.mobile.test.ts` sprawdza zapis raportu przez produkcyjny start/komendę;
 `runnerDrafts.test.ts` zachowuje odmowę PL/EN przez rzeczywiste narzędzia delegacji.
+
+## Mobile M4 F2g - host kopii bez przejścia vaulta
+
+Oba porty produkcyjne (`mobileDraftPorts`, `desktopDraftPorts`) przekazują teraz
+`DraftViewIO.index`, budowany przez prywatny `createDraftFileIndex(app)` w
+`draftFileIndex.ts`. To synchroniczny port get/files i leniwych dzieci folderu,
+bez adaptera, Node ani wynoszenia żywych TFile do narzędzi. Rozmiar i mtime bazy
+pochodzą z TFile.stat. Samo składanie portu nie wylicza nawet listy plików.
+
+`draftHostIndex.ts` tworzy lokalną projekcję tylko zmian własnych i zamrożonych
+poprzedników oraz ich rodziców. Zachowuje ambiguous-input, tombstones, kolejność
+starego walkera i techniczne foldery. Po zapisie aktualizuje dotkniętą ścieżkę
+oraz jej rodziców. `getAbstractFileByPath`, `children`, `getRoot`, `getFiles` i
+`getMarkdownFiles` pozostają synchroniczne; pełna enumeracja następuje dopiero
+na żądanie getFiles/getMarkdownFiles, z indeksu w RAM. Jawny search lub rekursywny
+list nadal może przetwarzać szeroki zakres zgodnie z kontraktem tych narzędzi.
+Tworzenie hosta, zwykły read/write oraz odświeżenie nie przechodzą vaulta.
+
+Ukryte ścieżki są poza indeksem. `prepareSubToolExecution` przekazuje requestedPaths
+z argumentów ścieżkowych; host przygotowuje ich stat i rodziców przed synchronicznym
+wykonaniem narzędzia, po tej samej kanonizacji ścieżki. Błędne/prywatne argumenty
+pozostają do dotychczasowej walidacji narzędzia. Bezpośredni konsument hosta z indeksem,
+który potrzebuje synchronicznego get dla ukrytego celu, musi podać go w requestedPaths.
+Adapter czyta/listuje leniwie tylko żądany zakres; po zapisie ukryty wpis jest od razu
+widoczny dla get. Jak wcześniej, ukryte wpisy nie trafiają do children ani getFiles,
+a prywatny magazyn jest odmawiany i pomijany w listingach, także dla administratora.
+
+Metadane są wczytywane wyłącznie z metadataFolder, również dla jego ukrytych wpisów.
+Po zapisie odświeża się tylko metadane celu. ArtifactStore.forHost dostaje dodatkowo
+enumerację Markdown ograniczoną do swojego poddrzewa, więc jego wewnętrzny filtr
+nie wymusza enumeracji całego indeksu. Publiczny host narzędzia nadal zwraca pełne
+getMarkdownFiles. Koszt artefaktów jest proporcjonalny do folderu artefaktów.
+
+Granica świeżości: Obsidian może jeszcze nie widzieć zewnętrznej zmiany na dysku.
+Dotyczy to synchronicznego istnienia, listingu i metadanych. Treść oraz first-touch
+nadal pochodzą z adaptera; sekwencja stat -> bajty -> stat i kontrola integralności
+pozostają bez zmian. Nie ma obejść ani cache'u między biegami. Historyczne DI bez
+index nadal uruchamia pełny walker i refresh; produkcja obu platform zawsze daje index.
+
+Przegląd całej drogi: weryfikacja efektów runnera pyta view.stat wyłącznie o cele,
+summary projektuje manifest, a prune/collectResolved/collectOrphans obejmują rejestr
+biegów i prywatny namespace kopii. Nie przechodzą bazowego vaulta; ich koszt nadal
+zależy od liczby kopii i blobów. Format, DraftStore, review i uprawnienia są nieruszone.
+
+Testy F2g w runnerDrafts.test.ts: prawdziwy delegate -> runner -> MCP i porty obu
+platform, dwa syntetyczne rozmiary vaulta, create/patch/read+list, literalne liczniki,
+bajty i pola manifestu; pomiar obejmuje weryfikację efektów i flush sprzątania.
+Testy F2g w subToolExecution.test.ts porównują oba hosty i przypinają wyniki
+odczytu/listingu/search/zapisów/artefaktów, ukrytego get/adaptera, poprzedników,
+tombstones, ambiguous A/B, synchronicznych aktualizacji i folderów technicznych,
+także kolizji pliku przodka z potomkiem oraz technicznego folderu nad tombstone.
+Dodatkowo mierzą listing 50/500 plików, metadane przy 30/3000 obcych plików oraz
+sprawdzają first-touch przy nieaktualnym indeksie. syntheticVaultIndex jest wyłącznie
+syntetyczną atrapą indeksu w testach; nie zastępuje produkcyjnego składania portów.

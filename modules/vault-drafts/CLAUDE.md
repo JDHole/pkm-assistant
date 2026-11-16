@@ -372,3 +372,35 @@ Do prób wyłącznie na fizycznym telefonie pozostają:
 - duże pliki i magazyny: czas startu, pamięć WebView, odzyskiwanie po przerwaniu;
 - rzeczywista obsługa dotykiem okien decyzji i wyłączenie innych synchronizatorów.
 Test adaptera pamięciowego nie potwierdza trwałości CapacitorAdapter ani fsync.
+
+## Mobile M4 F2g - synchroniczny indeks hosta i tani listing
+
+Barrel eksportuje typy `DraftFileIndex` oraz `DraftIndexEntry` (unia file/folder).
+Opcjonalne `DraftViewIO.index` jest przekazywane przez getter `DraftView.index`;
+moduł nie importuje runtime Obsidiana. Port get/files oraz leniwe children dostarcza
+moduł tools z indeksu app.vault na obu platformach. Host bez tego portu zachowuje
+historyczne skanowanie jako fallback wyłącznie dla starszego DI.
+
+`resolvedChanges()` buduje jedną projekcję grafu zmian z jednego snapshotu własnej
+kopii i indeksów zamrożonych poprzedników. Host nakłada ją na bazę bez enumeracji
+vaulta; aktualizacja po mutacji dotyczy celu i rodziców. Bliższe warstwy, identyczne
+propozycje, niejednoznaczności i tombstones zachowują reguły resolve.
+
+`DraftView.list(folder)` bierze rodzaj bazowych dzieci z portu list, bez stat dla
+każdego dziecka. Dla istniejącego folderu wykonuje jeden stat i jeden list, dla
+roota sam list, dla nieistniejącego folderu sam stat. Potem nakłada zmiany i sortuje
+jak wcześniej; prywatny namespace nigdy nie trafia do widoku. Kontrakt DraftViewIO
+wymaga pełnych ścieżek logicznych bezpośrednich dzieci, nie samych nazw (inaczej niż
+DraftStorageIO). Niepoprawny wpis nadal daje invalid-path. Nie weryfikujemy ponownie
+rodzaju każdego dziecka po listingu.
+
+Synchroniczne istnienie i metadane hosta mogą minimalnie odbiegać od dysku przed
+odświeżeniem indeksu Obsidiana. Odczyt treści, baza pierwszego dotknięcia i kontrola
+integralności nadal korzystają z dotychczasowego adapterowego stat -> bajty -> stat.
+Nie zmienia się format, trwałość, DraftStore, host review ani decyzje przeglądu.
+Leniwe przygotowanie ukrytych celów i ograniczenie metadanych artefaktów opisuje
+`../tools/CLAUDE.md`. Testy: F2g w subToolExecution.test.ts i runnerDrafts.test.ts.
+
+Testy offline mierzą liczbę wywołań, nie opóźnienia CapacitorAdapter. Nadal potrzebna
+jest próba pełnej delegacji i przyjęcia na Androidzie oraz kontrola desktopowa
+w rzeczywistym Obsidianie; iOS, ubicie procesu i trwałość adaptera pozostają ograniczeniami F2a.

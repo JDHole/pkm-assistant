@@ -260,3 +260,7 @@ Raport urządzenia pokazuje etap startu magazynu, zwalidowane name/code błędu 
 Start zapamiętuje referencję błędu bez odczytu pól, a ready oznacza też udaną
 rejestrację narzędzi. Raport łączy etap z dostępnością runtime i liczy niegotowy
 etap jako błąd; kontrakty i testy opisują dokumentacje diagnostics oraz tools.
+
+## Mobile M4 F2g - host kopii bez przejścia vaulta
+
+Host kopii na obu platformach korzysta z synchronicznego indeksu Obsidiana i lokalnej nakładki zmian, przygotowuje ukryte cele leniwie, a listing nie wykonuje stat per dziecko; port, granicę świeżości i testy kosztu opisują `modules/tools/CLAUDE.md` oraz `modules/vault-drafts/CLAUDE.md`.

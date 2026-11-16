@@ -32,13 +32,24 @@ export async function prepareSubToolExecution<A, P extends HostPlugin>(input: {
     if (memory || liveTools.has(tool.name)) return { kind: 'live' as const, app, plugin };
     if (!contentTools.has(tool.name)) throw new DraftError('mutation-denied', 'Unsupported draft tool');
     const view = execution.kind === 'overlay-read' ? execution.view : execution.workspace;
+    const metadataFolder = tool.name.startsWith('artifact_') ? plugin.artifactStore?.artifactsRoot() : undefined;
     const host = await createDraftToolHost(view, {
-        metadataFolder: tool.name.startsWith('artifact_') ? plugin.artifactStore?.artifactsRoot() : undefined,
+        requestedPaths: [args.path, args.folder, args.image_path, args.output_path].filter((path): path is string => typeof path === 'string'),
+        metadataFolder,
         writable: execution.kind === 'overlay-write', source: { tool: tool.name, callId: input.callId },
         ...(tool.name === 'create_folder' ? { explicitFolderPath: parseVaultPath(args.path) } : {}),
     });
     // Only the services used by content tools are exposed; no original app or write methods.
-    const localPlugin = Object.freeze({ app: host, artifactStore: plugin.artifactStore?.forHost(host),
+    // ArtifactStore asks for all Markdown files before filtering its own root. Supply that
+    // subtree directly, while the tool host keeps the full synchronous Vault API contract.
+    const artifactHost = metadataFolder && view.index ? { ...host, vault: { ...host.vault, getMarkdownFiles: () => {
+        type Entry = NonNullable<ReturnType<typeof host.vault.getAbstractFileByPath>>;
+        const walk = (entry: Entry): Entry[] => 'children' in entry ? (entry.children ?? []).flatMap(walk)
+            : entry.extension === 'md' ? [entry] : [];
+        const root = host.vault.getAbstractFileByPath(metadataFolder);
+        return root ? walk(root) : [];
+    } } } : host;
+    const localPlugin = Object.freeze({ app: host, artifactStore: plugin.artifactStore?.forHost(artifactHost),
         env: property(plugin, 'env'), oramaDb: property(plugin, 'oramaDb'), agentManager: property(plugin, 'agentManager'),
         permissionSystem: property(plugin, 'permissionSystem'),
     });

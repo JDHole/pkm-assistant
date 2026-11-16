@@ -1,8 +1,10 @@
+import * as fs from 'node:fs';
+import { syntheticVaultIndex } from './test-support/syntheticVaultIndex.js';
 import { AgentMemory, SessionEpochPersistenceError } from '../memory/index.js';
 import { freezeTurnOwner } from '../chat/chat/turnOwner.js';
 import { getLocale, setLocale } from '../../core/i18n/index.js';
 import { buildSubTaskResultDelivery } from '../chat/chat/subTaskResultDelivery.js';
-import { initializeVaultDrafts, mobileDraftPorts, createDraftReviewHost } from './index.js';
+import { initializeVaultDrafts, mobileDraftPorts, desktopDraftPorts, createDraftReviewHost } from './index.js';
 import { MemoryAdapter } from '../vault-drafts/test-support/MemoryAdapter.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
@@ -69,8 +71,7 @@ async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }, ada
     const app = {
         vault: {
             getFileByPath: (path: string) => files.has(path) ? entry(path) : null,
-            getAbstractFileByPath: (path: string) => files.has(path) ? entry(path) : folders.has(path) ? { ...entry(path), children: [] } : null,
-            getMarkdownFiles: () => [...files.keys()].filter(path => path.endsWith('.md')).map(entry),
+            ...syntheticVaultIndex(files, folders, adapter ? 1 : 7),
             read, cachedRead: read,
             create: async (path: string, text: string) => { files.set(path, encode(text)); return entry(path); },
             createFolder: async (path: string) => { folders.add(path); },
@@ -87,6 +88,7 @@ async function fixture(initial: Record<string, string> = { 'a.md': 'Baza' }, ada
                 ...(adapter ?? {}),
                 ...(adapter ? { list: async (path: string) => {
                     if (path !== '' && path !== '/') return adapter.list(path);
+                    adapter.calls.push({ operation: 'list', path: '' });
                     const listed = await io.list('');
                     return { files: [...listed.files], folders: [...listed.folders] };
                 } } : {}),
@@ -119,10 +121,21 @@ class Mailbox<T> {
 type Payload = { messages: Array<{ role: string; content: string }>; tools: Array<{ function: { name: string } }> };
 type Request = { payload: Payload; done(text: string): void; call(name: string, args: object): void; fail(): void };
 const origin = { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) };
-async function runtime(t: ExecutionContext, activate: boolean | 'mobile' = false) {
+async function runtime(t: ExecutionContext, activate: boolean | 'mobile' | 'desktop' = false, initial?: Record<string, string>) {
     const mobile = activate === 'mobile';
-    const adapter = mobile ? new MemoryAdapter() : undefined;
-    const f = await fixture({ 'a.md': 'Baza', 'b.md': 'Baza-B', 'source.png': 'IMG' }, adapter);
+    const desktop = activate === 'desktop';
+    const adapter = mobile || desktop ? new MemoryAdapter() : undefined;
+    const f = await fixture(initial ?? { 'a.md': 'Baza', 'b.md': 'Baza-B', 'source.png': 'IMG' }, adapter);
+    if (desktop) {
+        const root = fs.mkdtempSync(`${process.cwd()}/.f2g-runtime-`);
+        Object.assign(f.app.vault.adapter, { getBasePath: () => root });
+        const descriptor = Object.getOwnPropertyDescriptor(window, 'require');
+        Object.defineProperty(window, 'require', { configurable: true, value: (id: string) => id === 'fs' ? fs : undefined });
+        t.teardown(() => {
+            if (descriptor) Object.defineProperty(window, 'require', descriptor); else Reflect.deleteProperty(window, 'require');
+            fs.rmSync(root, { recursive: true, force: true });
+        });
+    }
     const registry = new SubTaskRegistry();
     const tools = new ToolRegistry();
     for (const tool of [createWriteTool(), createReadTool(), createListTool(), createDeleteTool(), createCreateFolderTool(f.app as never),
@@ -158,7 +171,7 @@ async function runtime(t: ExecutionContext, activate: boolean | 'mobile' = false
         },
     } : undefined);
     const fullPlugin = Object.assign(plugin, { mcpClient: client });
-    const boot = mobile ? await initializeVaultDrafts({ ...mobileDraftPorts(f.app as never), registry })
+    const boot = mobile || desktop ? await initializeVaultDrafts({ ...(mobile ? mobileDraftPorts(f.app as never) : desktopDraftPorts(f.app as never)), registry })
         : activate ? await initializeVaultDrafts({ storage: f.disk, registry,
         vault: { ...createDraftReviewHost(f.app as never), ...f.io },
         hasher: { sha256: async bytes => createHash('sha256').update(bytes).digest('hex') },
@@ -774,4 +787,68 @@ test.serial('F2b mobile available runtime runs a writer and keeps read-only dele
     t.deepEqual([reader.result, reader.toolsUsed, reader.draft], ['Read base', ['read'], undefined]);
     t.is(decode(f.files.get('a.md')!), 'Baza');
     t.is(f.store.list().length, 1);
+});
+
+for (const platform of ['mobile', 'desktop'] as const) for (const count of [30, 3000]) for (const scenario of ['create', 'patch', 'read-list'])
+test.serial(`F2g operation budget ${platform} ${count} ${scenario}`, async t => {
+    const initial: Record<string, string> = { 'Notes/base.md': 'Base', '.hidden/data.md': 'Hidden' };
+    const folders = count === 30 ? 6 : 300;
+    for (let i = 0; i < count; i++) initial[`Background/f${i % folders}/n${i}.md`] = 'Unrelated';
+    for (let i = 0; i < 50; i++) initial[`Listed/n${String(i).padStart(2, '0')}.md`] = 'Listed';
+    const f = await runtime(t, platform, initial);
+    f.agent.permissions.guidance_mode = true;
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    f.tools.registerTool(createDelegateTool(f.app, { drafts: f.drafts, isMobile: platform === 'mobile' }));
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
+    f.adapter!.calls.length = 0;
+    const receipt = await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'Prepare', aspect: 'child' } }, 'Tester', { origin, autonomy: 'yolo' });
+    t.like(receipt, { success: true, started: true });
+    const request = await f.requests.next();
+    if (scenario === 'read-list') {
+        request.call('read', { path: 'Notes/base.md' });
+        const read = await f.requests.next();
+        t.deepEqual(lastTool(read), { success: true, path: 'Notes/base.md', content: 'Base' });
+        read.call('list', { folder: 'Listed', scope: 'vault' });
+    } else request.call('write', scenario === 'create'
+        ? { path: 'Notes/new.md', mode: 'create', content: 'New' }
+        : { path: 'Notes/base.md', mode: 'patch', old_text: 'Base', new_text: 'Patched' });
+    const next = await f.requests.next();
+    if (scenario === 'read-list') t.like(lastTool(next), { success: true, count: 50, totalCount: 50 });
+    else t.like(lastTool(next), { success: true, path: scenario === 'create' ? 'Notes/new.md' : 'Notes/base.md' });
+    next.done('Prepared');
+    await __test__._settleBackground(true);
+    await f.boot!.flush();
+    const counts = (storage: boolean) => {
+        const result: Record<string, number> = {};
+        for (const call of f.adapter!.calls) if (call.path.startsWith('.pkm-assistant') === storage)
+            result[call.operation] = (result[call.operation] ?? 0) + 1;
+        return result;
+    };
+    t.log(JSON.stringify({ vault: counts(false), storage: counts(true), total: f.adapter!.calls.length }));
+    t.deepEqual(counts(false), scenario === 'create' ? { stat: 4 } : scenario === 'patch' ? { stat: 4, readBinary: 2 } : { readBinary: 1 });
+    if (platform === 'mobile') t.deepEqual(counts(true), scenario === 'create'
+        ? { stat: 50, mkdir: 7, writeBinary: 3, readBinary: 22, rename: 2, list: 16 }
+        : scenario === 'patch' ? { stat: 56, mkdir: 7, writeBinary: 4, readBinary: 32, rename: 2, list: 16 } : { stat: 7 });
+    const manifest = f.store.list()[0];
+    t.deepEqual(manifest.changes.map(c => [c.path, c.proposed.kind, c.base.kind]), scenario === 'read-list' ? []
+        : [[scenario === 'create' ? 'Notes/new.md' : 'Notes/base.md', 'text', scenario === 'create' ? 'missing' : 'file']]);
+    if (scenario !== 'read-list') t.is(await new DraftView(f.store, f.persistence, f.io, manifest.draftId).read(manifest.changes[0].path), scenario === 'create' ? 'New' : 'Patched');
+    t.is(decode(f.files.get('Notes/base.md')!), 'Base');
+    // IDs and wall-clock timestamps are runtime-owned; every persistent content field is literal.
+    const { draftId, runId, threadId, createdAt, updatedAt, ...persisted } = manifest;
+    t.is(threadId, runId);
+    t.is(f.registry.list()[0].result?.draft?.draftId, scenario === 'read-list' ? undefined : draftId);
+    t.true(updatedAt >= createdAt);
+    const firstTouch = scenario === 'create' ? { id: 'change-1', path: 'Notes/new.md', base: { kind: 'missing' } }
+        : { id: 'change-1', path: 'Notes/base.md', base: { kind: 'file',
+            blob: '7b47361aad19bb483aeab081a7df0a55f7cb0fdb3327efe6dd016e6353a17880',
+            version: { kind: 'file', hash: '7b47361aad19bb483aeab081a7df0a55f7cb0fdb3327efe6dd016e6353a17880', bytes: 4, mtime: 1 } } };
+    const hash = scenario === 'create' ? '18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359'
+        : 'aa348c76d489f19a9efff240f95087ceefc91c1d993054e264a8025faf4fb5e2';
+    t.deepEqual(persisted, { owner: { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+        version: 1, generation: scenario === 'read-list' ? 1 : 2, revision: 1, phase: { kind: 'sealed', reason: 'finished' },
+        firstTouches: scenario === 'read-list' ? [] : [firstTouch],
+        changes: scenario === 'read-list' ? [] : [{ ...firstTouch, proposed: { kind: 'text', blob: hash, hash, bytes: scenario === 'create' ? 3 : 7 },
+            revision: 1, review: { kind: 'pending' }, inheritedFrom: [], source: { tool: 'write', callId: 'call-1' } }],
+    });
 });

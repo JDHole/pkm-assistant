@@ -5,6 +5,7 @@ import { AdapterDraftStorage, DRAFT_ROOT, DesktopDraftStorage, DraftPersistence,
 import type { DraftStorageIO, DraftHasher, DraftClock, DraftFileSystem, DraftViewIO, DraftReviewIO } from '../vault-drafts/index.js';
 import { SubRunDrafts } from '../sub-agents/index.js';
 import type { SubTaskRegistry } from '../sub-agents/index.js';
+import { createDraftFileIndex } from './draftFileIndex.js';
 import { createDraftReviewHost } from './draftReviewHost.js';
 import { createSubagentChangesTool } from './SubagentChangesTool.js';
 
@@ -60,7 +61,7 @@ export function mobileDraftPorts(app: App): Pick<Parameters<typeof initializeVau
     return {
         storage: new AdapterDraftStorage(adapter),
         storagePresent: async () => (await adapter.stat(DRAFT_ROOT)) !== null,
-        vault: { ...createDraftReviewHost(app), list: path => adapter.list(path) },
+        vault: { ...createDraftReviewHost(app), index: createDraftFileIndex(app), list: path => adapter.list(path) },
         hasher: { sha256: async bytes => Array.from(new Uint8Array(await hostWindow.crypto.subtle.digest('SHA-256', bytes.slice().buffer)))
             .map(byte => byte.toString(16).padStart(2, '0')).join('') },
     };
@@ -80,7 +81,7 @@ export function desktopDraftPorts(app: App): Pick<Parameters<typeof initializeVa
     if (typeof root !== 'string' || !root) throw new Error('Invalid vault root');
     return {
         storage: new DesktopDraftStorage(fs as DraftFileSystem, root), // Capability methods validated above.
-        vault: { ...createDraftReviewHost(app), list: path => adapter.list(path) },
+        vault: { ...createDraftReviewHost(app), index: createDraftFileIndex(app), list: path => adapter.list(path) },
         hasher: { sha256: async bytes => Array.from(new Uint8Array(await hostWindow.crypto.subtle.digest('SHA-256', bytes.slice().buffer)))
             .map(byte => byte.toString(16).padStart(2, '0')).join('') },
     };

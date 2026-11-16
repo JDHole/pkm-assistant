@@ -4,8 +4,17 @@ import { parseVaultPath } from './schema.js';
 import { DraftError } from './types.js';
 import type { Change, DraftId, DraftManifest, DraftMutation, DraftRef, DraftVaultIO, VaultPath, VaultStat } from './types.js';
 
+/** In-memory host index only. Hidden segments are absent; children are lazy. */
+export type DraftIndexEntry =
+    | { kind: 'file'; path: string; bytes: number; mtime: number }
+    | { kind: 'folder'; path: string; children(): readonly DraftIndexEntry[] };
+export interface DraftFileIndex {
+    get(path: string): DraftIndexEntry | null;
+    files(): readonly Extract<DraftIndexEntry, { kind: 'file' }>[];
+}
 export interface DraftViewIO extends DraftVaultIO {
-    /** Immediate logical children, including hidden files. Root is ''. */
+    readonly index?: DraftFileIndex;
+    /** Full vault-relative paths of immediate children, including hidden files. Root is ''. */
     list(path: string): Promise<{ files: readonly string[]; folders: readonly string[] }>;
 }
 type Source = { ref: DraftRef; change: Change };
@@ -30,11 +39,6 @@ export class FrozenDraftView {
         return freeze(new FrozenDraftView(manifest, [...view.predecessors]));
     }
 }
-function candidates(layer: FrozenDraftView, path: VaultPath): Source[] {
-    const change = layer.manifest.changes.find(item => item.path === path);
-    return change ? [{ ref: { draftId: layer.manifest.draftId, revision: layer.manifest.revision }, change }]
-        : layer.predecessors.flatMap(parent => candidates(parent, path));
-}
 function contains(layer: FrozenDraftView, id: DraftId): boolean {
     return layer.manifest.draftId === id || layer.predecessors.some(parent => contains(parent, id));
 }
@@ -47,20 +51,44 @@ export class DraftView {
     constructor(readonly store: DraftStore, private readonly persistence: DraftPersistence,
         private readonly vault: DraftViewIO, readonly draftId: DraftId | null,
         readonly predecessors: readonly FrozenDraftView[] = []) { this.predecessors = Object.freeze([...predecessors]); }
+    get index(): DraftFileIndex | undefined { return this.vault.index; }
     freeze(): FrozenDraftView { return FrozenDraftView.from(this); }
-    resolve(input: string): DraftResolution {
-        const path = parseVaultPath(input);
+    private resolutionContext() {
         const own = this.draftId ? this.store.snapshot(this.draftId) : null;
-        const change = own?.changes.find(item => item.path === path);
-        if (own && change) return { kind: 'proposal', sources: [{ ref: { draftId: own.draftId, revision: own.revision }, change }] };
-        const all = this.predecessors.flatMap(layer => candidates(layer, path));
-        const layers = (nodes: readonly FrozenDraftView[]): FrozenDraftView[] => nodes.flatMap(node => [node, ...layers(node.predecessors)]);
-        const graph = layers(this.predecessors);
-        const sources = all.filter((source, index) => all.findIndex(other => other.ref.draftId === source.ref.draftId) === index
-            && !all.some(other => other.ref.draftId !== source.ref.draftId
-                && graph.some(layer => layer.manifest.draftId === other.ref.draftId && contains(layer, source.ref.draftId))));
-        if (!sources.length) return { kind: 'vault' };
-        return { kind: sources.every(source => equivalent(source.change.proposed, sources[0].change.proposed)) ? 'proposal' : 'ambiguous-input', sources };
+        const ownChanges = new Map(own?.changes.map(change => [change.path, change]));
+        const graph = new Map<DraftId, FrozenDraftView>();
+        const changes = new Map<DraftId, Map<VaultPath, Change>>();
+        const paths = new Set(ownChanges.keys());
+        const visit = (layer: FrozenDraftView): void => {
+            if (graph.has(layer.manifest.draftId)) return;
+            graph.set(layer.manifest.draftId, layer);
+            changes.set(layer.manifest.draftId, new Map(layer.manifest.changes.map(change => [change.path, change])));
+            for (const change of layer.manifest.changes) paths.add(change.path);
+            for (const parent of layer.predecessors) visit(parent);
+        };
+        for (const layer of this.predecessors) visit(layer);
+        const candidates = (layer: FrozenDraftView, path: VaultPath): Source[] => {
+            const change = changes.get(layer.manifest.draftId)!.get(path);
+            return change ? [{ ref: { draftId: layer.manifest.draftId, revision: layer.manifest.revision }, change }]
+                : layer.predecessors.flatMap(parent => candidates(parent, path));
+        };
+        const resolve = (path: VaultPath): DraftResolution => {
+            const change = ownChanges.get(path);
+            if (own && change) return { kind: 'proposal', sources: [{ ref: { draftId: own.draftId, revision: own.revision }, change }] };
+            const all = this.predecessors.flatMap(layer => candidates(layer, path));
+            const sources = all.filter((source, index) => all.findIndex(other => other.ref.draftId === source.ref.draftId) === index
+                && !all.some(other => other.ref.draftId !== source.ref.draftId
+                    && contains(graph.get(other.ref.draftId)!, source.ref.draftId)));
+            if (!sources.length) return { kind: 'vault' };
+            return { kind: sources.every(source => equivalent(source.change.proposed, sources[0].change.proposed)) ? 'proposal' : 'ambiguous-input', sources };
+        };
+        return { paths, resolve };
+    }
+    resolve(input: string): DraftResolution { return this.resolutionContext().resolve(parseVaultPath(input)); }
+    /** One snapshot/index of the change graph, never a scan of base vault entries. */
+    resolvedChanges(): ReadonlyMap<VaultPath, DraftResolution> {
+        const { paths, resolve } = this.resolutionContext();
+        return new Map([...paths].map(path => [path, resolve(path)]));
     }
     private unambiguous(path: string): Exclude<DraftResolution, { kind: 'ambiguous-input' }> {
         const result = this.resolve(path);
@@ -105,18 +133,34 @@ export class DraftView {
         const base = !path || (await this.vault.stat(parseVaultPath(path))).kind === 'folder'
             ? await this.vault.list(path) : { files: [], folders: [] };
         const prefix = path ? `${path}/` : '';
-        const names = new Set([...base.files, ...base.folders]);
-        for (const changed of this.changedPaths()) if (changed.startsWith(prefix)) names.add(prefix + changed.slice(prefix.length).split('/')[0]);
+        const kinds = new Map<string, 'file' | 'folder' | 'ambiguous'>();
+        for (const name of base.files) kinds.set(name, 'file');
+        for (const name of base.folders) kinds.set(name, 'folder');
+        const changed = this.resolvedChanges();
+        // Only proposals need resolution. The listing already supplies each base child's kind.
+        for (const [child, resolved] of changed) if (child.startsWith(prefix)) {
+            const rest = child.slice(prefix.length), name = prefix + rest.split('/')[0];
+            if (rest.includes('/')) {
+                if (!kinds.has(name) && (resolved.kind !== 'proposal' || resolved.sources[0].change.proposed.kind !== 'deleted')) kinds.set(name, 'folder');
+            }
+        }
+        for (const [name, resolved] of changed) if (name.startsWith(prefix) && !name.slice(prefix.length).includes('/')) {
+            if (resolved.kind === 'ambiguous-input') kinds.set(name, 'ambiguous');
+            else if (resolved.kind === 'proposal') {
+                const kind = resolved.sources[0].change.proposed.kind;
+                if (kind === 'deleted') kinds.delete(name);
+                else kinds.set(name, kind === 'folder' ? 'folder' : 'file');
+            }
+        }
         const result = { files: [] as string[], folders: [] as string[], ambiguous: [] as string[] };
-        for (const name of [...names].sort()) {
+        for (const [name, kind] of [...kinds].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
             // Private storage never enters the logical view, even for an admin.
             if (/^\.pkm-assistant\/subagent-drafts(?:\/|$)/i.test(name)) continue;
             parseVaultPath(name);
             if (!name.startsWith(prefix) || name.slice(prefix.length).includes('/')) throw new DraftError('invalid-path', 'Listing returned a non-child path');
-            if (this.resolve(name).kind === 'ambiguous-input') { result.ambiguous.push(name); continue; }
-            const stat = await this.stat(name);
-            if (stat.kind === 'file') result.files.push(name);
-            if (stat.kind === 'folder') result.folders.push(name);
+            if (kind === 'ambiguous') result.ambiguous.push(name);
+            else if (kind === 'file') result.files.push(name);
+            else result.folders.push(name);
         }
         return result;
     }
