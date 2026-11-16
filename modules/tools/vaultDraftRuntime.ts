@@ -24,7 +24,11 @@ export async function initializeVaultDrafts(input: {
     onProgress?: (progress: DraftStartupProgress) => void;
 }) {
     const persistence = new DraftPersistence(input.storage, input.hasher);
-    const store = new DraftStore(persistence, input.vault, input.clock ?? { now: () => Date.now() });
+    const store = new DraftStore(persistence, input.vault, input.clock ?? { now: () => Date.now() }, manifest => {
+        const task = input.registry.getTask(manifest.runId);
+        const thread = input.registry.getThread(manifest.threadId);
+        return !!task && ['waiting', 'running'].includes(task.status) || !!thread && thread.phase !== 'closed';
+    });
     input.onProgress?.({ stage: 'presence' });
     const present = input.storagePresent ? await input.storagePresent() : true;
     const observedPresence = input.storagePresent ? present : undefined;
@@ -40,16 +44,32 @@ export async function initializeVaultDrafts(input: {
     }, id => { const thread = registry.getThread(id); return !!thread && thread.phase !== 'closed'; });
     registry.attachDraftStore(store);
     let pending: Promise<void> = Promise.resolve();
+    let running = false, requested = false;
     const collect = () => {
         drafts.prune();
-        pending = pending.then(() => store.collectResolved()).catch(error => log.warn('VaultDrafts', 'Payload cleanup failed', error));
+        requested = true;
+        if (running) return;
+        running = true;
+        pending = Promise.resolve().then(async () => {
+            try {
+                while (requested) {
+                    requested = false;
+                    drafts.prune();
+                    try { await store.collectResolved(); }
+                    catch (error) { log.warn('VaultDrafts', 'Payload cleanup failed', error); }
+                }
+            } finally { running = false; }
+        });
     };
     const off = ['thread:closed', 'task:finished', 'task:plan', 'draft:changed'].map(event => registry.events.on(event, collect));
     const review = new DraftReview(store, persistence, input.vault);
     if (present) collect();
     await pending;
     return { store, persistence, drafts, review, tool: createSubagentChangesTool(review), issues: recovered.issues, present: observedPresence,
-        flush: () => pending, dispose: () => { for (const unsubscribe of off) unsubscribe(); } };
+        flush: async () => {
+            let observed: Promise<void>;
+            do { observed = pending; await observed; } while (observed !== pending);
+        }, dispose: () => { for (const unsubscribe of off) unsubscribe(); } };
 }
 
 /** Mobile capability boundary; never reads desktop capabilities or falls back to live writes. */
@@ -73,7 +93,7 @@ export function desktopDraftPorts(app: App): Pick<Parameters<typeof initializeVa
     if (!('getBasePath' in adapter) || typeof adapter.getBasePath !== 'function') throw new Error('Draft storage requires a filesystem vault');
     const win = hostWindow as typeof hostWindow & { require?: (id: string) => unknown };
     const fs = win.require?.('fs');
-    const methods = ['mkdirSync', 'lstatSync', 'readdirSync', 'readFileSync', 'openSync', 'writeFileSync', 'fsyncSync', 'closeSync', 'linkSync', 'unlinkSync'];
+    const methods = ['mkdirSync', 'lstatSync', 'readdirSync', 'readFileSync', 'openSync', 'writeFileSync', 'fsyncSync', 'closeSync', 'linkSync', 'unlinkSync', 'rmdirSync'];
     if (!fs || typeof fs !== 'object' || methods.some(name => !(name in fs) || typeof Reflect.get(fs, name) !== 'function'))
         throw new Error('Atomic draft storage unavailable');
     const getBasePath = adapter.getBasePath as () => unknown; // Function capability checked above.

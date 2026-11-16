@@ -70,7 +70,7 @@ export interface DraftVaultIO {
 export interface DraftStorageIO {
     /** Immediate child names only; missing directory returns []. Other errors reject. */
     list(path: string): Promise<readonly string[]>;
-    /** Optional payload GC; never removes an unresolved manifest. */
+    /** Optional GC: remove one file or EMPTY directory, never recursively; missing is harmless. */
     remove?(path: string): Promise<void>;
     /** Before restore, with no active writers. Best-effort staging cleanup and diagnostics. */
     cleanupTemporary?(): Promise<readonly RecoveryIssue[]>;

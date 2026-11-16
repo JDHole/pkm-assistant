@@ -30,6 +30,18 @@ function contract(name: string, factory: Factory) {
         await port.remove!(manifest);
         t.deepEqual(await port.list(`${DRAFT_ROOT}/sample/manifests`), []);
     });
+    test(`${name}: GC removes only empty directories and preserves unexpected children`, async t => {
+        const { port } = factory(t);
+        await port.publish(manifest, bytes, () => true);
+        await t.throwsAsync(async () => port.remove!(`${DRAFT_ROOT}/sample`));
+        await t.throwsAsync(async () => port.remove!(`${DRAFT_ROOT}/sample/manifests`));
+        t.deepEqual([...await port.read(manifest)], [0, 255, 13, 128]);
+        await port.remove!(manifest);
+        await port.remove!(`${DRAFT_ROOT}/sample/manifests`);
+        await port.remove!(`${DRAFT_ROOT}/sample`);
+        await port.remove!(`${DRAFT_ROOT}/sample`);
+        t.deepEqual(await port.list(DRAFT_ROOT), []);
+    });
     test(`${name}: cancellation leaves no target and permits retry`, async t => {
         const { port } = factory(t);
         t.is(await port.publish(manifest, bytes, () => false), 'cancelled');

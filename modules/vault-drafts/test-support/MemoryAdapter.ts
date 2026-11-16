@@ -1,6 +1,6 @@
 import type { DataAdapter } from 'obsidian';
 
-type Operation = 'stat' | 'list' | 'readBinary' | 'writeBinary' | 'mkdir' | 'rename' | 'remove';
+type Operation = 'stat' | 'list' | 'readBinary' | 'writeBinary' | 'mkdir' | 'rename' | 'remove' | 'rmdir';
 type Fault = { operation: Operation; moment: 'before' | 'after'; occurrence?: number };
 /** Synthetic adapter. Faults occur at the real I/O boundary, not in the storage port. */
 export class MemoryAdapter implements Pick<DataAdapter, Operation> {
@@ -70,6 +70,11 @@ export class MemoryAdapter implements Pick<DataAdapter, Operation> {
     });
     remove: DataAdapter['remove'] = path => this.run('remove', path, () => {
         if (!this.files.delete(path)) throw new Error('Missing file');
+    });
+    rmdir: DataAdapter['rmdir'] = (path, recursive) => this.run('rmdir', path, () => {
+        if (recursive) throw new Error('Recursive removal forbidden');
+        if ([...this.files.keys(), ...this.folders].some(key => key.startsWith(`${path}/`))) throw new Error('Directory not empty');
+        if (!this.folders.delete(path)) throw new Error('Missing directory');
     });
     private requireParent(path: string): void {
         const index = path.lastIndexOf('/');

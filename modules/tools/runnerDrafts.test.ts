@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { seedReceipts, traceStorage } from './test-support/draftGCFixture.js';
 import { syntheticVaultIndex } from './test-support/syntheticVaultIndex.js';
 import { AgentMemory, SessionEpochPersistenceError } from '../memory/index.js';
 import { freezeTurnOwner } from '../chat/chat/turnOwner.js';
@@ -121,7 +122,7 @@ class Mailbox<T> {
 type Payload = { messages: Array<{ role: string; content: string }>; tools: Array<{ function: { name: string } }> };
 type Request = { payload: Payload; done(text: string): void; call(name: string, args: object): void; fail(): void };
 const origin = { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) };
-async function runtime(t: ExecutionContext, activate: boolean | 'mobile' | 'desktop' = false, initial?: Record<string, string>) {
+async function runtime(t: ExecutionContext, activate: boolean | 'mobile' | 'desktop' = false, initial?: Record<string, string>, receipts = 0) {
     const mobile = activate === 'mobile';
     const desktop = activate === 'desktop';
     const adapter = mobile || desktop ? new MemoryAdapter() : undefined;
@@ -171,7 +172,10 @@ async function runtime(t: ExecutionContext, activate: boolean | 'mobile' | 'desk
         },
     } : undefined);
     const fullPlugin = Object.assign(plugin, { mcpClient: client });
-    const boot = mobile || desktop ? await initializeVaultDrafts({ ...(mobile ? mobileDraftPorts(f.app as never) : desktopDraftPorts(f.app as never)), registry })
+    const ports = mobile ? mobileDraftPorts(f.app as never) : desktop ? desktopDraftPorts(f.app as never) : undefined;
+    if (ports && receipts) await seedReceipts(ports, receipts);
+    const storageCalls: string[] = [];
+    const boot = ports ? await initializeVaultDrafts({ ...ports, storage: traceStorage(ports.storage, storageCalls), registry })
         : activate ? await initializeVaultDrafts({ storage: f.disk, registry,
         vault: { ...createDraftReviewHost(f.app as never), ...f.io },
         hasher: { sha256: async bytes => createHash('sha256').update(bytes).digest('hex') },
@@ -200,7 +204,7 @@ async function runtime(t: ExecutionContext, activate: boolean | 'mobile' | 'desk
     };
     const restored = async () => { const store = new DraftStore(f.persistence, f.io, { now: () => 200 }); await store.restore(); return store; };
     t.teardown(() => { registry.stopAll(); registry.dispose(); });
-    return { ...f, boot, adapter, previews, registry, tools, plugin: fullPlugin, runner, client, drafts, run, ownView, restored, requests, Model,
+    return { ...f, boot, adapter, storageCalls, previews, registry, tools, plugin: fullPlugin, runner, client, drafts, run, ownView, restored, requests, Model,
         agent, config, memory, journal, permissions, approvals: () => approvals };
 }
 function lastTool(request: Request): Record<string, unknown> {
@@ -827,8 +831,8 @@ test.serial(`F2g operation budget ${platform} ${count} ${scenario}`, async t => 
     t.log(JSON.stringify({ vault: counts(false), storage: counts(true), total: f.adapter!.calls.length }));
     t.deepEqual(counts(false), scenario === 'create' ? { stat: 4 } : scenario === 'patch' ? { stat: 4, readBinary: 2 } : { readBinary: 1 });
     if (platform === 'mobile') t.deepEqual(counts(true), scenario === 'create'
-        ? { stat: 50, mkdir: 7, writeBinary: 3, readBinary: 22, rename: 2, list: 16 }
-        : scenario === 'patch' ? { stat: 56, mkdir: 7, writeBinary: 4, readBinary: 32, rename: 2, list: 16 } : { stat: 7 });
+        ? { stat: 35, mkdir: 7, writeBinary: 3, readBinary: 10, rename: 2, list: 1 }
+        : scenario === 'patch' ? { stat: 41, mkdir: 7, writeBinary: 4, readBinary: 14, rename: 2, list: 1 } : { stat: 1 });
     const manifest = f.store.list()[0];
     t.deepEqual(manifest.changes.map(c => [c.path, c.proposed.kind, c.base.kind]), scenario === 'read-list' ? []
         : [[scenario === 'create' ? 'Notes/new.md' : 'Notes/base.md', 'text', scenario === 'create' ? 'missing' : 'file']]);
@@ -851,4 +855,25 @@ test.serial(`F2g operation budget ${platform} ${count} ${scenario}`, async t => 
         changes: scenario === 'read-list' ? [] : [{ ...firstTouch, proposed: { kind: 'text', blob: hash, hash, bytes: scenario === 'create' ? 3 : 7 },
             revision: 1, review: { kind: 'pending' }, inheritedFrom: [], source: { tool: 'write', callId: 'call-1' } }],
     });
+});
+
+for (const platform of ['mobile', 'desktop'] as const) for (const receipts of [1, 20])
+test.serial(`F2k delegation storage budget ${platform} receipts=${receipts}`, async t => {
+    const f = await runtime(t, platform, { 'a.md': 'Base' }, receipts);
+    f.agent.permissions.guidance_mode = true;
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    f.tools.registerTool(createDelegateTool(f.app, { drafts: f.drafts, isMobile: platform === 'mobile' }));
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
+    f.adapter!.calls.length = 0; f.storageCalls.length = 0;
+    const result = await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'Prepare', aspect: 'child' } }, 'Tester', { origin, autonomy: 'yolo' });
+    t.like(result, { success: true, started: true });
+    (await f.requests.next()).call('write', { path: 'new.md', content: 'New' });
+    const next = await f.requests.next();
+    t.like(lastTool(next), { success: true, path: 'new.md' }); next.done('Prepared');
+    await __test__._settleBackground(true); await f.boot!.flush();
+    t.is(f.storageCalls.length, 11);
+    t.is(f.adapter!.calls.filter(c => c.path.startsWith('.pkm-assistant')).length, platform === 'mobile' ? 54 : 0);
+    const draft = f.store.list().find(m => !m.payloadCollected)!;
+    t.is(await new DraftView(f.store, f.persistence, f.io, draft.draftId).read('new.md'), 'New');
+    t.deepEqual(draft.changes.map(c => [c.path, c.review.kind]), [['new.md', 'pending']]);
 });

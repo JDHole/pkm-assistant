@@ -1096,8 +1096,9 @@ do odczytu działają dalej; tekst desktopowy oraz kolejność bramek bez zmian.
 `vaultDraftRuntime.startup.test.ts` sprawdza literalne ślady portu obu platform
 oraz adaptera mobile dla pustego magazynu i jednej zamkniętej pending kopii,
 a także rzeczywiście odtworzoną propozycję. Ślady porównano z runtime sprzed F2e
-(6fff56f): identyczne. Mobile: 1 operacja dla pustego namespace, 23 dla jednej
-propozycji nowego pliku z istniejącym pustym stagingiem, bez zapisów przy starcie.
+(6fff56f): w F2e były identyczne. F2k zachowuje 1 operację dla pustego namespace,
+a koszt jednej propozycji nowego pliku z pustym stagingiem obniża z 23 do 9,
+bez zapisów przy starcie.
 `src/main.mobile.test.ts` sprawdza zapis raportu przez produkcyjny start/komendę;
 `runnerDrafts.test.ts` zachowuje odmowę PL/EN przez rzeczywiste narzędzia delegacji.
 
@@ -1238,3 +1239,34 @@ Liczniki runnera bez ukrytych celów pozostają 104/123/8 mobile i 4/6/1 desktop
 dla obu rozmiarów. Mutacje wyłączające ponowny odczyt ukrytej bazy oraz
 ograniczające odświeżenie metadanych do lokalnego celu są wykrywane przez
 generator (ziarno 15867904, odpowiednio krok 6 i 4) oraz testy literalne.
+
+
+## Mobile M4 F2k - magazyn kopii: jeden skan i termin ważności pokwitowań
+
+Runtime obu platform scala zdarzenia thread:closed/task:finished/task:plan/draft:changed:
+jeden aktywny przebieg i jedna flaga oczekującego, bez kolejki N identycznych zadań.
+Prune nadal zwalnia referencje; store decyduje w RAM, czy potrzebny jest skan.
+`flush()` czeka także na przebieg dołączony w trakcie oczekiwania. Błędy GC nadal
+mają log i nie odmawiają startu. Runtime przekazuje store predykat ochrony żywego
+biegu i niezamkniętego wątku; przy starcie wygasza tylko niechronione pokwitowania
+starsze niż 30 dni. Szczegóły bezpieczeństwa i przerwań: `../vault-drafts/CLAUDE.md`.
+Desktop wymaga dodatkowo rmdirSync do usuwania pustych katalogów; mobile używa
+opcjonalnego rmdir adaptera wyłącznie przy GC katalogu. Brak tej zdolności nie
+zmienia uruchamiania ani zapisu kopii, ale pozostawia katalog do ponowienia.
+
+`vaultDraftRuntime.gc.test.ts`: 1/20 pokwitowań na obu portach, seria 10 zdarzeń
+z barierą podczas skanu, oczekiwanie flush, żywy bieg/wątek oraz literalne odpowiedzi
+narzędzia list/accept/reject po wygaśnięciu. `runnerDrafts.test.ts`: pełny
+MCP -> delegate -> runner -> write przy 1/20 pokwitowaniach: 11 wywołań portu
+w obu przypadkach i na obu platformach (wcześniej 59/458), mobilny adapter 54
+(wcześniej 129/756). Pomiar kończy się po zakończeniu runnera i flush, przed
+kontrolnym odczytem propozycji. Desktopowe liczby portu obejmują też fs, podczas
+gdy licznik adaptera desktopu mierzy wyłącznie bazowy vault.
+
+F2e: jedna pending propozycja kosztuje 9 zamiast 23 wywołań adaptera mobile;
+pusty namespace nadal 1. F2g: 104/123/8 spada do 62/75/2 mobile dla
+create/patch/read-list; desktopowe 4/6/1 wywołań adaptera pozostaje bez zmian.
+Testy zachowują literalne ślady i pełne asercje treści, bazy i przeglądu.
+Nie zmieniono hosta kopii, schematów, uprawnień ani odpowiedzi review.
+Próba fizycznego urządzenia nadal potrzebna do oceny czasu startu i trwałości
+przy ubiciu procesu; test pamięciowy nie modeluje zachowania CapacitorAdapter.

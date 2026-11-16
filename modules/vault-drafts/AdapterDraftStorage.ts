@@ -3,7 +3,7 @@ import { DRAFT_ROOT } from './DraftPersistence.js';
 import { DraftError } from './types.js';
 import type { DraftStorageIO, RecoveryIssue } from './types.js';
 
-type Adapter = Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>;
+type Adapter = Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'> & Partial<Pick<DataAdapter, 'rmdir'>>;
 const STAGING = `${DRAFT_ROOT}/.staging`;
 // crypto.randomUUID(): lowercase UUID v4 plus .tmp, including the exact end of name.
 function isTemporaryName(name: string): boolean {
@@ -76,7 +76,14 @@ export class AdapterDraftStorage implements DraftStorageIO {
     async remove(path: string): Promise<void> {
         this.path(path);
         await this.queued(path, async () => {
-            if (await this.adapter.stat(path)) await this.adapter.remove(path);
+            const stat = await this.adapter.stat(path);
+            if (stat?.type === 'folder') {
+                if (!this.adapter.rmdir) throw new DraftError('io-error', 'Empty directory removal unavailable');
+                // Never trust recursive deletion, even after a clean scan.
+                const children = await this.adapter.list(path);
+                if (children.files.length || children.folders.length) throw new DraftError('io-error', 'Draft directory is not empty');
+                await this.adapter.rmdir(path, false);
+            } else if (stat) await this.adapter.remove(path);
             this.published.delete(path);
         });
     }

@@ -27,7 +27,7 @@ wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 
 ## Publiczne API (`index.ts`)
 
-`DraftStore(persistence, vaultIO, clock)`:
+`DraftStore(persistence, vaultIO, clock, isProtected?)`:
 
 - `create(identity: unknown)`: waliduje właściciela (agentName, sessionPath,
   sessionEpoch), draftId, runId, threadId i opcjonalny planId/nodeId. Nie tworzy plików.
@@ -39,12 +39,13 @@ wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 - `seal(draftId, reason)`: synchronicznie odbiera prawo mutacji/publikacji; Promise
   potwierdza trwałe zamknięcie. Powtórzenie zachowuje pierwszą utrwaloną przyczynę.
   Po błędzie zapisu kopia pozostaje zablokowana w RAM; `seal` można ponowić.
-- `restore()`: na świeżym magazynie, przed dopuszczeniem biegów. Zwraca `{drafts, issues}`.
+- `restore()`: na świeżym magazynie, przed dopuszczeniem biegów. Zwraca `{drafts, issues}` i zachowuje kompletny skan do pierwszego GC.
   Zamyka `open` jako `sealed/restart`, zmienia `applying` na `recovery-required`.
   Nie uruchamia pracy, zgód ani zapisów do vaulta. Błąd utrwalenia restore odrzuca Promise.
 
 `DraftPersistence(storageIO, hasher)` udostępnia `putBlob`, `readBlob`, `hash`,
-`hasDraft`, `save`, `writeIntent`, `loadAll`. `save` jest niskopoziomowym API dla zaufanego store/review;
+`hasDraft`, `save`, `writeIntent`, `loadAll`. Wynik loadAll zawiera także zwalidowane
+inwentarze pokwitowań i sierot, używane przez GC bez kolejnego skanu. `save` jest niskopoziomowym API dla zaufanego store/review;
 nie udostępniać go narzędziom modelu. `readBlob` sprawdza długość i SHA-256.
 Barrel eksportuje też typy, `DraftError` z `code`, `DRAFT_ROOT` i fabryki
 `parseDraftId/ChangeId/BlobId/ContentHash/Revision/VaultPath/DraftManifest/DraftMutation`.
@@ -248,6 +249,7 @@ i nieznany format; test P5 w `tools/vaultDraftRuntime.test.ts` sprawdza referenc
 Barrel eksportuje `AdapterDraftStorage(adapter, nextTemporaryId?)`. Konstruktor przyjmuje
 `Pick<DataAdapter, 'list' | 'readBinary' | 'writeBinary' | 'rename' | 'remove' | 'stat' | 'mkdir'>`
 oraz opcjonalny generator UUID v4 (domyślnie `crypto.randomUUID`, wstrzykiwany w testach kolizji).
+Od F2k adapter może dodatkowo udostępniać rmdir do usuwania pustych katalogów.
 Nie wykrywa platformy i nie importuje Node ani runtime Obsidiana. F2a dostarczyło
 port, a F2b wybiera go przez istniejący `Platform.isMobile`, współdzieli jedną
 instancję na namespace i kończy restore przed dopuszczeniem pisarzy.
@@ -352,18 +354,22 @@ nadal przenosić te dane i muszą je wykluczyć po stronie użytkownika.
 oraz SHA-256 przez Web Crypto. Tylko potwierdzony brak korzenia pozwala runtime
 pominąć restore i początkowe GC: jeden stat, zero zapisów (licznik w
 `src/main.mobile.test.ts`). Każdy istniejący katalog przechodzi dotychczasowy
-pełny skan; błędy nie oznaczają pustego magazynu. Desktopowe I/O bez zmian.
+pełny skan; błędy nie oznaczają pustego magazynu. F2k zmniejsza koszt skanów
+na obu platformach, zachowując desktopową trwałość publikacji.
 
-Koszt z kodu dla poprawnych zamkniętych pending kopii, bez stagingu do usunięcia,
-GC payloadu ani napraw: trzy skany manifestów (restore, kontrola GC, orphan GC).
-Na kopię każdy skan wymaga stat+list katalogu manifestów, jednego readBinary
-manifestu i B odczytów blobów: łącznie `9 + 3B` operacji na kopię, plus 10 operacji
-stałych, albo 11 gdy istnieje pusty staging. B obejmuje bazy firstTouches,
-propozycje i recoveryBlob. Dwie kopie po jednej zmianie istniejącego tekstu
-(B=2) dały 41 operacji w teście restartu runnerDrafts.test.ts. Uszkodzone generacje,
-open/applying i GC rozstrzygniętych zmian dodają odczyty lub zapisy.
-Nie optymalizujemy pełnego odzyskiwania w tej paczce; koszt rośnie z liczbą kopii,
-blobów i ich rozmiarem, a SHA-256 nadal przetwarza pełne bajty w RAM.
+F2k: koszt dla poprawnych zamkniętych pending kopii, bez napraw i GC payloadu,
+to jeden skan: `3 + B` wywołań adaptera na kopię (stat/list manifestów, readBinary
+najnowszego manifestu, B odczytów blobów), plus 4 stałe operacje albo 5 z pustym
+stagingiem. Zastępuje dawny wzór `9 + 3B` plus 10/11 operacji stałych.
+B obejmuje firstTouches, propozycje i recoveryBlob. Dwie kopie zmieniające tekst
+(B=2 każda) kosztują teraz 15 zamiast 41 operacji, a jedna propozycja nowego pliku
+9 zamiast 23. Pusty mobilny namespace nadal kosztuje jeden stat.
+Pokwitowania dodatkowo wymagają rozpoznania układu i inwentarza do bezpiecznego GC
+po przerwaniu; wszystko należy do tego samego skanu. Dla jednego manifestu,
+pustych blobs i braku decisions koszt marginalny wynosi 7 operacji adaptera
+(4 wywołania portu). 1/20 pokwitowań: 12/145 zamiast 25/291 operacji adaptera,
+5/81 zamiast 13/184 wywołań portu obu platform. Więcej zachowanego payloadu,
+recoveryBlob i napraw zwiększa koszt. SHA-256 nadal czyta pełne bajty w RAM.
 
 Do prób wyłącznie na fizycznym telefonie pozostają:
 
@@ -425,3 +431,54 @@ propozycji jako bazy i odświeża stat po zewnętrznej zmianie ukrytego pliku.
 Nie zmienia stat/read/mutate, przechwycenia first-touch ani formatu magazynu.
 Testy dwóch hostów, metadanych oraz kosztu przygotowanych celów opisuje
 `../tools/CLAUDE.md`, sekcja F2j. Ograniczenia prób na urządzeniu pozostają aktualne.
+
+
+## Mobile M4 F2k - jeden skan, zdarzenia i wygaśnięcie pokwitowań
+
+Zmiana obejmuje obie platformy. `collectResolved` wykonuje najwyżej jeden
+`loadAll`; skan zawiera też inwentarz i zweryfikowane hashe kandydatów na sieroty.
+Dopiero zakończony, czysty skan dopuszcza usuwanie. Problemy restore blokują GC
+przez cały runtime; problemy późniejszego skanu blokują jego przebieg.
+Nieznany układ pozostaje nietknięty. Skan restore jest jednorazowo przekazywany
+do początkowego GC. Licznik zapisów persistence unieważnia go po zapisie wykonanym między
+skanem a GC; własne naprawy restore są zaufane, a ich ID pozostają chronione.
+Namespace ma jednego właściciela, jak dotąd: nie gwarantujemy ochrony przed
+zewnętrznym procesem zapisującym poza portem.
+
+Przed usuwaniem każdej kopii ponownie sprawdzamy stan w kolejce publikacji,
+referencje oraz opcjonalny `isProtected(manifest)` dostarczony przez runtime
+(dla żywego biegu lub niezamkniętego wątku). `collecting` blokuje nową retencję
+w trakcie usuwania. Sieroty sprawdzają żywe ID przy każdej operacji; katalog
+bez manifestu powstały w bieżącym store pozostaje chroniony jego wpisem aż do
+restartu. Persistence pamięta możliwe sieroty po próbach zapisu blobów.
+Bez kandydata w RAM, ponowienia nieudanego GC ani niechronionej sieroty nie ma I/O.
+Udane GC nie przegląda ponownie zebranych pokwitowań po każdym zdarzeniu.
+
+**Decyzja Kuby z 16.11.2026:** stała `RECEIPT_RETENTION_MS` to 30 dni.
+Tylko pierwsze sprzątanie po restore może wygasić pokwitowanie: musi mieć
+payloadCollected, sealed, wyłącznie accepted/rejected, brak referencji i żywego
+biegu/wątku, rozpoznany układ, czysty skan oraz updatedAt starsze niż 30 dni.
+Dokładnie 30 dni, czas z przyszłości i zegar wcześniejszy od createdAt/updatedAt
+nie kwalifikują kopii. Nie ma TTL nierozstrzygniętych zmian ani applying/recovery-required.
+Accepted po operacji destrukcyjnej zachowuje recoveryBlob: taki katalog nie wygasa
+nigdy, nawet po zebraniu reszty payloadu. Nie zmieniamy manifestów ani blobów.
+Po wygaśnięciu list pomija kopię, a accept/reject zwracają dawną odmowę nieznanego ID.
+
+Usuwanie jest sekwencyjne przez istniejące `DraftStorageIO.remove`, teraz również
+dla pustego katalogu. Desktop używa rmdirSync, mobile opcjonalnego adapter.rmdir
+z recursive=false i wcześniejszą kontrolą pustki; brak zdolności odmawia usuwiania
+katalogu. Nie ma rekursywnego kasowania. Najpierw usuwamy payload, decyzje i starsze
+manifesty, potem puste blobs/decisions, najnowsze pokwitowanie jako ostatni plik,
+a na końcu puste manifests i katalog kopii. Przerwanie przed pokwitowaniem zostawia
+je do ponowienia; po nim zostają tylko puste, rozpoznane katalogi, kończone przez
+orphan GC. Błąd odczytu lub nieznany układ daje issue albo zachowanie katalogu.
+
+Testy `DraftStore.gc.test.ts` uruchamiają obie implementacje portu: 29/30/31 dni,
+100-dniowe pending/applying/recovery-required, ochronę referencji i recoveryBlob,
+cofnięty zegar, nieznany układ i błędy skanu, unieważnienie skanu po zapisie,
+żywy zapis podczas GC oraz restart po każdej z 7 operacji usuwania pliku i 4
+usuwania katalogu. Lista plików po accept/release została odtworzona na 39e588b:
+zostaje wyłącznie manifests/000005.json. `DraftStorage.contract.test.ts` sprawdza
+odmowę usunięcia niepustego katalogu i idempotentne usunięcie pustego na obu portach.
+Testy runtime i runnera z licznikami opisuje `../tools/CLAUDE.md`.
+Testy offline nie dowodzą trwałości rmdir/rename ani czasu I/O na Androidzie/iOS.

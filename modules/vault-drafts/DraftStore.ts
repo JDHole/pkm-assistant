@@ -1,16 +1,27 @@
 import { EventEmitter } from '../../core/index.js';
-import { DraftPersistence } from './DraftPersistence.js';
+import { DraftPersistence, type DraftScan } from './DraftPersistence.js';
 import { parseChangeId, parseDraftId, parseDraftManifest, parseDraftMutation, parseRevision } from './schema.js';
 import { DraftError } from './types.js';
 import type { BaseSnapshot, ChangeId, ReviewState, Revision, DraftClock, DraftId, DraftManifest, DraftMutation, DraftPhase, DraftRef, DraftVaultIO, FirstTouch, ProposedValue, RecoveryIssue, VaultPath, VaultStat } from './types.js';
 
 type Entry = { manifest: DraftManifest; persisted: boolean; closed: boolean; publication: Promise<void>; paths: Map<VaultPath, Promise<void>> };
+// Kuba's decision, 2026-11-16: only disposable receipts expire, at startup.
+const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 type SealReason = Extract<DraftPhase, { kind: 'sealed' }>['reason'];
 export class DraftStore {
     readonly events = new EventEmitter();
     private readonly references = new Map<DraftId, number>();
     private readonly collecting = new Set<DraftId>();
     private recoveryIssues = false;
+    private startupScan?: DraftScan;
+    private startupCleanup = false;
+    private readonly cleanupPending = new Set<DraftId>();
+    private collection?: Promise<void>;
+    private eligible(id: DraftId, entry: Entry): boolean {
+        return entry.persisted && !this.references.has(id) && !this.isProtected(entry.manifest)
+            && entry.manifest.phase.kind === 'sealed'
+            && entry.manifest.changes.every(c => c.review.kind === 'accepted' || c.review.kind === 'rejected');
+    }
     /** A view holds every layer it can read, including transitive predecessors. */
     retain(ids: readonly DraftId[]): () => void {
         const unique = [...new Set(ids)];
@@ -28,26 +39,59 @@ export class DraftStore {
             }
         };
     }
-    async collectResolved(): Promise<void> {
-        // Incomplete/future-format scans cannot prove that a blob is unreferenced.
-        if (this.recoveryIssues || (await this.persistence.loadAll()).issues.length) return;
-        for (const [id, entry] of this.entries) await this.publish(entry, async () => {
-            const old = entry.manifest;
-            if (this.references.has(id) || old.phase.kind !== 'sealed'
-                || old.changes.some(c => c.review.kind !== 'accepted' && c.review.kind !== 'rejected')) return;
-            if (!entry.persisted) return; // Runner finalization may still read its empty reference.
-            this.collecting.add(id);
-            try {
-                if (!old.payloadCollected) entry.manifest = await this.persistence.save({ ...old, payloadCollected: true }, () => !this.references.has(id));
-                await this.persistence.collect(entry.manifest);
-            } finally { this.collecting.delete(id); }
-        });
-        await this.persistence.collectOrphans(id => this.entries.has(id));
+    collectResolved(): Promise<void> {
+        if (this.collection) return this.collection;
+        const operation = this.collect();
+        this.collection = operation;
+        void operation.then(() => { this.collection = undefined; }, () => { this.collection = undefined; });
+        return operation;
+    }
+    private async collect(): Promise<void> {
+        if (this.recoveryIssues) return;
+        const startup = this.startupCleanup;
+        if (!startup && ![...this.entries].some(([id, entry]) => this.eligible(id, entry)
+            && (!entry.manifest.payloadCollected || this.cleanupPending.has(id)))
+            && !this.persistence.hasOrphans(id => this.entries.has(id))) return;
+        // Reuse restore only until the first intervening write. All candidates are
+        // validated before deletion; per-entry publication and retain guard live work.
+        const scan = this.startupScan?.revision === this.persistence.revision
+            ? this.startupScan : await this.persistence.loadAll();
+        this.startupScan = undefined;
+        this.startupCleanup = false;
+        if (scan.issues.length) return;
+        for (const [id, entry] of this.entries) {
+            if (!this.eligible(id, entry)) continue;
+            await this.publish(entry, async () => {
+                if (!this.eligible(id, entry)) return;
+                const old = entry.manifest;
+                if (old.payloadCollected && !startup && !this.cleanupPending.has(id)) return;
+                this.collecting.add(id);
+                try {
+                    const layout = scan.receipts.get(id);
+                    const now = this.clock.now();
+                    if (startup && old.payloadCollected && layout
+                        && now >= old.createdAt && now - old.updatedAt > RECEIPT_RETENTION_MS
+                        && !old.changes.some(c => 'recoveryBlob' in c.review && c.review.recoveryBlob)) {
+                        if (await this.persistence.expire(old, layout)) this.entries.delete(id);
+                        this.cleanupPending.delete(id);
+                        return;
+                    }
+                    this.cleanupPending.add(id);
+                    if (!old.payloadCollected) {
+                        entry.manifest = await this.persistence.save({ ...old, payloadCollected: true }, () => !this.references.has(id));
+                        await this.persistence.collect(entry.manifest);
+                    } else if (layout) await this.persistence.collectReceipt(old, layout);
+                    this.cleanupPending.delete(id);
+                } finally { this.collecting.delete(id); }
+            });
+        }
+        await this.persistence.collectOrphans(scan, id => this.entries.has(id));
     }
     private changed(entry: Entry): void { this.events.emit('draft:changed', structuredClone(entry.manifest)); }
     private readonly entries = new Map<DraftId, Entry>();
     private readonly decisions = new Map<VaultPath, Promise<void>>();
-    constructor(private readonly persistence: DraftPersistence, private readonly vault: DraftVaultIO, private readonly clock: DraftClock) {}
+    constructor(private readonly persistence: DraftPersistence, private readonly vault: DraftVaultIO, private readonly clock: DraftClock,
+        private readonly isProtected: (manifest: DraftManifest) => boolean = () => false) {}
     /** Validates untrusted identity; no files or directories until the first net mutation. */
     async create(identity: unknown): Promise<DraftManifest> {
         if (typeof identity !== 'object' || identity === null) throw new DraftError('invalid-manifest', 'Invalid draft identity');
@@ -235,6 +279,11 @@ export class DraftStore {
         }
         if (this.entries.size) throw new DraftError('draft-exists', 'Store changed during restore');
         for (const manifest of restored) this.entries.set(manifest.draftId, this.entry(manifest, true));
+        // Restore's own repair publications are trusted and all their IDs are live.
+        recovered.manifests = restored;
+        recovered.revision = this.persistence.revision;
+        this.startupScan = recovered;
+        this.startupCleanup = true;
         return { drafts: this.list(), issues: recovered.issues };
     }
 }

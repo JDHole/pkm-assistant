@@ -268,3 +268,7 @@ Host kopii na obu platformach od F2i odtwarza w RAM migawkę starego przejścia 
 ## Mobile M4 S1a - podetapy fazy agentów w diagnostyce
 
 Raport obu platform pokazuje 13 liczbowych podetapów i liczników ostatniej inicjalizacji agentów bez zmiany kolejności startu; źródło, obsługę błędów i reload opisuje `modules/agents/CLAUDE.md`, a zamknięty słownik i równoległość zasobów `modules/diagnostics/CLAUDE.md`.
+
+## Mobile M4 F2k - magazyn kopii: jeden skan i termin ważności pokwitowań
+
+Obie platformy współdzielą jeden skan startu i scalają zgłoszenia GC, a niechronione pokwitowania starsze niż 30 dni wygasają wyłącznie przy starcie; warunki bezpieczeństwa, bezterminowy recoveryBlob i testy kosztu opisują `modules/vault-drafts/CLAUDE.md` oraz `modules/tools/CLAUDE.md`.

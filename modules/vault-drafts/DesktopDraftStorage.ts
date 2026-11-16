@@ -4,7 +4,7 @@ import type { DraftStorageIO } from './types.js';
 
 /** Desktop-only host capability. No Node runtime import in the plugin bundle. */
 export type DraftFileSystem = Pick<typeof import('node:fs'), 'mkdirSync' | 'lstatSync' | 'readdirSync' |
-    'readFileSync' | 'openSync' | 'writeFileSync' | 'fsyncSync' | 'closeSync' | 'linkSync' | 'unlinkSync'>;
+    'readFileSync' | 'openSync' | 'writeFileSync' | 'fsyncSync' | 'closeSync' | 'linkSync' | 'unlinkSync' | 'rmdirSync'>;
 const missing = (error: unknown): boolean => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 
 /** fsync staging + synchronous create-only hard-link publication. Stop cannot run
@@ -34,7 +34,11 @@ export class DesktopDraftStorage implements DraftStorageIO {
     }
     read(path: string): Promise<Uint8Array> { return Promise.resolve(new Uint8Array(this.fs.readFileSync(this.path(path)))); }
     remove(path: string): Promise<void> {
-        try { this.fs.unlinkSync(this.path(path)); }
+        try {
+            const target = this.path(path);
+            if (this.fs.lstatSync(target).isDirectory()) this.fs.rmdirSync(target);
+            else this.fs.unlinkSync(target);
+        }
         catch (error) { if (!missing(error)) return Promise.reject(error instanceof Error ? error : new DraftError('io-error', String(error))); }
         return Promise.resolve();
     }

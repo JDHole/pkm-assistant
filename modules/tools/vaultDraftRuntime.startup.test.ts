@@ -35,27 +35,13 @@ for (const mobile of [false, true]) for (const pending of [false, true]) {
         t.teardown(() => { boot.dispose(); registry.dispose(); });
         t.deepEqual(boot.store.list().map(draft => [draft.draftId, draft.phase, draft.changes.map(change => [change.path, change.review.kind])]),
             pending ? [['sample', { kind: 'sealed', reason: 'finished' }, [['new.md', 'pending']]]] : []);
-        // Literal baseline from 6fff56f; blob IDs alone are normalized.
+        // F2k reuses restore's complete scan for both payload and orphan GC.
         const storageTrace = pending ? [
             'list .pkm-assistant/subagent-drafts/v1',
             'list .pkm-assistant/subagent-drafts/v1/sample/manifests',
             'read .pkm-assistant/subagent-drafts/v1/sample/manifests/000002.json',
             'read .pkm-assistant/subagent-drafts/v1/sample/blobs/BLOB',
-            'list .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1/sample/manifests',
-            'read .pkm-assistant/subagent-drafts/v1/sample/manifests/000002.json',
-            'read .pkm-assistant/subagent-drafts/v1/sample/blobs/BLOB',
-            'list .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1/sample/manifests',
-            'read .pkm-assistant/subagent-drafts/v1/sample/manifests/000002.json',
-            'read .pkm-assistant/subagent-drafts/v1/sample/blobs/BLOB',
-            'list .pkm-assistant/subagent-drafts/v1',
-        ] : [
-            'list .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1',
-        ];
+        ] : ['list .pkm-assistant/subagent-drafts/v1'];
         t.deepEqual(trace, mobile ? pending ? ['cleanupTemporary', ...storageTrace] : [] : storageTrace);
         t.deepEqual(adapter.calls.map(call => `${call.operation} ${call.path.replace(/[a-f0-9]{64}/g, 'BLOB')}`),
             mobile ? pending ? [
@@ -68,20 +54,6 @@ for (const mobile of [false, true]) for (const pending of [false, true]) {
             'list .pkm-assistant/subagent-drafts/v1/sample/manifests',
             'readBinary .pkm-assistant/subagent-drafts/v1/sample/manifests/000002.json',
             'readBinary .pkm-assistant/subagent-drafts/v1/sample/blobs/BLOB',
-            'stat .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1',
-            'stat .pkm-assistant/subagent-drafts/v1/sample/manifests',
-            'list .pkm-assistant/subagent-drafts/v1/sample/manifests',
-            'readBinary .pkm-assistant/subagent-drafts/v1/sample/manifests/000002.json',
-            'readBinary .pkm-assistant/subagent-drafts/v1/sample/blobs/BLOB',
-            'stat .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1',
-            'stat .pkm-assistant/subagent-drafts/v1/sample/manifests',
-            'list .pkm-assistant/subagent-drafts/v1/sample/manifests',
-            'readBinary .pkm-assistant/subagent-drafts/v1/sample/manifests/000002.json',
-            'readBinary .pkm-assistant/subagent-drafts/v1/sample/blobs/BLOB',
-            'stat .pkm-assistant/subagent-drafts/v1',
-            'list .pkm-assistant/subagent-drafts/v1',
         ] : ['stat .pkm-assistant/subagent-drafts/v1'] : []);
     });
 }
