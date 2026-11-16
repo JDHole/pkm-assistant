@@ -877,3 +877,128 @@ test.serial(`F2k delegation storage budget ${platform} receipts=${receipts}`, as
     t.is(await new DraftView(f.store, f.persistence, f.io, draft.draftId).read('new.md'), 'New');
     t.deepEqual(draft.changes.map(c => [c.path, c.review.kind]), [['new.md', 'pending']]);
 });
+
+// F2m uses the real delegate, runner, registry, MCP and draft runtime; only the model is scripted.
+async function reviewMenuRuntime(t: ExecutionContext, mobile = false) {
+    const f = await runtime(t, mobile ? 'mobile' : true);
+    for (const tool of f.tools.filterByAgent(f.agent)) {
+        if (!['write', 'read', 'list', 'subagent_changes'].includes(tool.name)) f.tools.unregisterTool(tool.name);
+    }
+    f.agent.permissions.guidance_mode = true;
+    f.config.tools = ['write', 'read', 'subagent_changes'];
+    Object.assign(f.plugin.env, { chatModel: new f.Model() });
+    Object.assign(f.plugin.env.settings.pkmAssistant, {
+        modelLibrary: { minion: [{ platform: 'openai', model: 'model', isDefault: true }] },
+    });
+    const deps = { drafts: f.drafts, isMobile: mobile };
+    f.tools.registerTool(createDelegateTool(f.app, deps));
+    f.tools.registerTool(createSubAgentTool(f.app, deps));
+    modelsTest.setChatModelFactory(() => new f.Model() as never);
+    t.teardown(async () => { stopAllDelegations('test'); await __test__._settleBackground(true); modelsTest.reset(); });
+    const call = (name: string, args: object) => f.client.executeToolCall({ name, arguments: args }, 'Tester', { origin, autonomy: 'yolo' });
+    return { ...f, call };
+}
+
+for (const mobile of [false, true]) for (const variant of ['worker', 'custom', 'pkm-sub', 'template'])
+test.serial(`F2m model menu and frozen continuation permissions: ${variant}, mobile=${mobile}`, async t => {
+    const f = await reviewMenuRuntime(t, mobile);
+    if (variant === 'template') {
+        Object.assign(f.plugin.env.settings.pkmAssistant, { globalSubTemplate: 'test-template' });
+        Object.assign(f.plugin.agentManager, { subAgentTemplateStore: { get: () => ({ ...f.config, name: 'Template' }) } });
+    }
+    t.deepEqual(f.tools.filterByAgent(f.agent).map(tool => tool.name),
+        ['write', 'read', 'list', 'subagent_changes', 'delegate', 'sub_agent']);
+    const delegated = f.call('delegate', { task: 'Prepare', background: false,
+        ...(variant === 'worker' ? { aspect: 'worker' } : variant === 'custom' ? { aspect: 'child' } : {}) });
+    const request = await f.requests.next();
+    const expected = variant === 'worker' ? ['write', 'read', 'list', 'delegate', 'sub_agent', 'ask_parent']
+        : variant === 'pkm-sub' ? ['list', 'read', 'ask_parent'] : ['write', 'read', 'ask_parent'];
+    t.deepEqual(request.payload.tools.map(tool => tool.function.name), expected);
+    const thread = f.registry.listThreads(origin)[0];
+    const frozen = variant === 'worker' ? ['write', 'read', 'list', 'delegate', 'sub_agent']
+        : variant === 'pkm-sub' ? ['list', 'read'] : ['write', 'read'];
+    t.deepEqual(thread.config.toolNames, frozen);
+    request.done('Prepared');
+    t.like(await delegated, { success: true, started: true });
+    await __test__._settleBackground(true);
+    t.is(f.registry.list()[0].result?.text, 'Prepared');
+    const continued = f.call('sub_agent', { action: 'task', sub_id: thread.threadId, task: 'Continue', background: false });
+    const next = await f.requests.next();
+    t.deepEqual(next.payload.tools.map(tool => tool.function.name), expected);
+    t.deepEqual(thread.config.toolNames, frozen);
+    next.done('Continued');
+    t.like(await continued, { success: true, result: 'Continued' });
+});
+
+for (const mobile of [false, true])
+test.serial(`F2m grandchild receives the actual caller whitelist, mobile=${mobile}`, async t => {
+    const f = await reviewMenuRuntime(t, mobile);
+    const callerLists: unknown[] = [];
+    const execute = f.client.executeToolCall.bind(f.client);
+    f.client.executeToolCall = (call, agent, opts) => {
+        if (opts?.subRunContext && call.name === 'delegate') callerLists.push(opts.callerToolNames);
+        return execute(call, agent, opts);
+    };
+    const delegated = f.call('delegate', { task: 'Coordinate', aspect: 'worker', background: false });
+    const root = await f.requests.next();
+    t.deepEqual(root.payload.tools.map(tool => tool.function.name), ['write', 'read', 'list', 'delegate', 'sub_agent', 'ask_parent']);
+    root.call('delegate', { task: 'Prepare child proposal', aspect: 'child' });
+    const a = await f.requests.next(), b = await f.requests.next();
+    const child = a.payload.messages[0].content.includes('METHOD') ? a : b;
+    const parent = child === a ? b : a;
+    t.deepEqual(callerLists, [['write', 'read', 'list', 'delegate', 'sub_agent']]);
+    t.deepEqual(child.payload.tools.map(tool => tool.function.name), ['write', 'read', 'ask_parent']);
+    t.deepEqual(f.registry.listThreads(origin).map(thread => thread.config.toolNames),
+        [['write', 'read', 'list', 'delegate', 'sub_agent'], ['write', 'read']]);
+    parent.done('Waiting for child');
+    child.done('Child prepared');
+    (await f.requests.next()).done('Coordinated');
+    t.like(await delegated, { success: true, started: true });
+    await __test__._settleBackground(true);
+    t.is(f.registry.list()[0].result?.text, 'Coordinated');
+    t.deepEqual(f.registry.list().map(task => [task.level, task.status]), [[1, 'done'], [2, 'done']]);
+});
+
+for (const locale of ['pl', 'en'])
+test.serial(`F2m draft writer explains proposal and refuses guessed review calls without effects (${locale})`, async t => {
+    const f = await reviewMenuRuntime(t, true), previousLocale = getLocale();
+    setLocale(locale);
+    t.teardown(() => setLocale(previousLocale));
+    const delegate = createDelegateTool(f.app, { drafts: f.drafts, isMobile: true });
+    const delegated = delegate.execute({ task: 'Prepare proposal', aspect: 'child', background: false,
+        _invocationDelegationDepth: 1, _invocationOrigin: origin, _invocationAgentName: 'Tester' }, f.app, f.plugin as never);
+    (await f.requests.next()).call('write', { path: 'a.md', content: 'Proposal' });
+    let next = await f.requests.next();
+    t.like(lastTool(next), { success: true, path: 'a.md', draft_note: locale === 'pl'
+        ? 'Ten zapis jest propozycją czekającą na decyzję agenta zlecającego; nie zatwierdzasz jej samodzielnie.'
+        : 'This write is a proposal awaiting the assigning agent\'s decision; you do not approve it yourself.' });
+    const snapshot = f.store.list()[0];
+    t.is(await new DraftView(f.store, f.persistence, f.io, snapshot.draftId).read('a.md'), 'Proposal');
+    const decision = { draft_id: snapshot.draftId, change_id: snapshot.changes[0].id, revision: snapshot.changes[0].revision };
+    for (const action of ['list', 'accept', 'reject']) {
+        next.call('subagent_changes', action === 'list' ? { action, draft_id: snapshot.draftId } : { action, ...decision });
+        next = await f.requests.next();
+        t.is(next.payload.messages.filter(message => message.role === 'tool').at(-1)!.content, locale === 'pl'
+            ? 'Odmowa: narzędzie "subagent_changes" jest poza dozwolonym zestawem tego sub-agenta (whitelist rodzic∩sub). Używaj tylko narzędzi, które dostałeś.'
+            : 'Refused: tool "subagent_changes" is outside this sub-agent\'s allowed set (parent∩sub whitelist). Use only the tools provided to you.');
+        t.is(decode(f.files.get('a.md')!), 'Baza');
+        t.deepEqual(f.store.snapshot(snapshot.draftId), snapshot);
+    }
+    next.done('Proposal ready');
+    t.like(await delegated, { success: true, result: 'Proposal ready', draft_note: locale === 'pl'
+        ? `Kopia draft_id=${snapshot.draftId}: 1 zmian. Przejrzyj i rozstrzygnij pliki narzędziem subagent_changes. Zakończenie suba nie oznacza przyjęcia.`
+        : `Draft draft_id=${snapshot.draftId}: 1 changes. Review and decide on files with subagent_changes. Ending the run does not accept changes.` });
+    const sealed = f.store.snapshot(snapshot.draftId);
+    t.is(sealed.phase.kind, 'sealed');
+    // Bypass the runner menu to exercise the unchanged execution boundary with a sealed proposal.
+    for (const opts of [{ delegationDepth: 1 }, { subRunContext: { runId: 'old-run', level: 1, origin } }]) {
+        t.like(await f.client.executeToolCall({ name: 'subagent_changes', arguments: { action: 'accept', ...decision } },
+            'Tester', { origin, autonomy: 'yolo', ...opts }), { kind: 'denied', isError: true });
+        t.deepEqual(f.store.snapshot(snapshot.draftId), sealed);
+        t.is(decode(f.files.get('a.md')!), 'Baza');
+    }
+    t.like(await f.call('subagent_changes', { action: 'list', draft_id: snapshot.draftId }),
+        { kind: 'listed', changes: [{ path: 'a.md', status: 'pending' }] });
+    t.like(await f.call('subagent_changes', { action: 'accept', ...decision }), { kind: 'accepted' });
+    t.is(decode(f.files.get('a.md')!), 'Proposal');
+});

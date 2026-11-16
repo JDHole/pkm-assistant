@@ -110,6 +110,7 @@ export const en: Record<string, string> = {
   "memory.epoch.readback_failed": "Could not read the file after appending the identifier: {{detail}}",
   "memory.epoch.verification_failed": "The read-back did not confirm a valid identifier and preservation of the previous content.",
   'subagent.draft.unavailable': 'Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.',
+  'subagent.draft.proposal_note': 'This write is a proposal awaiting the assigning agent\'s decision; you do not approve it yourself.',
   "subagent.draft.saved": "Prepared in the draft; vault unchanged.",
   "subagent.draft.ambiguous": "Different versions of {{path}} from: {{sources}}.",
   "chat.subdraft.pending": "Pending review: {{count}}",

@@ -276,3 +276,10 @@ Raport obu platform pokazuje 13 liczbowych podetapów i liczników ostatniej ini
 ## Mobile M4 F2k - magazyn kopii: jeden skan i termin ważności pokwitowań
 
 Obie platformy współdzielą jeden skan startu i scalają zgłoszenia GC, a niechronione pokwitowania starsze niż 30 dni wygasają wyłącznie przy starcie; warunki bezpieczeństwa, bezterminowy recoveryBlob i testy kosztu opisują `modules/vault-drafts/CLAUDE.md` oraz `modules/tools/CLAUDE.md`.
+
+## Mobile M4 F2m - przegląd kopii tylko u prowadzącego
+
+Na obu platformach runner ukrywa `subagent_changes` przed każdym sub-agentem,
+a wynik zapisu w kopii wyjaśnia PL/EN, że propozycja czeka na decyzję zleceniodawcy.
+Ukrycie definicji porządkuje menu; egzekucyjna odmowa pozostaje granicą bezpieczeństwa.
+Kontrakt i testy opisują `modules/sub-agents/CLAUDE.md` oraz `modules/tools/CLAUDE.md`.

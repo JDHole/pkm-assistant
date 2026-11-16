@@ -224,6 +224,7 @@ export interface ExecuteToolCallOptions {
  */
 interface ToolExecutionResult {
     vault_effect?: { kind: 'draft'; draftId: import('../vault-drafts/index.js').DraftId | null };
+    draft_note?: string;
     success?: boolean;
     /** Znacznik porażki dopisywany przez normalizację (krok 8b niżej). */
     isError?: boolean;
@@ -1378,7 +1379,8 @@ export class MCPClient {
             if (opts.abortSignal?.aborted) return { success: false, error: t('chat.substrip.status_aborted') };
             if (draftWrite && result && typeof result === 'object' && toolResultStatus(result) !== 'error'
                 && execution.kind === 'overlay-write') {
-                result = { ...result, vault_effect: { kind: 'draft', draftId: execution.workspace.draftId } };
+                result = { ...result, vault_effect: { kind: 'draft', draftId: execution.workspace.draftId },
+                    draft_note: t('subagent.draft.proposal_note') };
             }
 
             // 7b/7c. Modale review (IdeaReviewModal → _planStore) i ArtifactProgressModal

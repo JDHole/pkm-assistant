@@ -1216,7 +1216,7 @@ export class SubAgentRunner {
         // lib.es5.d.ts w tej wersji) - cast na WYNIKU (nie nowy statement, nie zmieniony warunek)
         // trzyma resztę łańcucha bez zmian w emitowanym JS.
         const tools = (toolNames
-            .filter(name => name !== 'ask_user' && name !== 'ask_parent')
+            .filter(name => name !== 'ask_user' && name !== 'ask_parent' && name !== 'subagent_changes')
             .map(name => this.toolRegistry.getTool(name))
             .filter(Boolean) as RunnerToolDefinition[])
             .filter((tool) => !parentVisible || parentVisible.has(tool.name))

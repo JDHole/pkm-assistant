@@ -1096,3 +1096,27 @@ Mobile otrzymuje teraz dostępny runtime z composition root; writer tworzy kopi�
 kontynuacja dziedziczy warstwy, read-only bez warstw pozostaje live. Nowe testy
 `../tools/runnerDrafts.test.ts` wykonują te drogi z adapterem w pamięci, MCP,
 restartem i decyzjami, obok dotychczasowych odmów dla runtime niedostępnego.
+
+## Mobile M4 F2m - przegląd kopii tylko u prowadzącego
+
+Na obu platformach `_getTools` odcina `subagent_changes` obok `ask_user` i
+`ask_parent` przed pobraniem definicji. To jedno miejsce decyzji dla workera,
+`pkm-sub`, custom suba, szablonu, wnuka i kontynuacji, także przy jawnej nazwie
+w YAML. Nie zmieniamy konfiguracji użytkownika ani listy narzędzi prowadzącego.
+Whitelista `_executeTool`, `callerToolNames` kolejnego piętra i zapisywane przed
+pierwszym żądaniem modelu `thread.config.toolNames` już pochodzą z przefiltrowanej
+listy (z istniejącymi wyjątkami dla lokalnych narzędzi pytań i sterowania).
+Kontynuacja ponownie przechodzi `_getTools`.
+
+Ukrycie definicji porządkuje menu suba. Granicą bezpieczeństwa pozostaje odmowa
+wykonania: whitelista runnera oraz niezmienione `draftReviewContext` i
+`SubagentChangesTool`. Zgadnięta nazwa lub stary transkrypt nie pozwalają subowi
+przyjąć ani odrzucić kopii. Rama promptu pozostaje edytowalna i bez zmian;
+MCP dopisuje do sukcesu writera w kopii krótkie `draft_note` PL/EN o propozycji
+czekającej na decyzję zleceniodawcy, której sub nie zatwierdza sam.
+
+Testy F2m w `../tools/runnerDrafts.test.ts` używają publicznej delegacji,
+rzeczywistego runnera, MCP i magazynu oraz sterowanego modelu: literalne listy
+narzędzi i zamrożonych uprawnień, kontynuacje czterech wariantów suba na obu
+platformach, whitelistę wnuka, notę PL/EN, odmowy bez zmiany pliku i manifestu
+oraz zachowany przegląd prowadzącego. Nie wymagają żywego Obsidiana ani sieci.

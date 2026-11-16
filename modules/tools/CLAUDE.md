@@ -1283,3 +1283,19 @@ Liczniki startu i delegacji F2k pozostają bez zmian; graf ochrony nie dodaje od
 Nie zmieniono hosta kopii, schematów, uprawnień ani odpowiedzi review.
 Próba fizycznego urządzenia nadal potrzebna do oceny czasu startu i trwałości
 przy ubiciu procesu; test pamięciowy nie modeluje zachowania CapacitorAdapter.
+
+## Mobile M4 F2m - menu suba bez przeglądu kopii
+
+Na obu platformach definicję `subagent_changes` usuwa wyłącznie `_getTools`
+w runnerze. `filterByAgent` prowadzącego i zwrotka delegacji z instrukcją
+przeglądu pozostają bez zmian. Ukrycie definicji porządkuje menu, a granicą
+bezpieczeństwa pozostaje egzekucyjna odmowa: whitelista suba, `draftReviewContext`
+i `SubagentChangesTool`. Nie zmieniono zgód, diffów, uprawnień ani list/accept/reject.
+
+Sukces writera w `overlay-write` dostaje obok `vault_effect` pole `draft_note`
+(`subagent.draft.proposal_note`, PL/EN): zapis jest propozycją do decyzji agenta
+zlecającego, sub nie zatwierdza jej sam. Wspólne miejsce w MCP obejmuje wszystkie
+writery treści; zapis live i edytowalna rama suba zachowują dotychczasowy kontrakt.
+Testy F2m w `runnerDrafts.test.ts` sprawdzają rzeczywiste żądania modelu przez
+publiczne delegate/sub_agent, dziedziczenie whitelisty, zamrożenie narzędzi wątku,
+odmowy zgadniętej nazwy bez skutków oraz tekst po zapisie i przegląd prowadzącego.

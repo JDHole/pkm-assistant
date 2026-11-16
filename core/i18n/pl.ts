@@ -110,6 +110,7 @@ export const pl: Record<string, string> = {
   "memory.epoch.readback_failed": "Nie udało się odczytać pliku po dopisaniu identyfikatora: {{detail}}",
   "memory.epoch.verification_failed": "Odczyt po zapisie nie potwierdził poprawnego identyfikatora i zachowania wcześniejszej treści.",
   'subagent.draft.unavailable': 'Magazyn kopii jest niedostępny. Sub nie może przygotować zmian; sprawdź log odzyskiwania.',
+  'subagent.draft.proposal_note': 'Ten zapis jest propozycją czekającą na decyzję agenta zlecającego; nie zatwierdzasz jej samodzielnie.',
   "subagent.draft.saved": "Przygotowano w kopii roboczej; vault bez zmian.",
   "subagent.draft.ambiguous": "Różne wersje {{path}} od: {{sources}}.",
   "chat.subdraft.pending": "Do przeglądu: {{count}}",
