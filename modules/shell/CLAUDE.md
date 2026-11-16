@@ -310,3 +310,50 @@ Są to pomiary CSS, nie nowe testy AVA ani test fizycznego Androida.
 Następne zmiany modala muszą zachować przewijanie `.modal-content`, bo ono
 wyznacza obszar działania lepkiej stopki; dotyk, większa czcionka systemowa
 i zachowanie konkretnego WebView pozostają do odbioru na urządzeniu.
+
+## Mobile M3 U22 - panel agentów
+
+Sam CSS w `sidebar/SidebarViews.css`: każda reguła wymaga `body.is-phone`,
+przodka `[data-type="pkm-agent-sidebar"]` i treści bez bezpośredniego
+`.cs-profile__header`. Obejmuje Home, komunikator, trzy zakładki Zaplecza,
+wyzwalacze oraz szczegóły szablonów. Przycisk Wstecz dobiera zakres przez
+bieżącą treść widoku. U14/U16/U17, DOM, handlery, desktop i tablet bez zmian.
+
+Tekst i etykiety mają 14 px, tytuły sekcji oraz pomocnicze liczniki/plakietki
+12 px, pola 16 px. Cele dotyku mają minimum 44 px wysokości, przyciski ikon
+również 44 px szerokości. Siatka agentów ma dwie kolumny `minmax(0, 1fr)`,
+aby długie nazwy mieściły się także w węższej szufladzie. Paski komunikatora
+i filtrów zawijają się zamiast przewijać poziomo. Trzy zakładki Zaplecza
+mają trzy kolumny z zawijanymi etykietami. Menu „Użyj u agenta” po otwarciu
+zajmuje własny wiersz w układzie karty, żeby nie przykrywać innych akcji.
+Wiadomość układa nadawcę i temat ponad datą oraz stale widocznym koszem.
+
+Akcje nakładane na kartę agenta mają `display: none`, więc nie zajmują
+miejsca ani nie przechwytują dotyku. Obie drogi istnieją: karta -> prezentacja
+-> Edytuj profil -> przycisk usunięcia w dolnym pasku profilu -> potwierdzenie.
+Wbudowany agent pozostaje chroniony dotychczasowymi warunkami. Nie dodano UI.
+
+Weryfikacja U22 [measured]: tymczasowa podmiana arkusza w działającym Obsidianie,
+bez buildu ani wdrożenia, przy 360x804 i 412x880. Liczby tekstów <12 px / celów
+<44 px przed zmianą: Home 50/44, komunikator 139/13, skille 16/1, sub-agenci 29/5,
+konektory 68/0, wyzwalacze 18/0; po zmianie każdy widok 0/0 przy obu szerokościach.
+Pomiar uwzględnia także klikalne divy i niewidoczne przez opacity przyciski
+przechwytujące dotyk; nie liczy SVG jako tekstu ani kontrolek. Po zmianie brak
+wyjścia poza szerokość i poziomego scrolla. W tych sześciu widokach nie było
+natywnych kontrolek wymagających wyjątku od minimum 44 px.
+
+Dodatkowo 16 prób na produkcyjnych rendererach z syntetycznymi danymi w RAM:
+osiem widoków przy dwóch szerokościach, długie nazwy bez spacji, rozwinięta
+wiadomość, menu wyboru agenta, rozwinięte narzędzia konektora i oba szczegóły
+szablonów. Wszystkie bez małego tekstu/celów, obcięcia tekstu i poziomego
+overflow. Dotyk przez CDP przeszedł kartę, prezentację, profil, potwierdzenie
+usunięcia i anulowanie, cztery wiersze zaplecza oraz żeton komunikatora.
+Nie wykonywano usuwania ani wysyłania. Po zatrzymaniu animacji 12 porównań
+geometrii i stylów sześciu widoków dało identyczne wyniki: desktop bez emulacji
+960 px oraz wariant CSS tabletu bez `is-phone` przy 768 px. Profil U14 również
+zachował geometrię po podmianie arkusza. Nie dodano AVA dla samego CSS ani
+asercji na tekst arkusza. To pomiary emulatora, nie test fizycznego Androida
+lub iOS; dotyk, klawiatura, większa czcionka systemowa i przewijanie pozostają
+do odbioru na urządzeniu. Nowe widoki/klasy kontrolek wymagają ponownego
+pomiaru; szczególnie nie należy współdzielić ich z profilem bez sprawdzenia
+zakresu istniejących reguł U14.

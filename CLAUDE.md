@@ -208,6 +208,10 @@ Tylko na telefonie lista `@` w czacie ma zawijane nazwy i wiersze minimum 44 px,
 
 Na `Platform.isMobile` telefon i tablet pokazują po `selectionchange` menu Cytuj / Dodaj jako kontekst pod zaznaczeniem, z ochroną kliknięcia i geometrią listy z U7; desktop zachowuje trzy akcje, a stałe odstępów i ograniczenia prób opisuje `modules/chat/CLAUDE.md`.
 
+## Mobile M3 U22 - panel agentów
+
+`modules/shell/sidebar/SidebarViews.css` pod `body.is-phone` powiększa tekst i cele dotyku listy agentów, komunikatora oraz zaplecza, zawija długie nazwy i ukrywa nakładane akcje kart dostępne przez prezentację i profil; zakres, pomiary oraz ograniczenia opisuje `modules/shell/CLAUDE.md`.
+
 ## Mobile M2 D1 - samonaprawa stanu po konflikcie gita
 
 Na obu platformach memory scala pełne strony konfliktu `.state.json` po kopii oryginału, a czat tłumaczy nierozwiązywalny błąd; kontrakt odczytu, reguły scalania, zachowane I/O poprawnych plików i testy opisuje `modules/memory/CLAUDE.md`.

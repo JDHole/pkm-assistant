@@ -3265,3 +3265,133 @@ body.is-phone .modal-content.cs-agent-presentation-modal > * { flex-shrink: 0; }
 body.is-phone .cs-profile-content .cs-shard__action ~ .cs-shard__action { right: 52px; }
 /* Wrapped memory entries can exceed the desktop animation's 600px cap. */
 body.is-phone .cs-profile-content .cs-mem-card.open .cs-mem-card__body { max-height: none; }
+
+/* Mobile M3 U22: the agent panel, excluding the U14 profile editor.
+   Keep this scope on every rule: these classes also occur outside the panel. */
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(div, span, p, label, a, button, pre, code, strong, em, small, h5, h6) {
+    font-size: 14px;
+    min-width: 0;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-section-title, .cs-section-title *, .cs-section-head, .cs-section-head *, .cs-agent-card__role, .cs-home-row__count, .cs-comm-home-chip__badge, .cs-comm-chip__badge, .cs-comm-msg__date, .cs-comm-msg__meta, .cs-comm-msg__meta *, .cs-item-card__badge, .cs-item-card__badge *, .cs-zaplecze-tab__count, .cs-trigger-row__badge, .sidebar-category-badge) {
+    font-size: 12px;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(button, input:not([type=hidden]), textarea, select, a, .cs-agent-card, .cs-home-row, .cs-home-section__header--clickable, .cs-comm-home-chip, .cs-comm-chip, .cs-comm-msg__header, .cs-filter-chip, .cs-picker__option, .sidebar-agent-link) {
+    min-height: 44px;
+    height: auto;
+    max-width: 100%;
+    box-sizing: border-box;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(input, textarea, select) {
+    font-size: 16px;
+    min-width: 0;
+}
+
+/* The back button belongs to the current non-profile view, not its ancestors. */
+body.is-phone [data-type="pkm-agent-sidebar"] .agent-sidebar:not(:has(> .sidebar-view-content > .cs-profile__header)) .sidebar-back-btn {
+    min-height: 44px;
+    height: auto;
+    max-width: 100%;
+    font-size: 14px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-agent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Presentation -> edit profile -> delete provides both actions without overlays. */
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-agent-card__actions {
+    display: none;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-agent-card__name, .cs-home-row__left, .cs-comm-home-chip > span, .cs-comm-chip__name, .cs-comm-msg__subject, .cs-trigger-row__desc) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+    max-width: 100%;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-home-section__open, .cs-comm-action-btn, .cs-comm-msg__delete, .cs-template-action) {
+    min-width: 44px;
+    flex-shrink: 0;
+    justify-content: center;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-home-row__count, .cs-comm-home-chip__badge, .cs-comm-chip__badge) {
+    flex-shrink: 0;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-comm-strip, .cs-filter-bar, .cs-comm-header, .cs-comm-header__title, .cs-comm-msg__meta, .cs-trigger-row__top, .sidebar-detail-header-row, .sidebar-detail-row) {
+    flex-wrap: wrap;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-comm-strip, .cs-filter-bar) {
+    overflow-x: visible;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-comm-chip, .cs-filter-chip, .cs-item-card__badge, .cs-template-use, .cs-template-use__btn) {
+    max-width: 100%;
+    box-sizing: border-box;
+    white-space: normal;
+}
+
+/* Date and delete sit below the sender/subject, leaving room for long names. */
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-comm-msg__header {
+    flex-wrap: wrap;
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-comm-msg__info {
+    flex-direction: column;
+    align-items: flex-start;
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-comm-msg__right {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-comm-msg__delete {
+    opacity: 1;
+}
+
+/* Three actual tabs; each label can wrap within its own column. */
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-zaplecze-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-zaplecze-tabs .cs-profile-tab {
+    flex-direction: column;
+    padding: 8px 4px;
+    text-align: center;
+}
+
+/* An in-flow picker cannot cover adjacent actions or overflow the card edge. */
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-template-use:has(> .cs-template-use__menu:not(.cs-collapsed)) {
+    flex-basis: 100%;
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-template-use__menu {
+    position: static;
+    margin-top: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) .cs-picker__option {
+    display: flex;
+    align-items: center;
+}
+
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) :is(.cs-item-card__name, .cs-home-row__left, .cs-comm-header__agent) > svg {
+    flex-shrink: 0;
+}
+body.is-phone [data-type="pkm-agent-sidebar"] .sidebar-view-content:not(:has(> .cs-profile__header)) pre {
+    white-space: pre-wrap;
+}
