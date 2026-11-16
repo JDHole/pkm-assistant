@@ -1,0 +1,9 @@
+[2026-11-16T09:07:34.025Z] [INFO] [Plugin] File-log sink: ON (.pkm-assistant/logs/pkm-assistant.log)
+[2026-11-16T09:07:34.026Z] [INFO] [Plugin] Trace pętli agenta: ON (.pkm-assistant/logs/trace.log)
+[2026-11-16T09:07:34.026Z] [INFO] [Plugin] SkinManager OK: aktywny skin crystal-soul
+[2026-11-16T09:07:34.026Z] [INFO] [Plugin] Embedding provider niewybrany — pokazuję notice.
+[2026-11-16T09:07:34.026Z] [ERROR] [Plugin] AgentManager FAIL: Error: Controlled agents failure | at AgentManager.<anonymous> (/home/user/pkm-assistant/src/main.mobile.test.ts:308:61)
+[2026-11-16T09:07:34.027Z] [INFO] [Plugin] MCP system OK: 25 narzędzi zarejestrowanych
+[2026-11-16T09:07:34.027Z] [INFO] [ServerLoader] Załadowano 8 built-in serwerów MCP
+[2026-11-16T09:07:34.027Z] [INFO] [ServerManager] Initialized: 8 built-in serwerów
+[2026-11-16T09:07:34.030Z] [INFO] [Plugin] === PKM Assistant v2.4.1 GOTOWY ===

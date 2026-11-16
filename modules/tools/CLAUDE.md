@@ -1109,14 +1109,23 @@ Oba porty produkcyjne (`mobileDraftPorts`, `desktopDraftPorts`) przekazują tera
 bez adaptera, Node ani wynoszenia żywych TFile do narzędzi. Rozmiar i mtime bazy
 pochodzą z TFile.stat. Samo składanie portu nie wylicza nawet listy plików.
 
-`draftHostIndex.ts` tworzy lokalną projekcję tylko zmian własnych i zamrożonych
-poprzedników oraz ich rodziców. Zachowuje ambiguous-input, tombstones, kolejność
-starego walkera i techniczne foldery. Po zapisie aktualizuje dotkniętą ścieżkę
-oraz jej rodziców. `getAbstractFileByPath`, `children`, `getRoot`, `getFiles` i
-`getMarkdownFiles` pozostają synchroniczne; pełna enumeracja następuje dopiero
-na żądanie getFiles/getMarkdownFiles, z indeksu w RAM. Jawny search lub rekursywny
-list nadal może przetwarzać szeroki zakres zgodnie z kontraktem tych narzędzi.
-Tworzenie hosta, zwykły read/write oraz odświeżenie nie przechodzą vaulta.
+`draftHostIndex.ts` od F2i odtwarza pełną migawkę w RAM przy utworzeniu hosta
+oraz po każdym udanym write/mkdir. To ten sam porządek co historyczny refresh/walk:
+synchroniczny list/stat z indeksu i resolvedChanges, ambiguous przed plikami,
+potem foldery z zejściem w głąb, na końcu brakujące foldery techniczne w kolejności
+dopisania. Dzieci powstają z kolejności wpisów migawki, bez ukrytych ścieżek.
+Nie ma przyrostowego księgowania rodziców, blokad ani promocji folderów.
+getAbstractFileByPath, children, getRoot, getFiles i getMarkdownFiles czytają tę samą
+migawkę; zmiany indeksu lub innych hostów są widoczne dopiero po odświeżeniu.
+Nieudana operacja nie publikuje nowej migawki. Techniczni rodzice zapamiętani przed
+błędem mkdir trafiają do niej dopiero przy następnym udanym odświeżeniu tego hosta;
+nowy host ma własny pusty zbiór folderów technicznych, jak historyczny kod.
+
+Wariant pełnego przejścia w pamięci wybrano dla zgodności ze starym algorytmem.
+Koszt CPU i RAM rośnie z liczbą wpisów indeksu (dodatkowo sortowanie dzieci folderów);
+praca nad zmianami obejmuje ich przodków. Nie ma I/O adaptera zależnego od rozmiaru
+vaulta, timerów ani cache'u między hostami. Jawny search lub rekursywny list nadal
+może przetwarzać szeroki zakres zgodnie z kontraktem tych narzędzi.
 
 Ukryte ścieżki są poza indeksem. `prepareSubToolExecution` przekazuje requestedPaths
 z argumentów ścieżkowych; host przygotowuje ich stat i rodziców przed synchronicznym
@@ -1130,8 +1139,9 @@ a prywatny magazyn jest odmawiany i pomijany w listingach, także dla administra
 Metadane są wczytywane wyłącznie z metadataFolder, również dla jego ukrytych wpisów.
 Po zapisie odświeża się tylko metadane celu. ArtifactStore.forHost dostaje dodatkowo
 enumerację Markdown ograniczoną do swojego poddrzewa, więc jego wewnętrzny filtr
-nie wymusza enumeracji całego indeksu. Publiczny host narzędzia nadal zwraca pełne
-getMarkdownFiles. Koszt artefaktów jest proporcjonalny do folderu artefaktów.
+nie dodaje kolejnej enumeracji całego indeksu. Publiczny host narzędzia nadal zwraca
+pełne getMarkdownFiles. I/O metadanych artefaktów jest proporcjonalne do ich folderu;
+CPU budowy migawki obejmuje cały widoczny indeks, jak opisano wyżej.
 
 Granica świeżości: Obsidian może jeszcze nie widzieć zewnętrznej zmiany na dysku.
 Dotyczy to synchronicznego istnienia, listingu i metadanych. Treść oraz first-touch
@@ -1158,7 +1168,7 @@ syntetyczną atrapą indeksu w testach; nie zastępuje produkcyjnego składania 
 F2h: projekcja dołącza foldery techniczne po drzewie propozycji, jak dawny refresh.
 Tombstone nadal blokuje potomne propozycje, ale nie techniczne foldery; te zachowują
 kolejność utworzenia także pod tombstone. Nieudane mkdir zachowuje poprzedni widok
-synchroniczny: rodzice są aktualizowani dopiero po walidacji całej operacji i udanej
+synchroniczny: nowa migawka powstaje dopiero po walidacji całej operacji i udanej
 mutacji jawnego folderu. Historyczny adapter może nadal widzieć technicznego rodzica
 zapamiętanego przed odmową mkdir; nie oznacza to opublikowania go w widoku hosta.
 Poprawki dotyczą obu platform, bez dodatkowego I/O ani skanowania vaulta.
@@ -1169,3 +1179,18 @@ i folderu z propozycjami. Oczekiwania odtworzono na pełnym kodzie f5f13b6, łą
 z ówczesnym DraftView.list; testy porównują też obecną ścieżkę bez indeksu.
 `draftFileIndex.test.ts` podaje produkcyjnemu portowi nieprzefiltrowaną atrapę vaulta
 i sprawdza osobno get/files/children, w tym segmenty z kropką i prywatny magazyn.
+
+
+F2i: `draftHostProjection.test.ts` wykonuje 500 deterministycznych sekwencji po
+6-12 operacji, w 20 partiach. Porównuje sukces/kod odmowy, pełne get z dziećmi,
+root, getFiles/getMarkdownFiles i adapter.exists/stat/list po każdej operacji,
+także nieudanej. Sekwencje obejmują zamrożonych poprzedników i niezależną
+niejednoznaczność. Trwałe hosty wykonują identyczne operacje na dwóch równoważnych
+widokach; świeży host i wyrocznia czytają ten sam store, draft ID oraz poprzedników.
+Wyrocznia używa starego walkera bez indeksu i niezależnej kopii listingu f5f13b6
+ze stat per dziecko, więc nie dzieli optymalizacji DraftView.list. Przy błędzie
+asercja podaje ziarno i sekwencję. Pięć literalnych reprodukcji recenzji uruchamia
+obie ścieżki, a osobny test sprawdza granice migawki. Pomiar 20000 plików w 3700
+folderach raportuje czas tworzenia i odświeżenia po mutacji, bez progu czasowego;
+sprawdza 0 operacji adaptera przy tworzeniu i 4 stat całego create z odświeżeniem.
+Liczniki runnera F2g oraz asercje F2g/F2h pozostają bez zmian.

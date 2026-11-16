@@ -66,20 +66,23 @@ export async function createDraftToolHost(view: DraftView, options: {
     };
     if (index) {
         for (const path of options.requestedPaths ?? []) await index.prepareHidden(path);
-        const loadFolderMetadata = async (path: string): Promise<void> => {
+        const metadataPaths: string[] = [];
+        const prepareFolderMetadata = async (path: string): Promise<void> => {
             const listed = await view.list(path);
             for (const child of listed.files) if (child.endsWith('.md')) {
                 await index.prepareHidden(child);
-                await loadMetadata(child);
+                metadataPaths.push(child);
             }
-            for (const child of listed.folders) await loadFolderMetadata(child);
+            for (const child of listed.folders) await prepareFolderMetadata(child);
         };
-        if (options.metadataFolder) await loadFolderMetadata(options.metadataFolder);
+        if (options.metadataFolder) await prepareFolderMetadata(options.metadataFolder);
+        index.refresh();
+        for (const path of metadataPaths) await loadMetadata(path);
     } else await refresh(); // Legacy DI only: no synchronous host index was supplied.
     const refreshPath = async (path: string): Promise<void> => {
         if (!index) return refresh();
-        index.update(path);
         await index.prepareHidden(path);
+        index.refresh();
         await loadMetadata(path);
     };
     const get = (path: string): LocalFile | null => {
@@ -98,16 +101,14 @@ export async function createDraftToolHost(view: DraftView, options: {
         if (!options.writable) denied();
         parseVaultPath(path);
         const segments = path.split('/');
-        const missing: string[] = [];
         for (let i = 1; i <= segments.length; i++) {
             const parent = segments.slice(0, i).join('/'), stat = await view.stat(parent);
             if (stat.kind === 'file') throw new DraftError('invalid-transition', 'Folder collides with file');
-            if (stat.kind === 'missing') { technicalFolders.add(parent); missing.push(parent); }
+            if (stat.kind === 'missing') technicalFolders.add(parent);
         }
         if (path === options.explicitFolderPath && (await view.stat(path)).kind === 'missing')
             await view.mutate(path, options.source, { kind: 'folder' }, 'create');
         // Like legacy refresh, publish the synchronous projection only after mkdir succeeds.
-        for (const parent of missing) index?.update(parent);
         await refreshPath(path);
     };
     const binary = async (path: string): Promise<ArrayBuffer> => (await view.readBinary(path)).slice().buffer;

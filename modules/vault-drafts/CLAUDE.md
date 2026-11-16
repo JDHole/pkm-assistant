@@ -382,8 +382,10 @@ moduł tools z indeksu app.vault na obu platformach. Host bez tego portu zachowu
 historyczne skanowanie jako fallback wyłącznie dla starszego DI.
 
 `resolvedChanges()` buduje jedną projekcję grafu zmian z jednego snapshotu własnej
-kopii i indeksów zamrożonych poprzedników. Host nakłada ją na bazę bez enumeracji
-vaulta; aktualizacja po mutacji dotyczy celu i rodziców. Bliższe warstwy, identyczne
+kopii i indeksów zamrożonych poprzedników. Od F2i host odtwarza z niej i całego
+indeksu bazowego migawkę przez historyczny algorytm list/stat/walk w pamięci,
+bez enumeracji adaptera. Odświeża ją przy utworzeniu i po udanym write/mkdir,
+a błędna operacja zachowuje poprzednią migawkę. Bliższe warstwy, identyczne
 propozycje, niejednoznaczności i tombstones zachowują reguły resolve.
 
 `DraftView.list(folder)` bierze rodzaj bazowych dzieci z portu list, bez stat dla
@@ -406,3 +408,10 @@ Leniwe przygotowanie ukrytych celów i ograniczenie metadanych artefaktów opisu
 Testy offline mierzą liczbę wywołań, nie opóźnienia CapacitorAdapter. Nadal potrzebna
 jest próba pełnej delegacji i przyjęcia na Androidzie oraz kontrola desktopowa
 w rzeczywistym Obsidianie; iOS, ubicie procesu i trwałość adaptera pozostają ograniczeniami F2a.
+
+F2i usuwa przyrostowe księgowanie hosta w tools. CPU/RAM projekcji zależy od
+rozmiaru indeksu, ale liczba wywołań adaptera pozostaje niezależna od niego.
+`tools/draftHostProjection.test.ts` porównuje 500 sekwencji z niezależnym listingiem
+f5f13b6 ze stat per dziecko, również po odmowach i ponownym utworzeniu hosta.
+Pięć literalnych reprodukcji, test granic migawki i pomiar indeksu 20000/3700
+uzupełniają niezmienione liczniki i zachowania F2g/F2h.
