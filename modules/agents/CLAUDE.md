@@ -309,3 +309,27 @@ częściowy błąd pamięci, ta sama wartość błędu zasobów w istniejącym c
 komunikator, pusty reload, jeden watcher i izolacja migawki. Literalny ślad wywołań
 jest jednakowy z odczytywaniem pomiaru i bez niego. Dotychczasowy test startu
 `AgentManager.startup.test.ts` pozostaje bez zmian.
+
+
+### M4 S1b - awaria zegara nie zmienia startu
+
+Każdy odczyt wstrzykniętego zegara oraz zapis pomiaru jest osłonięty przed wyjątkiem.
+Wyjątek, NaN, Infinity lub -Infinity pozostawia nieustawione tylko zależne czasy;
+nie zmienia pamięci, liczników sukcesów/błędów, logów ani wykonania watchera i
+playbooków. Nieskończona różnica dwóch skończonych odczytów również jest odrzucana.
+Brak początku bloku unieważnia wszystkie jego czasy, ale nie kolejne bloki.
+Brak choć jednej próbki udanej pamięci unieważnia całe `memoryMaxMs` do końca
+przebiegu (także usuwa wcześniejsze maksimum), bo częściowe maksimum mogłoby
+zaniżać wynik. Liczniki pamięci pozostają niezależne od pomiaru czasu.
+
+Oba callbacki obserwatorów komunikatora/mapy nie rzucają; pochodna obietnica
+kończy się poprawnie również przy awarii zegara. Promise.all nadal oczekuje na
+oryginalne obietnice, więc błąd inicjalizacji zachowuje tożsamość i dotychczasową
+obsługę. Zmiana obowiązuje obie platformy, jak cała diagnostyka S1a.
+
+Dodatkowe testy w `AgentManager.timings.test.ts` przechodzą przez każdy z 17
+odczytów z wyjątkiem oraz NaN/Infinity/-Infinity: sprawdzają literalne czasy,
+pełny stan pamięci, ślad zależności z watcherem/playbookami, logi i nasłuch
+`unhandledRejection`. Osobne przypadki stale rzucającego zegara sprawdzają
+rzeczywiste błędy pamięci, skilli, komunikatora, mapy, ładowania agentów i playbooków.
+Dotychczasowe asercje S1a pozostają bez zmian.

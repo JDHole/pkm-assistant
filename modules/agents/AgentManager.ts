@@ -151,33 +151,60 @@ export class AgentManager {
         const initStart = Date.now();
         // Capture a per-run object so late parallel completions cannot overwrite a newer run.
         const timings: AgentStartupMetrics = {};
-        this.startupMetrics = timings;
-        const elapsed = (start: number) => Math.max(0, Math.round(this.startupNow() - start));
+        // Diagnostics must never become an initialization failure, including in observers.
+        const record = (update: () => void): void => {
+            try { update(); } catch { /* A failed measurement must not affect startup. */ }
+        };
+        record(() => { this.startupMetrics = timings; });
+        const readNow = (): number | undefined => {
+            try {
+                const value = this.startupNow();
+                return Number.isFinite(value) ? value : undefined;
+            } catch { return undefined; }
+        };
+        let memoryMaxInvalid = false;
+        const measure = (phase: Exclude<keyof AgentStartupMetrics, 'memoryCount' | 'memoryFailed'>, start: number | undefined): void => {
+            record(() => {
+                const end = readNow();
+                const duration = start === undefined || end === undefined ? undefined : end - start;
+                if (duration === undefined || !Number.isFinite(duration)) {
+                    delete timings[phase];
+                    // A maximum over incomplete samples would misleadingly underreport it.
+                    if (phase === 'memoryMaxMs') memoryMaxInvalid = true;
+                    return;
+                }
+                const ms = Math.max(0, Math.round(duration));
+                if (phase === 'memoryMaxMs') {
+                    if (!memoryMaxInvalid) timings.memoryMaxMs = Math.max(timings.memoryMaxMs ?? 0, ms);
+                } else {
+                    timings[phase] = ms;
+                }
+            });
+        };
         log.group('AgentManager', 'initialize()');
         try {
-            const loadStart = this.startupNow();
+            const loadStart = readNow();
             const allAgents = await this.loader.loadAllAgents();
-            timings.loadMs = elapsed(loadStart);
+            measure('loadMs', loadStart);
             log.debug('AgentManager', `Załadowano ${allAgents.length} agentów: ${allAgents.map(a => a.name).join(', ')}`);
 
             // E2: Initialize agent memories in parallel
-            const memoryStart = this.startupNow();
-            timings.memoryCount = 0;
-            timings.memoryFailed = 0;
+            const memoryStart = readNow();
+            record(() => { timings.memoryCount = 0; timings.memoryFailed = 0; });
             await Promise.all(allAgents.map(async (agent) => {
                 try {
                     this.agents.set(agent.name, agent);
                     const memory = await this._initializeMemoryForAgent(agent);
-                    timings.memoryMaxMs = Math.max(timings.memoryMaxMs ?? 0, elapsed(memoryStart));
-                    timings.memoryCount!++;
+                    measure('memoryMaxMs', memoryStart);
+                    record(() => { timings.memoryCount!++; });
                     this.agentMemories.set(agent.name, memory);
                     log.debug('AgentManager', `Pamięć ${agent.name}: OK`);
                 } catch (agentError) {
-                    timings.memoryFailed!++;
+                    record(() => { timings.memoryFailed!++; });
                     log.error('AgentManager', `Błąd inicjalizacji agenta "${agent.name}" — pomijam, reszta się ładuje:`, agentError);
                 }
             }));
-            timings.memoryMs = elapsed(memoryStart);
+            measure('memoryMs', memoryStart);
 
             // Set default active agent (Jaskier or first available)
             // TS-boundary: `settings` is the open plugin settings bag (SettingsBag index signature
@@ -187,11 +214,11 @@ export class AgentManager {
             log.info('AgentManager', `Aktywny agent: ${this.activeAgent?.name || 'BRAK'}`);
 
             // E1: Load independent resources in parallel
-            const resourcesStart = this.startupNow();
+            const resourcesStart = readNow();
             const observeResource = (promise: Promise<void> | undefined, phase: 'komunikatorMs' | 'vaultMapMs') => {
                 // Observe completion without replacing the promise awaited by the existing block.
                 // Its rejection still reaches Promise.all and the original catch unchanged.
-                void promise?.then(() => { timings[phase] = elapsed(resourcesStart); }, () => {});
+                void promise?.then(() => { measure(phase, resourcesStart); }, () => {});
                 return promise;
             };
             await Promise.all([
@@ -200,13 +227,13 @@ export class AgentManager {
                     // to, co user sam ma na dysku (znosi brak folderu, patrz SkillLoader.loadAllSkills).
                     await this.skillLoader.loadAllSkills();
                     log.debug('AgentManager', `Skills: ${this.skillLoader.cache?.size || 0} załadowanych`);
-                    timings.skillsMs = elapsed(resourcesStart);
+                    measure('skillsMs', resourcesStart);
                 })(),
                 (async () => {
                     await this.subAgentLoader.ensureStarterSubAgents();
                     await this.subAgentLoader.loadAllSubAgents();
                     log.debug('AgentManager', `Sub-agents: ${this.subAgentLoader.cache?.size || 0} załadowanych`);
-                    timings.subAgentsMs = elapsed(resourcesStart);
+                    measure('subAgentsMs', resourcesStart);
                 })(),
                 // Po loadAll seed fabrycznych szablonów Deep Research (RAZ, marker;
                 // kasacja usera szanowana - patrz factoryTemplates.js).
@@ -219,19 +246,19 @@ export class AgentManager {
                         subAgentTemplateStore: this.subAgentTemplateStore,
                     });
                     log.debug('AgentManager', `Szablony: ${this.skillTemplateStore.count()} skilli / ${this.subAgentTemplateStore.count()} subów`);
-                    timings.templatesMs = elapsed(resourcesStart);
+                    measure('templatesMs', resourcesStart);
                 })(),
                 (async () => {
                     // Brak pola oznacza default UI, nie zgodę na przepisanie wspólnych typów.
                     await this.artifactTypeLoader.ensureBuiltinTypes(this.settings.pkmAssistant?.language);
                     await this.artifactTypeLoader.loadAllTypes();
                     log.debug('AgentManager', `Artifact types: ${this.artifactTypeLoader.cache?.size || 0} załadowanych`);
-                    timings.artifactTypesMs = elapsed(resourcesStart);
+                    measure('artifactTypesMs', resourcesStart);
                 })(),
                 observeResource(this.komunikatorManager?.ensureFolder(), 'komunikatorMs'),
                 observeResource(this.vaultMap.initialize(), 'vaultMapMs'),
             ]);
-            timings.resourcesMs = elapsed(resourcesStart);
+            measure('resourcesMs', resourcesStart);
 
             if (!this._unwatchAgents) {
                 // emit `agents:changed` skasowany - grep po calym repo (core/modules/src/config/
@@ -246,9 +273,9 @@ export class AgentManager {
             // TS-boundary: Agent.focusFolders (AgentFocusFolder - path/access/group all optional
             // on one shape) vs VaultMapFocusFolder (string | {path,access} | {group}, path
             // required in the object branch) - same runtime entries, stricter union on this side.
-            const playbooksStart = this.startupNow();
+            const playbooksStart = readNow();
             await this.playbookManager.ensureStarterFiles(allAgents as VaultMapAgent[]);
-            timings.playbooksMs = elapsed(playbooksStart);
+            measure('playbooksMs', playbooksStart);
 
             this._emit('agents:loaded', { count: this.agents.size });
 

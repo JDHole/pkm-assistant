@@ -13,8 +13,9 @@ export async function load(url, context, next) {
 }`));
 const { AgentManager } = await import('./AgentManager.js');
 
-function fixture(options: { memoryFailure?: boolean; resourceFailure?: 'skills' | 'komunikator' | 'vault-map'; communicator?: boolean; observe?: boolean } = {}) {
+function fixture(options: { memoryFailure?: boolean; resourceFailure?: 'skills' | 'komunikator' | 'vault-map'; communicator?: boolean; observe?: boolean; clock?: (now: number, call: number) => number } = {}) {
     let now = 100;
+    let clockCalls = 0;
     const trace: string[] = [];
     const pending: Array<{ at: number; finish(): void }> = [];
     const failure = new Error('Synthetic startup failure');
@@ -31,7 +32,10 @@ function fixture(options: { memoryFailure?: boolean; resourceFailure?: 'skills' 
         remove: async () => {}, rmdir: async () => {},
         list: async () => ({ files: [], folders: [] }),
     } };
-    const manager = new AgentManager(vault, { pkmAssistant: { komunikatorEnabled: options.communicator !== false } }, null, null, () => now);
+    const manager = new AgentManager(vault, { pkmAssistant: { komunikatorEnabled: options.communicator !== false } }, null, null, () => {
+        clockCalls++;
+        return options.clock ? options.clock(now, clockCalls) : now;
+    });
     const agents = [new Agent({ name: 'Tester A' }), new Agent({ name: 'Tester B' }), new Agent({ name: 'Tester C' })];
     const memories = agents.map(agent => new AgentMemory(vault, agent.name, {}));
     manager.loader.loadAllAgents = () => delay('load', 10, agents);
@@ -62,7 +66,7 @@ function fixture(options: { memoryFailure?: boolean; resourceFailure?: 'skills' 
             if (options.observe) void manager.startupTimings;
         }
     };
-    return { manager, trace, failure, drain, pending };
+    return { manager, trace, failure, drain, pending, memories, clockCalls: () => clockCalls };
 }
 
 const complete = {
@@ -154,3 +158,114 @@ test('disabled communicator stays absent while other resources complete', async 
     });
     t.deepEqual(f.trace, expectedTrace.filter(item => !item.startsWith('komunikator')));
 });
+
+// Literal dependency map for the 17 clock reads in this controlled startup.
+const missingByRead: Array<Array<keyof typeof complete>> = [
+    ['loadMs'], ['loadMs'], ['memoryMs', 'memoryMaxMs'],
+    ['memoryMaxMs'], ['memoryMaxMs'], ['memoryMaxMs'], ['memoryMs'],
+    ['resourcesMs', 'skillsMs', 'subAgentsMs', 'templatesMs', 'artifactTypesMs', 'komunikatorMs', 'vaultMapMs'],
+    ['komunikatorMs'], ['vaultMapMs'], ['skillsMs'], ['artifactTypesMs'],
+    ['subAgentsMs'], ['templatesMs'], ['resourcesMs'], ['playbooksMs'], ['playbooksMs'],
+];
+
+for (const fault of ['throw', 'NaN', 'Infinity', '-Infinity'] as const) {
+    test.serial(`${fault} at every clock read only removes dependent timings`, async t => {
+        const logs: unknown[][] = [];
+        const logMocks = (['group', 'debug', 'info', 'warn', 'error', 'timing', 'groupEnd'] as const).map(level =>
+            mock.method(log, level, (...args: unknown[]) => {
+                // Date.now-based total is deliberately outside the injected sub-stage clock.
+                logs.push([level, ...(level === 'timing' ? args.slice(0, 2) : args)]);
+            }));
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+        process.on('unhandledRejection', onUnhandled);
+        t.teardown(() => {
+            process.off('unhandledRejection', onUnhandled);
+            for (const logger of logMocks) logger.mock.restore();
+        });
+        for (let failedRead = 0; failedRead <= missingByRead.length; failedRead++) {
+            logs.length = 0;
+            const f = fixture({ clock: (now, call) => {
+                if (call !== failedRead) return now;
+                if (fault === 'throw') throw new Error('Synthetic clock failure');
+                return Number(fault);
+            } });
+            const initializing = f.manager.initialize();
+            await f.drain(); await initializing; await setImmediate();
+            const expected: Partial<typeof complete> = { ...complete };
+            for (const key of missingByRead[failedRead - 1] ?? []) delete expected[key];
+            t.deepEqual(f.manager.startupTimings, expected, `clock read ${failedRead}`);
+            t.is(f.clockCalls(), 17);
+            t.deepEqual(f.trace, expectedTrace);
+            t.deepEqual([...f.manager.agentMemories].map(([name, memory]) => [name, memory.agentName]), [
+                ['Tester A', 'Tester A'], ['Tester C', 'Tester C'], ['Tester B', 'Tester B'],
+            ]);
+            for (const memory of f.memories) t.is(f.manager.getAgentMemory(memory.agentName), memory);
+            t.deepEqual(f.manager.getAllAgents().map(agent => agent.name), ['Tester A', 'Tester B', 'Tester C']);
+            t.is(f.manager.getActiveAgent()?.name, 'Tester A');
+            t.deepEqual(logs, [
+                ['group', 'AgentManager', 'initialize()'],
+                ['debug', 'AgentManager', 'Załadowano 3 agentów: Tester A, Tester B, Tester C'],
+                ['debug', 'AgentManager', 'Pamięć Tester A: OK'],
+                ['debug', 'AgentManager', 'Pamięć Tester C: OK'],
+                ['debug', 'AgentManager', 'Pamięć Tester B: OK'],
+                ['info', 'AgentManager', 'Aktywny agent: Tester A'],
+                ['debug', 'AgentManager', 'Skills: 0 załadowanych'],
+                ['debug', 'AgentManager', 'Artifact types: 0 załadowanych'],
+                ['debug', 'AgentManager', 'Sub-agents: 0 załadowanych'],
+                ['debug', 'AgentManager', 'Szablony: 0 skilli / 0 subów'],
+                ['timing', 'AgentManager', 'initialize()'], ['groupEnd'],
+            ]);
+            t.deepEqual(unhandled, []);
+        }
+    });
+}
+
+for (const resource of ['skills', 'komunikator', 'vault-map'] as const) {
+    test.serial(`broken clock preserves the original ${resource} rejection`, async t => {
+        const logger = mock.method(log, 'error', () => {});
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+        process.on('unhandledRejection', onUnhandled);
+        t.teardown(() => { logger.mock.restore(); process.off('unhandledRejection', onUnhandled); });
+        const f = fixture({ resourceFailure: resource, clock: () => { throw new Error('Synthetic clock failure'); } });
+        const initializing = f.manager.initialize();
+        await f.drain(); await initializing; await setImmediate();
+        t.deepEqual(f.manager.startupTimings, { memoryCount: 3, memoryFailed: 0 });
+        t.deepEqual(logger.mock.calls.map(call => call.arguments), [['AgentManager', 'Initialization FAIL:', f.failure]]);
+        t.is(logger.mock.calls[0].arguments[2], f.failure);
+        t.deepEqual(f.trace, expectedTrace.slice(0, -4).map(item => item === `${resource}:done` ? `${resource}:failed` : item));
+        t.deepEqual([...f.manager.agentMemories.keys()], ['Tester A', 'Tester C', 'Tester B']);
+        t.deepEqual(unhandled, []);
+    });
+}
+
+test.serial('broken clock preserves real memory failures and successful memories', async t => {
+    const logger = mock.method(log, 'error', () => {});
+    t.teardown(() => logger.mock.restore());
+    const f = fixture({ memoryFailure: true, clock: () => { throw new Error('Synthetic clock failure'); } });
+    const initializing = f.manager.initialize();
+    await f.drain(); await initializing;
+    t.deepEqual(f.manager.startupTimings, { memoryCount: 2, memoryFailed: 1 });
+    t.deepEqual([...f.manager.agentMemories.keys()], ['Tester A', 'Tester B']);
+    t.is(logger.mock.calls.length, 1);
+    t.is(logger.mock.calls[0].arguments[2], f.failure);
+    t.deepEqual(f.trace, expectedTrace.map(item => item === 'memory-2:done' ? 'memory-2:failed' : item));
+});
+
+for (const stage of ['load', 'playbooks'] as const) {
+    test.serial(`broken clock preserves the original ${stage} exception`, async t => {
+        const logger = mock.method(log, 'error', () => {});
+        t.teardown(() => logger.mock.restore());
+        const f = fixture({ clock: () => { throw new Error('Synthetic clock failure'); } });
+        const fail = () => { f.trace.push(`${stage}:failed`); throw f.failure; };
+        if (stage === 'load') f.manager.loader.loadAllAgents = fail;
+        else f.manager.playbookManager.ensureStarterFiles = fail;
+        const initializing = f.manager.initialize();
+        await f.drain(); await initializing;
+        t.deepEqual(logger.mock.calls.map(call => call.arguments), [['AgentManager', 'Initialization FAIL:', f.failure]]);
+        t.is(logger.mock.calls[0].arguments[2], f.failure);
+        t.deepEqual(f.manager.startupTimings, stage === 'load' ? {} : { memoryCount: 3, memoryFailed: 0 });
+        t.deepEqual(f.trace, stage === 'load' ? ['load:failed'] : [...expectedTrace.slice(0, -3), 'playbooks:failed']);
+    });
+}
