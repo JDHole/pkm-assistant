@@ -1597,7 +1597,7 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
   dotyczą wyłącznie TREŚCI, nie etykiet. Jedyny WŁASNY `user-select: none` w CSS czatu sprzed
   tej zmiany siedzi na `.cs-action-row__head` (rodzina martwa od A2, patrz sekcja "Kafelki Tile
   w streamie i w historii" wyżej) - nietknięty.
-- **Menu na zaznaczeniu** (`chat/selectionMenu.ts`, nowy plik): nasłuch `mouseup` i `keyup`
+- **Menu na zaznaczeniu na desktopie** (`chat/selectionMenu.ts`): nasłuch `mouseup` i `keyup`
   (Shift+strzałki) na `messages_container`; gdy `window.getSelection()` jest niepuste i
   zakotwiczone wewnątrz `.cs-message__text` lub `.cs-tile__body` - pokazuje `div.cs-selection-menu`
   (`position: absolute` w `messages_container`, nad ostatnim `range` przez
@@ -1619,7 +1619,7 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
     `chat/selectionMenu.test.ts` na lokalnej atrapie elementów i zaznaczenia.
 - **Montaż w `renderView`, odpięcie w `onClose` (`chat_view.ts`).** `chat_ui.ts`'s
   `renderView` woła `this._selectionMenuDetach?.(); this._selectionMenuDetach =
-  installSelectionMenu(this);` - odpina POPRZEDNI egzemplarz przed montażem nowego (`renderView`
+  installSelectionMenu(this, { isMobile: Platform.isMobile });` - odpina POPRZEDNI egzemplarz przed montażem nowego (`renderView`
   potrafi się powtórzyć w cyklu życia jednego widoku, patrz wołacze w `chat_view.ts`, a
   `messages_container` powstaje na nowo za każdym razem - bez tego odpięcia nasłuchy na
   `document` by się mnożyły przy każdym kolejnym renderze). Pole `_selectionMenuDetach`
@@ -2163,8 +2163,7 @@ godzinę (może zawinąć tekst) i ikonę cache przy szerokości szuflady 300 px
 `_renderUserText` nadal tworzy bezpieczne węzły tekstowe
 wewnątrz `p`, z osobnymi badge'ami wzmianek. Telefon zachowuje LF przez `pre-wrap`;
 desktopowe Shift+Enter nadal zapisuje LF, lecz zwykły dymek wizualnie skleja linie.
-Menu cytatu nadal nasłuchuje wyłącznie `mouseup`/`keyup`. `selectionchange`/`touchend`
-i współpracę z natywnym menu Androida zostawiono następnej paczce zgodnie z zakresem U1.
+U20 dodaje mobilne `selectionchange` dla menu cytatu; desktop zachowuje `mouseup`/`keyup`.
 
 Testy TS: `chat/chat_ui.mobile.test.ts` (etykiety PL/EN i DOM trzech platform,
 wysyłka wielolinijkowa, rezerwa desktop/tablet i przejście na telefon).
@@ -2499,3 +2498,56 @@ Osiem testów D7b w `chat_streaming.sendTab.test.ts` wykonuje produkcyjne restor
 edycję i kliknięcie wysyłki: PL/EN, jawne/legacy ID, naprawa teraz/wcześniej przez
 osobny adapter. Sprawdzają tekst komunikatu, zachowane obce wiadomości, szkic i okno,
 brak wywołania modelu przy odmowie oraz skuteczną ponowną edycję po otwarciu.
+
+## Mobile M3 U20 - menu zaznaczenia na dotyk
+
+`chat_ui.ts` przekazuje `Platform.isMobile` do `installSelectionMenu`; telefon i tablet
+używają jednej ścieżki `document.selectionchange`, bez mobilnych `mouseup`/`keyup`.
+Opcjonalny port timera pozwala testować 250 ms uspokojenia bez czekania. Zaznaczenie
+musi należeć do treści `.cs-message__text` / `.cs-tile__body` tego kontenera;
+nasłuch dokumentu nie przejmuje zaznaczeń z innego widoku. Pusty tekst, nagłówki
+oraz zaznaczenia całkiem poza widoczną listą nie pokazują menu.
+
+Czysta `mobileSelectionPosition` używa ostatniego prostokąta `getClientRects()`
+i `MOBILE_HANDLE_GAP = 28` px pod zaznaczeniem. Przy braku miejsca wybiera pierwszy
+prostokąt i `MOBILE_TOOLBAR_GAP = 64` px nad nim. To przybliżenia do sprawdzenia
+na urządzeniu, nie pomiar systemowego paska. Pozycja jest ograniczona do listy;
+przy braku miejsca również nad zaznaczeniem priorytet ma dostępność menu w liście,
+więc odstęp może być mniejszy. Szerokość i wysokość menu są ograniczone przed
+pomiarem: CSS zawija przyciski i udostępnia pionowe przewijanie w małym obszarze.
+Geometria listy już uwzględnia U7, bez drugiego pomiaru klawiatury. Dodatkowe
+przecięcie z górą panelu pola chroni tablet, który nadal ma panel absolutny.
+
+Mobile pokazuje kolejno istniejące etykiety i18n Cytuj / Dodaj jako kontekst,
+bez Kopiuj. Reguły `body.is-mobile .pkm-chat-view` dają przyciskom minimum
+44 px wysokości i 14 px tekstu; bazowe reguły desktopowe pozostają niezmienione.
+Każdy przycisk przechowuje tekst z chwili pokazania menu. `pointerdown` i `mousedown`
+na menu wywołują `preventDefault`, żeby nie przenosić fokusu. `touchstart` tylko
+blokuje usunięcie menu (passive), ponieważ anulowanie tego zdarzenia może usunąć
+późniejszy `click`. Uspokojenie pustego `selectionchange` podczas naciśnięcia
+nie usuwa przycisku przed akcją. Kliknięcie wykonuje dotychczasową akcję i czyści
+menu oraz zaznaczenie; anulowanie gestu, puszczenie poza menu lub nowe naciśnięcie
+poza nim zwalnia blokadę. Scroll chowa menu od razu i ponawia ocenę po 250 ms.
+Escape anuluje oczekującą ocenę. Odpięcie usuwa nasłuchy dokumentu/kontenera,
+kasuje timery obu platform i blokuje spóźnione callbacki przed odczytem DOM.
+Cykl `_selectionMenuDetach` w renderze i zamknięciu pozostaje bez zmian.
+
+`chat/selectionMenu.mobile.test.ts`: 19 testów na syntetycznym DOM i zegarze.
+Cztery testy geometrii sprawdzają literalne pozycje pod/nad, obie krawędzie,
+wieloliniowość i niski obszar. PL/EN sprawdzają debounce i dokładnie dwa przyciski;
+desktop sprawdza brak reakcji na selectionchange, trzy etykiety, pozycję oraz
+mysz/klawiaturę/scroll. Pozostałe sprawdzają zakres zaznaczenia, sześć kombinacji
+naciśnięcia i akcji po utracie zaznaczenia, powrót po scrollu, panel tabletu
+oraz wysokość listy U7, anulowanie gestu/Escape i sprzątanie na obu platformach.
+Istniejące 10 testów menu pozostaje bez zmian asercji.
+
+Pomiar U20 w Chromium 153: produkcyjny kontroler menu i CSS, syntetyczna obudowa
+czatu, PL/EN przy 360x804, 412x880 i 768x804. Sześć wariantów mobile mieści menu
+w liście ponad panelem, z odstępami 28 px pod / 64 px nad i przyciskami 44 px,
+tekstem 14 px; rzeczywiste zdarzenia dotyku Chromium wykonują cytat i kontekst.
+Sześć par desktop przed/po ma identyczne etykiety i geometrię. To próba komponentu,
+bez uruchomienia całego Obsidiana ani natywnego paska zaznaczenia.
+
+Ograniczenia: atrapa AVA nie mierzy CSS ani natywnej kolejności zdarzeń.
+Rzeczywista kolejność dotyku w Android WebView, pozycja paska systemu i możliwe
+nakładanie oraz działanie z otwartą klawiaturą ekranową wymagają fizycznego telefonu.

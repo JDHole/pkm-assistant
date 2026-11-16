@@ -3930,6 +3930,24 @@ span.cs-note-link {
   background: var(--background-modifier-hover);
 }
 
+/* U20: phone and tablet; width/height limits come from the visible message list. */
+body.is-mobile .pkm-chat-view .cs-selection-menu {
+  box-sizing: border-box;
+  width: max-content;
+  flex-wrap: wrap;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+body.is-mobile .pkm-chat-view .cs-selection-menu__btn {
+  min-height: 44px;
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 14px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* 2.4.5: parent conversation, shared by tiles and the sub-agent strip. */
 .cs-parent-conversation__badge {
     flex-shrink: 0;

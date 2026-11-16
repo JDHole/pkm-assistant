@@ -152,7 +152,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // razem, więc bez tego nasłuchy na `document` (klik poza / Escape) by się mnożyły. Pełne
     // sprzątanie w `onClose` - patrz gotcha "Sprzątanie" w `selectionMenu.ts`.
     this._selectionMenuDetach?.();
-    this._selectionMenuDetach = installSelectionMenu(this);
+    this._selectionMenuDetach = installSelectionMenu(this, { isMobile: Platform.isMobile });
 
     // ── SLIM BAR (right side, 66px) ──
     this._slimBar = chatBody.createDiv({ cls: 'cs-skillbar cs-root' });

@@ -204,6 +204,10 @@ Na `Platform.isMobile` popup `/` otwiera się także z tekstowego `input` (w tym
 
 Tylko na telefonie lista `@` w czacie ma zawijane nazwy i wiersze minimum 44 px, a nagłówek `/` pomija klawisze; zakres CSS, zachowany limit U7 i testy opisuje `modules/chat/CLAUDE.md`.
 
+## Mobile M3 U20 - menu zaznaczenia na dotyk
+
+Na `Platform.isMobile` telefon i tablet pokazują po `selectionchange` menu Cytuj / Dodaj jako kontekst pod zaznaczeniem, z ochroną kliknięcia i geometrią listy z U7; desktop zachowuje trzy akcje, a stałe odstępów i ograniczenia prób opisuje `modules/chat/CLAUDE.md`.
+
 ## Mobile M2 D1 - samonaprawa stanu po konflikcie gita
 
 Na obu platformach memory scala pełne strony konfliktu `.state.json` po kopii oryginału, a czat tłumaczy nierozwiązywalny błąd; kontrakt odczytu, reguły scalania, zachowane I/O poprawnych plików i testy opisuje `modules/memory/CLAUDE.md`.

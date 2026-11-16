@@ -30,6 +30,39 @@ import type { ChatViewLike } from './chatViewShape.js';
 /** Elementy, wewnątrz których zaznaczenie ma pokazać menu (treść, nie nagłówki). */
 const SELECTABLE_SELECTOR = '.cs-message__text, .cs-tile__body';
 
+// Przybliżenia: uchwyty zaznaczenia i natywny pasek wymagają pomiaru na urządzeniu.
+const MOBILE_HANDLE_GAP = 28;
+const MOBILE_TOOLBAR_GAP = 64;
+const MOBILE_SETTLE_MS = 250;
+type SelectionRect = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>;
+
+/** Viewport coordinates; the caller limits menu size to the visible area first. */
+export function mobileSelectionPosition(
+    rects: readonly SelectionRect[], area: SelectionRect, menu: Pick<DOMRect, 'width' | 'height'>,
+): { left: number; top: number; side: 'below' | 'above' } | null {
+    const first = rects[0], last = rects[rects.length - 1];
+    if (!first || !last) return null;
+    const below = last.bottom + MOBILE_HANDLE_GAP;
+    const side = below + menu.height <= area.bottom ? 'below' : 'above';
+    const anchor = side === 'below' ? last : first;
+    return {
+        left: Math.max(area.left, Math.min(anchor.left, area.right - menu.width)),
+        top: Math.max(area.top, Math.min(
+            side === 'below' ? below : first.top - MOBILE_TOOLBAR_GAP - menu.height,
+            area.bottom - menu.height,
+        )),
+        side,
+    };
+}
+
+interface SelectionMenuOptions {
+    isMobile?: boolean;
+    timer?: {
+        setTimeout: (callback: () => void, delay: number) => number;
+        clearTimeout: (id: number) => void;
+    };
+}
+
 /**
  * Cytat markdown: każda linia zaznaczenia dostaje prefiks `> `, na końcu jedna pusta linia
  * (miejsce na dopisanie własnego komentarza usera nad cytatem po wstawieniu do pola).
@@ -95,11 +128,32 @@ function isInsideSelectable(node: Node | null, boundary: HTMLElement): boolean {
  * @returns funkcja odpinająca wszystkie nasłuchy zamontowane tym wywołaniem - patrz gotcha
  *   "Sprzątanie" w nagłówku pliku.
  */
-export function installSelectionMenu(view: ChatViewLike): () => void {
+export function installSelectionMenu(view: ChatViewLike, options: SelectionMenuOptions = {}): () => void {
     const container = view.messages_container;
+    const isMobile = options.isMobile ?? false;
+    const timer = options.timer ?? window;
     let menuEl: HTMLDivElement | null = null;
+    let disposed = false;
+    let pressingMenu = false;
+    let settleTimer: number | null = null;
+    const mouseTimers = new Set<number>();
+
+    function cancelSettle(): void {
+        if (settleTimer !== null) timer.clearTimeout(settleTimer);
+        settleTimer = null;
+    }
+
+    function settleSelection(): void {
+        cancelSettle();
+        if (disposed) return;
+        settleTimer = timer.setTimeout(() => {
+            settleTimer = null;
+            if (!disposed && !pressingMenu) showMenu();
+        }, MOBILE_SETTLE_MS);
+    }
 
     function removeMenu(): void {
+        pressingMenu = false;
         if (!menuEl) return;
         menuEl.remove();
         menuEl = null;
@@ -112,11 +166,14 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
         const text = sel.toString();
         if (!text.trim()) return null;
         const range = sel.getRangeAt(0);
+        // Mobile listens on document: another chat view must not adopt this selection.
+        if (isMobile && !container.contains(range.commonAncestorContainer)) return null;
         if (!isInsideSelectable(range.commonAncestorContainer, container)) return null;
         return { text, range };
     }
 
     function afterAction(): void {
+        if (isMobile) cancelSettle();
         removeMenu();
         window.getSelection?.()?.removeAllRanges();
     }
@@ -158,9 +215,15 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
     }
 
     function showMenu(): void {
+        if (disposed) return;
         const found = readSelection();
         removeMenu();
         if (!found) return;
+
+        if (isMobile) {
+            showMobileMenu(found);
+            return;
+        }
 
         const rect = found.range.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
@@ -177,10 +240,52 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
         menuEl = menu;
     }
 
+    function showMobileMenu(found: { text: string; range: Range }): void {
+        const rects = Array.from(found.range.getClientRects());
+        const bounds = container.getBoundingClientRect();
+        // U7 already shrinks the phone list above the keyboard. Tablets retain an
+        // absolute input panel, so intersect with its top as well; no keyboard probe.
+        const panel = view.input_area.closest('.cs-input-panel');
+        const area = {
+            left: bounds.left + container.clientLeft,
+            right: bounds.left + container.clientLeft + container.clientWidth,
+            top: bounds.top + container.clientTop,
+            bottom: Math.min(bounds.top + container.clientTop + container.clientHeight,
+                panel?.getBoundingClientRect().top ?? bounds.bottom),
+        };
+        if (area.right <= area.left || area.bottom <= area.top || !rects.some(rect =>
+            rect.bottom > area.top && rect.top < area.bottom && rect.right > area.left && rect.left < area.right)) return;
+
+        const menu = createDiv({ cls: 'cs-selection-menu' });
+        menu.style.maxWidth = `${area.right - area.left}px`;
+        menu.style.maxHeight = `${area.bottom - area.top}px`;
+        menu.style.left = `${container.scrollLeft}px`;
+        menu.style.top = `${container.scrollTop}px`;
+        menu.appendChild(buildButton('chat.selection.quote', handleQuote, found.text));
+        menu.appendChild(buildButton('chat.selection.context', handleAddContext, found.text));
+        // Pointer/mouse defaults move focus. Cancelling touchstart can suppress click,
+        // so touchstart only locks the snapshot; pointerdown/mousedown prevent focus.
+        const press = (event: Event) => {
+            pressingMenu = true;
+            cancelSettle();
+            if (event.type !== 'touchstart') event.preventDefault();
+        };
+        menu.addEventListener('pointerdown', press);
+        menu.addEventListener('mousedown', press);
+        menu.addEventListener('touchstart', press, { passive: true });
+        container.appendChild(menu);
+        menuEl = menu;
+        const position = mobileSelectionPosition(rects, area, menu.getBoundingClientRect());
+        if (!position) { removeMenu(); return; }
+        menu.style.left = `${position.left - area.left + container.scrollLeft}px`;
+        menu.style.top = `${position.top - area.top + container.scrollTop}px`;
+    }
+
     function onMouseUp(): void {
         // `window.getSelection()` w `mouseup` bywa jeszcze niezaktualizowany w części
         // przeglądarek - jedna mikro/makro-tura kolejki wystarcza, bez sztucznego czekania.
-        window.setTimeout(showMenu, 0);
+        const id = timer.setTimeout(() => { mouseTimers.delete(id); showMenu(); }, 0);
+        mouseTimers.add(id);
     }
 
     function onKeyUp(e: KeyboardEvent): void {
@@ -192,19 +297,48 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
         if (!menuEl) return;
         const target = e.target as Node | null;
         if (target && menuEl.contains(target)) return;
+        if (isMobile) cancelSettle();
         removeMenu();
     }
 
     function onDocKeyDown(e: KeyboardEvent): void {
-        if (e.key === 'Escape') removeMenu();
+        if (e.key === 'Escape') {
+            if (isMobile) cancelSettle();
+            removeMenu();
+        }
+    }
+
+    function onMobilePress(e: Event): void {
+        if (menuEl && e.target instanceof Node && menuEl.contains(e.target)) return;
+        cancelSettle();
+        removeMenu();
+    }
+
+    function onMobileCancel(): void {
+        pressingMenu = false;
+        settleSelection();
+    }
+
+    function onMobileRelease(e: Event): void {
+        if (pressingMenu && !(e.target instanceof Node && menuEl?.contains(e.target))) onMobileCancel();
     }
 
     function onContainerScroll(): void {
         removeMenu();
+        if (isMobile) settleSelection();
     }
 
-    container.addEventListener('mouseup', onMouseUp);
-    container.addEventListener('keyup', onKeyUp);
+    if (isMobile) {
+        document.addEventListener('selectionchange', settleSelection);
+        document.addEventListener('pointerdown', onMobilePress, true);
+        document.addEventListener('touchstart', onMobilePress, true);
+        document.addEventListener('pointerup', onMobileRelease);
+        document.addEventListener('pointercancel', onMobileCancel);
+        document.addEventListener('touchcancel', onMobileCancel);
+    } else {
+        container.addEventListener('mouseup', onMouseUp);
+        container.addEventListener('keyup', onKeyUp);
+    }
     // Capture na `document`: musi zdążyć ocenić klik PRZED tym, jak menu ewentualnie zniknie
     // z innego powodu (np. `blur` pola tekstowego wywołany tym samym klikiem).
     document.addEventListener('mousedown', onDocMouseDown, true);
@@ -212,7 +346,17 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
     container.addEventListener('scroll', onContainerScroll);
 
     return function uninstallSelectionMenu(): void {
+        disposed = true;
+        cancelSettle();
+        for (const id of mouseTimers) timer.clearTimeout(id);
+        mouseTimers.clear();
         removeMenu();
+        document.removeEventListener('selectionchange', settleSelection);
+        document.removeEventListener('pointerdown', onMobilePress, true);
+        document.removeEventListener('touchstart', onMobilePress, true);
+        document.removeEventListener('pointerup', onMobileRelease);
+        document.removeEventListener('pointercancel', onMobileCancel);
+        document.removeEventListener('touchcancel', onMobileCancel);
         container.removeEventListener('mouseup', onMouseUp);
         container.removeEventListener('keyup', onKeyUp);
         document.removeEventListener('mousedown', onDocMouseDown, true);
