@@ -48,3 +48,6 @@ audyt/biegi/*/surowe/
 
 # Prywatna, polska wersja CLAUDE.md dla właściciela - publiczny CLAUDE.md w repo jest po angielsku, dla obcych kontrybutorów i ich agentów.
 CLAUDE.local.md
+
+# Katalogi tymczasowe testu src/main.mobile.test.ts (mkdtemp w korzeniu repo); nigdy do commita.
+.mobile-test-*/
