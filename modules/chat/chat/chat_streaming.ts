@@ -21,7 +21,7 @@ import { asToolMedia, mediaTextPart, toToolMessageContent } from '../../tools/in
 import { log } from '../../../core/utils/Logger.js';
 // Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
 // (tę samą czyta MCPClient przy normalizacji i runner subów).
-import { probeFile, countTokens, getTokenCount, calibrate, StreamWatchdog, resolveMessageOrigin, toolResultStatus, shouldLinkWrittenFile } from '../../../core/index.js';
+import { messageTime, probeFile, countTokens, getTokenCount, calibrate, StreamWatchdog, resolveMessageOrigin, toolResultStatus, shouldLinkWrittenFile } from '../../../core/index.js';
 import {
     createCompactToolChip,
     createToolCallDisplay,
@@ -298,7 +298,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const isHuman = messageOrigin === 'human';
     const turnKind = messageOrigin === 'human' ? 'user' : 'machine';
     const rawMeta = opts?.meta && typeof opts.meta === 'object' ? opts.meta : {};
-    const messageMeta = { ...rawMeta, origin: messageOrigin };
+    const messageMeta = { ...rawMeta, origin: messageOrigin, messageTime: messageTime() };
 
     const rawText = isInjected ? injectedText : this.input_area.value.trim();
     // Markery `@@skill:` parsujemy TYLKO w tekście od człowieka - treść artefaktu, `context_summary`
@@ -589,7 +589,11 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // Nie ma sekcji trybu w promptcie - workMode nie istnieje.
         // Drugi argument = agent-WŁAŚCICIEL. Bez niego prompt składałby się z persony i pamięci
         // agenta, który akurat jest na wierzchu.
+        if (rw.mobileEnvironment === undefined) {
+            rw.mobileEnvironment = agentManager.getMobileEnvironment?.() ?? null;
+        }
         const basePrompt = await agentManager.getActiveSystemPromptWithMemory({
+            mobileEnvironment: rw.mobileEnvironment ?? undefined,
             isLocalModel,
             // Aktywny artefakt tej rozmowy (per-tab) → świeży chudy JSON w prompcie.
             activeArtifactId: owner.artifactId as string | undefined,

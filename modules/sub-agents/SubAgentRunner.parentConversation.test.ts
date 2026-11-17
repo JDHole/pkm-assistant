@@ -28,7 +28,7 @@ for (const fallback of [false, true]) {
         const plugin = { subTaskRegistry: registry, agentManager: { getAgent: () => ({ name: 'Mira' }) },
             permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false } };
         const mcp = new MCPClient(null as never, plugin as never, toolRegistry as never);
-        const runner = new SubAgentRunner({ app: {}, plugin: { ...plugin, mcpClient: fallback ? undefined : mcp } as never, toolRegistry });
+        const runner = new SubAgentRunner({ app: {}, plugin: { ...plugin, mcpClient: fallback ? undefined : mcp } as never, toolRegistry, clock: () => { const date = new Date(2026, 10, 16, 0, 0); date.getTimezoneOffset = () => 0; return date; } });
         let calls = 0;
         const model = { providerId: 'ollama', modelId: 'worker-model', stream(_payload: unknown, handlers: { done(response: unknown): void }) {
             handlers.done({ choices: [{ message: calls++ === 0 ? { role: 'assistant', content: 'Własny tekst rodzica.', reasoning_content: 'MYŚLENIE',

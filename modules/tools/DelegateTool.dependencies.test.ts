@@ -1,3 +1,4 @@
+import { withoutTaskTime } from './test-support/withoutTaskTime.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { SubAgentRunner, SubTaskRegistry, parsePlanId, parsePlanNodeId } from '../sub-agents/index.js';
@@ -182,7 +183,7 @@ test.serial('P3 dependency material reaches the real runner after manual context
     const model = { providerId: 'openai', modelId: 'child',
         listModels: async () => [{ id: 'child', max_input_tokens: 32768 }],
         stream(payload: ChatRequest, handlers: { done(response: unknown): void }) {
-            messages.push(structuredClone(payload.messages));
+            messages.push(withoutTaskTime(structuredClone(payload.messages)));
             handlers.done({ choices: [{ message: { role: 'assistant', content: 'Completed.' } }] });
         },
     };

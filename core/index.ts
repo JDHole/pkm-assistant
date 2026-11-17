@@ -80,6 +80,8 @@ export {
 } from './security/promptFence.js';
 // Proweniencja wiadomości czatu (kto NAPISAŁ tekst tury) - bramka przywilejów człowieka.
 export {
+  messageTime,
+  messageTimeLine,
   HUMAN_MESSAGE_META,
   MACHINE_MESSAGE_META,
   machineMeta,

@@ -2565,3 +2565,12 @@ bez uruchomienia całego Obsidiana ani natywnego paska zaznaczenia.
 Ograniczenia: atrapa AVA nie mierzy CSS ani natywnej kolejności zdarzeń.
 Rzeczywista kolejność dotyku w Android WebView, pozycja paska systemu i możliwe
 nakładanie oraz działanie z otwartą klawiaturą ekranową wymagają fizycznego telefonu.
+
+## Mobile T1 — snapshot środowiska
+
+`RollingWindow.mobileEnvironment` zamraża możliwości przy pierwszej turze okna;
+prompt nadal buduje się co turę, ale ta sekcja nie zmienia się po połączeniu MCP.
+Nowe okno pobiera nowy snapshot. Zmiany rzeczywistych możliwości w trakcie sesji
+nie są odzwierciedlane aż do utworzenia nowego okna.
+
+Czas wiadomości użytkownika jest metadanym `messageTime` nadawanym przy wysyłce; `getMessagesForAPI` dodaje linię tylko do kopii dla modelu, także dla załączników. Format sesji nie zapisuje dowolnych metadanych, więc po wznowieniu znacznik znika; treść i podsumowania pozostają czyste.

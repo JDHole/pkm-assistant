@@ -1,3 +1,4 @@
+import { withoutTaskTime } from './test-support/withoutTaskTime.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { setImmediate as nextTurn } from 'node:timers/promises';
@@ -52,7 +53,7 @@ function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: b
             const key = payload.messages.map(message => message.content).join('\n').match(/TASK ([A-Z]+)/)![1];
             starts.push(key);
             const finish = (message: unknown) => handlers.done({ choices: [{ message }] });
-            box(key).push({ payload: structuredClone(payload), complete: text => finish({ role: 'assistant', content: text }),
+            box(key).push({ payload: { ...structuredClone(payload), messages: withoutTaskTime(structuredClone(payload.messages)) }, complete: text => finish({ role: 'assistant', content: text }),
                 calls: (name, args) => finish({ role: 'assistant', content: '', tool_calls: [
                     { id: `call-${starts.length}`, type: 'function', function: { name, arguments: JSON.stringify(args) } },
                 ] }), fail: () => handlers.error(new Error('Controlled failure')) });

@@ -2624,6 +2624,16 @@ export const pl: Record<string, string> = {
 
   // ── PromptBuilder — permissions ──
   'prompt.identity': 'Jesteś {{name}} - agent AI w vaultcie "{{vault}}".',
+  'prompt.label.mobile_environment': 'Urządzenie mobilne',
+  'prompt.mobile.phone': 'Pracujesz w Obsidianie na telefonie.',
+  'prompt.mobile.tablet': 'Pracujesz w Obsidianie na tablecie.',
+  'prompt.mobile.semantic': 'Wyszukiwanie po znaczeniu jest niedostępne; szukaj po słowach.',
+  'prompt.mobile.local_mcp': 'Lokalne serwery MCP (stdio) są niedostępne.',
+  'prompt.mobile.no_mcp': 'Żaden zewnętrzny serwer MCP nie jest połączony.',
+  'prompt.mobile.screenshot': 'Zrzut ekranu jest niedostępny.',
+  'prompt.mobile.no_promises': 'Nie obiecuj funkcji wymienionych jako niedostępne.',
+  'prompt.message_time': 'Wiadomości zaczynają się od znacznika czasu dodanego przez system, który nie jest tekstem użytkownika; godzina ostatniej wiadomości to czas bieżący, a przy zapisie do plików używaj tej daty i godziny.',
+  'prompt.label.message_time': 'Czas wiadomości',
   'prompt.current_date': 'Aktualna data: {{date}}.',
   'prompt.label.identity': 'Tożsamość',
   'prompt.label.personality': 'Osobowość',

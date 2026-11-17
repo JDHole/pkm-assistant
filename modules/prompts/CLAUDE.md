@@ -210,3 +210,11 @@ Pure helpery `resolveDecisionTreeInstructions` / `splitDecisionTreeRules` / `bui
 - `modules/artifacts/CLAUDE.md` - silnik artefaktów, `parseArtifact`/`findSection`, którego
   format czyta `artifactIndex.js`
 - `core/security/promptFence.js` - implementacja `fenceUntrusted`
+
+## Mobile T1 — środowisko
+
+Opcjonalny `mobileEnvironment` dodaje sekcję `mobile_environment` przez zwykłe
+przełączanie i override agenta/globalny; brak kontekstu nie zmienia promptu desktopu.
+Stan możliwości pochodzi z composition root, a nie z importu Platform w module.
+
+Sekcja kontekstu `message_time` jest stałą instrukcją PL/EN dla obu platform; bieżąca godzina pochodzi wyłącznie z wiadomości, nie z promptu systemowego.

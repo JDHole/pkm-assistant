@@ -1409,3 +1409,5 @@ await diagnostyki daje 2 timeouty przed startem; usunięcie startu następcy prz
 _ready daje 2 timeouty narzędzi; usunięcie dispose poprzednika oblewa 2 próby
 zastąpienia z unload; przesunięcie subskrypcji za pierwsze GC oblewa 2 próby
 payloadCollected dla A. Każda para obejmuje desktop i mobile.
+
+Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu właściwej treści zadania; zachowanie znacznika i stałej instrukcji sprawdzają testy runnera sub-agentów.
