@@ -60,7 +60,7 @@ function makeVault(files: Record<string, string> = {}) {
 test('saved sub without tools gives the runner the same parent-filtered tools before and after reload', async t => {
     const loader = new RuntimeSubAgentLoader(makeVault());
     await loader.saveSubAgent({ name: 'worker', description: 'test' });
-    const tools = ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read'].map(name => ({ name, description: name, inputSchema: {} }));
+    const tools = ['search', 'list', 'read', 'web_search', 'web_read'].map(name => ({ name, description: name, inputSchema: {} }));
     const runner = new SubAgentRunner({ app: {}, plugin: {}, toolRegistry: {
         getTool: (name: string) => tools.find(tool => tool.name === name) ?? null,
         filterByAgent: () => tools.filter(tool => tool.name !== 'web_read'),
@@ -76,15 +76,15 @@ test('saved sub without tools gives the runner the same parent-filtered tools be
         await runner.runTask('task', { name: 'parent' }, config, model);
     };
     await run();
-    t.deepEqual(received[0], ['search', 'list', 'read', 'check_syntax', 'web_search', 'ask_parent']);
+    t.deepEqual(received[0], ['search', 'list', 'read', 'web_search', 'ask_parent']);
     await loader.reloadSubAgents();
     await run();
-    t.deepEqual(received[1], ['search', 'list', 'read', 'check_syntax', 'web_search', 'ask_parent']);
+    t.deepEqual(received[1], ['search', 'list', 'read', 'web_search', 'ask_parent']);
 });
 
 // Brak ról systemowych — plugin nie ma żadnych wbudowanych subów.
 test('DEFAULT_SUB_AGENT_TOOLS is the uniform generic worker toolset', t => {
-    t.deepEqual(DEFAULT_SUB_AGENT_TOOLS, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+    t.deepEqual(DEFAULT_SUB_AGENT_TOOLS, ['search', 'list', 'read', 'web_search', 'web_read']);
 });
 
 test('existing YAML tool fields retain their read semantics', async t => {
@@ -94,7 +94,7 @@ test('existing YAML tool fields retain their read semantics', async t => {
     }
     const loader = new RuntimeSubAgentLoader(makeVault(files));
     await loader.loadAllSubAgents();
-    t.deepEqual(loader.getSubAgent('missing')?.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+    t.deepEqual(loader.getSubAgent('missing')?.tools, ['search', 'list', 'read', 'web_search', 'web_read']);
     t.deepEqual(loader.getSubAgent('empty')?.tools, []);
     t.deepEqual(loader.getSubAgent('aliases')?.tools, ['search', 'read']);
 });
@@ -107,7 +107,7 @@ test('saved tools match disk for missing, empty, explicit and migrated lists', a
     await loader.saveSubAgent({ name: 'read', description: 'test', tools: ['read'] });
     await loader.saveSubAgent({ name: 'aliases', description: 'test', tools: ['vault_grep', 'vault_search', 'vault_read'] });
     const expected = {
-        missing: ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read'],
+        missing: ['search', 'list', 'read', 'web_search', 'web_read'],
         empty: [], read: ['read'], aliases: ['search', 'read'],
     };
     t.false(files['.pkm-assistant/sub-agents/missing/SUB_AGENT.yaml'].includes('tools:'));

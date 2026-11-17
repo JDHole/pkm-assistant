@@ -563,4 +563,4 @@ kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
 
 Czas wiadomości: `messageTime` renderuje lokalną datę, dzień języka interfejsu i offset z wstrzykiwanego zegara; gotowy tekst należy zamrozić przy utworzeniu wiadomości.
 PL/EN opisują wymagany klucz wyszukiwania Jina, status wspólnych kluczy mediów i skrót do sekcji Klucze API.
-`check_syntax` używa istniejącej akcji `vault.read`, z ryzykiem GREEN; kanonizacja i No-Go działają jak dla odczytu.
+`check_syntax` jest domyślnie wyłączone; po rejestracji używa akcji `vault.read` oraz kanonizacji i No-Go jak odczyt.

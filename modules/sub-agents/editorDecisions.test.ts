@@ -40,7 +40,7 @@ test('walidacja max_iterations odrzuca wartości poza zakresem i tekst', t => {
 
 test('Zaawansowane otwiera się przy niestandardowych wartościach', t => {
     const defaults = {
-        tools: ['search', 'read', 'list', 'check_syntax'],
+        tools: ['search', 'read', 'list'],
         scope: null,
         max_iterations: 25,
         min_iterations: 1,

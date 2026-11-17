@@ -102,7 +102,7 @@ const BUILTIN_TOOL_MAP: Record<string, string[]> = {
     // `search` żyje w serwerze `vault` — scope=memory bramkowane osobno uprawnieniem memory
     // (SearchTool), więc agent bez serwera `vault` nie dostaje dostępu do vaultu przez tylną furtkę.
     vault: [
-        'read', 'check_syntax', 'write', 'list',
+        'read', 'write', 'list',
         'delete', 'create_folder', 'search'
     ],
     memory: [
