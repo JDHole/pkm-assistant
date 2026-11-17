@@ -204,3 +204,7 @@ test('JS metadata limit rejects before reading while JSON permits the same size'
     t.like(await createCheckSyntaxTool().execute({ path: 'large.json' }, app, {}), { success: true, ok: true });
     t.is(reads, 1);
 });
+
+test('rejects an unsupported syntax kind', t => {
+    t.like(checkSyntax('MARKER_A: [', 'yaml' as never), { ok: false, kind: 'yaml', problems: [{ line: 1, column: 1, type: 'limit', message: 'Unsupported syntax kind' }], truncated: false });
+});

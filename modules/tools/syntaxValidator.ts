@@ -19,6 +19,15 @@ function utf8Size(text: string): number {
 }
 
 export function checkSyntax(text: string, kind: SyntaxKind, options: { shouldAbort?: () => boolean; parse?: typeof parse } = {}): SyntaxResult {
+    switch (kind) {
+        case 'js':
+        case 'json':
+            break;
+        default: {
+            const unsupported: never = kind;
+            return { ok: false, kind: unsupported, problems: [{ line: 1, column: 1, message: 'Unsupported syntax kind', type: 'limit' }], truncated: false };
+        }
+    }
     const problems: SyntaxProblem[] = [];
     if (utf8Size(text) > syntaxByteLimit(kind)) return { ok: false, kind, problems: [{ line: 1, column: 1, message: syntaxLimitMessage(kind), type: 'limit' }], truncated: false };
     let count = 0;

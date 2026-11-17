@@ -1784,3 +1784,7 @@ body.is-phone .pkm-render-check-setting .checkbox-container::before {
     height: 44px;
     transform: translate(-50%, -50%);
 }
+
+.pkm-render-check-setting.is-hidden {
+  display: none;
+}
