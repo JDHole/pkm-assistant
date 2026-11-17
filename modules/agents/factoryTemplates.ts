@@ -47,7 +47,7 @@ export function getFactorySubAgentTemplates() {
             name: 'researcher',
             description: t('factory.template.researcher.desc'),
             role: 'researcher',
-            tools: ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read'],
+            tools: ['search', 'list', 'read', 'web_search', 'web_read'],
             max_iterations: 12,
             max_tool_result_length: DEFAULT_LIMITS.max_tool_result_length,
             prompt: t('factory.template.researcher.knowledge'),

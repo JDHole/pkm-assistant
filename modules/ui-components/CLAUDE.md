@@ -423,4 +423,4 @@ i importy typów. Test sprzątania pickera ma własną granicę DOM śledzącą 
 i usuwanie; mutacja usuwająca `input.remove()` powoduje jego porażkę. Macierz
 MIME/rozszerzenia sprawdza telefon, desktop i tablet bez zmiany klasyfikacji.
 
-`check_syntax` ma etykietę PL/EN i pokazuje ścieżkę wywołania w widoku narzędzi.
+Dla historycznych wywołań `check_syntax` widok ma etykietę PL/EN i pokazuje ścieżkę; narzędzie jest domyślnie wyłączone.

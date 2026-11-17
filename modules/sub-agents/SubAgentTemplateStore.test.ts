@@ -183,7 +183,7 @@ test('template copies preserve their effective tools immediately and after reloa
     await store.instantiate('empty', 'parent', { subAgentLoader: loader });
     await store.instantiate('read', 'parent', { subAgentLoader: loader });
     const check = () => {
-        t.deepEqual(loader.getSubAgent('parent-empty')?.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+        t.deepEqual(loader.getSubAgent('parent-empty')?.tools, ['search', 'list', 'read', 'web_search', 'web_read']);
         t.deepEqual(loader.getSubAgent('parent-read')?.tools, ['read']);
     };
     check();

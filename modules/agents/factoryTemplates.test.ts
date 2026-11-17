@@ -156,7 +156,7 @@ test('definicje fabryczne: max_tool_result_length zgadza się z DEFAULT_LIMITS, 
 test('definicje fabryczne: stałe nazwy (kontrakt delegacji) + typ raport w przepisach', t => {
     const subs = getFactorySubAgentTemplates();
     t.deepEqual(subs.map(s => s.name), ['researcher']);
-    t.deepEqual(subs[0].tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+    t.deepEqual(subs[0].tools, ['search', 'list', 'read', 'web_search', 'web_read']);
 
     const skills = getFactorySkillTemplates();
     t.deepEqual(skills.map(s => s.name), ['deep-research-web', 'deep-research-vault']);

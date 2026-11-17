@@ -1414,7 +1414,7 @@ Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu wła
 Sekcje STT i obrazów pokazują wyłącznie status wspólnego klucza `chat.apiKeys` i skrót przez `owner.openSection` do Kluczy API; wartości klucza nie są renderowane.
 ## check_syntax
 
-`check_syntax` waliduje JS, JSON, YAML i Markdown bez wykonania kodu; czysty parser jest w `syntaxValidator.ts`. Odczyt przechodzi przez `read` (w tym autoryzację, stronicowanie i host kopii); `subToolExecution` musi rozpoznawać nowe narzędzie jako vaultowe. Parser YAML jest lokalny i nie zmienia wstrzykiwanego silnika pluginu.
+Narzędzie sprawdza JS i JSON bez wykonywania kodu; `CHECK_SYNTAX_ENABLED` domyślnie wyłącza rejestrację do decyzji właściciela i końcowego odbioru. YAML jest poza zakresem po [recenzji R5](/tmp/claude-0/-home-user/574bd53a-639d-50df-8e0d-078cb8e11dc7/scratchpad/codex/r5-wynik.md) (zależność od Node i czas parsowania); Markdown jest poza zakresem po [recenzji R5](/tmp/claude-0/-home-user/574bd53a-639d-50df-8e0d-078cb8e11dc7/scratchpad/codex/r5-wynik.md) (błędy rozpoznawania kontenerów). Skaner `markdownFences.ts` pozostaje na potrzeby `render_check` i jest reeksportowany z `syntaxValidator.ts`. Odczyt, stat i Stop zachowują autoryzację i ograniczenie rozmiaru.
 
 `obsidian_app render_check` uses `app.open` read permission and canonical note target; MCP passes trusted callbacks that recheck the current agent identity, read permission and administrator access outside model arguments. Only admin receives masked render text/errors; other main agents receive statuses. It opens the note on screen and uses heuristic DOM stabilization. Sub-agents remain denied. Details and device limitations: `modules/obsidian-app/CLAUDE.md`.
 
@@ -1430,3 +1430,4 @@ F4c: `ObsidianAppTool` maskuje komentarze HTML i Obsidiana przed wspólnym skane
 F4e: `render_check` jest domyślnie wyłączony i niewidoczny w schemacie oraz
 opisie modelu; MCP odmawia przed zgodą i dostępem do portów. Testy włączają go
 jawnie. Warunki ponownego włączenia: `modules/obsidian-app/CLAUDE.md`.
+`obsidian_app render_check` używa uprawnienia `app.open`, ponownie sprawdza profil i administratora, otwiera notatkę oraz heurystycznie czeka na stabilizację DOM; szczegóły i ograniczenia urządzeń opisuje `modules/obsidian-app/CLAUDE.md`.

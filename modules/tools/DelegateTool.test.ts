@@ -200,7 +200,7 @@ test('delegate WITHOUT aspect runs the generic worker even with zero custom subs
     t.true(res.success);
     t.is(res.aspect, 'pkm-sub', 'aspect = nazwa fabrycznego workera');
     t.is(captured.config!.name, 'pkm-sub');
-    t.deepEqual(captured.config!.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read'],
+    t.deepEqual(captured.config!.tools, ['search', 'list', 'read', 'web_search', 'web_read'],
         'worker dostaje domyślny zestaw (przecięcie z rodzicem robi runner)');
     t.falsy(captured.config!.prompt, 'generyczny worker nie ma wbudowanej instrukcji (encyklopedii)');
     t.falsy(captured.resolveCalled, 'resolveSubAgentConfig NIE wołane dla generycznego workera');
@@ -225,7 +225,7 @@ test('bez ustawienia globalnego szablonu delegacja używa fabrycznego pkm-sub', 
     const config = __test__.resolveGenericWorkerConfig(pluginWithTemplates(null));
 
     t.is(config.name, 'pkm-sub');
-    t.deepEqual(config.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+    t.deepEqual(config.tools, ['search', 'list', 'read', 'web_search', 'web_read']);
     t.falsy(config.prompt, 'fabryczny worker nie niesie instrukcji');
 });
 
@@ -365,7 +365,7 @@ test('config explorera jest read-only i jedzie slotem sub-agentów', t => {
 
     t.is(config.name, __test__.PKM_EXPLORER_NAME);
     t.is(config.role, 'explorer');
-    t.deepEqual(config.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read'],
+    t.deepEqual(config.tools, ['search', 'list', 'read', 'web_search', 'web_read'],
         'zwiadowca nie dostaje niczego, co pisze');
     t.is(__test__._resolveModelRole(config), 'researcher', 'tani slot sub-agentów');
     t.truthy(config.description);
@@ -394,13 +394,13 @@ test('fail-soft: brak/zepsute filterByAgent daje workerowi zestaw domyślny, nie
     log.warn = () => {};
     try {
         const bezRejestru = __test__.buildBuiltinWorkerConfig({} as unknown as DelegatePlugin, { name: 'Jaskier' });
-        t.deepEqual(bezRejestru.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+        t.deepEqual(bezRejestru.tools, ['search', 'list', 'read', 'web_search', 'web_read']);
 
         const rzuca = __test__.buildBuiltinWorkerConfig(
             { toolRegistry: { filterByAgent: () => { throw new Error('boom'); } } } as unknown as DelegatePlugin,
             { name: 'Jaskier' },
         );
-        t.deepEqual(rzuca.tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+        t.deepEqual(rzuca.tools, ['search', 'list', 'read', 'web_search', 'web_read']);
         t.is(rzuca.role, 'worker', 'rola zostaje — worker bez zapisu to nadal worker klasy rodzica');
     } finally {
         log.warn = originalWarn;
@@ -455,7 +455,7 @@ test('end-to-end: aspect:"worker" odpala model GŁÓWNY agenta, explorer — slo
     t.is(zwiad.aspect, 'pkm-explorer');
     t.true(robota.success);
     t.is(robota.aspect, 'pkm-worker');
-    t.deepEqual(configs[0].tools, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+    t.deepEqual(configs[0].tools, ['search', 'list', 'read', 'web_search', 'web_read']);
     t.deepEqual(configs[1].tools, ['read', 'write'], 'worker dostał narzędzia rodzica');
     // Ostatnia sonda `_resolveTaskConcurrency` nie biegnie w trybie single-task, więc lista
     // kluczy modeli jest dokładnie [explorer, worker].

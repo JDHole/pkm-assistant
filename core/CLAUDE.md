@@ -570,3 +570,4 @@ F4c: opisy `obsidian_app` w PL i EN wyjaśniają znaczenie `counts_match` i ogra
 
 F4e: opisy PL/EN `obsidian_app` domyślnie pokazują tylko `state` i `open`;
 osobny opis `render_check` jest dołączany jedynie przy jawnym włączeniu akcji.
+`check_syntax` jest domyślnie wyłączone; po rejestracji używa akcji `vault.read` oraz kanonizacji i No-Go jak odczyt.

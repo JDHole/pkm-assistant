@@ -18,7 +18,7 @@ const DEFAULT_RESEARCHER_MAX_TOOL_RESULT_LENGTH = DEFAULT_LIMITS.max_tool_result
 // JEDEN generyczny worker — brak podziału research/strateg. Wszystkie suby dostają
 // ten sam domyślny zestaw narzędzi (rola w YAML to już tylko etykieta opisowa, nie steruje).
 // Przecięcie z uprawnieniami rodzica robi SubAgentRunner._getTools (parent∩sub).
-export const DEFAULT_SUB_AGENT_TOOLS = ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read'];
+export const DEFAULT_SUB_AGENT_TOOLS = ['search', 'list', 'read', 'web_search', 'web_read'];
 /**
  * Nazwa FABRYCZNEGO generycznego workera (`delegate` bez `aspect`).
  * Byt syntetyczny — nie istnieje na dysku, więc jest niezniszczalny bez żadnego mechanizmu

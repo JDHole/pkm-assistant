@@ -289,7 +289,7 @@ test('_resolveToolNames uses the uniform worker default set (prymitywy read/list
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
     const names = runner._resolveToolNames({}, {});
 
-    t.deepEqual(names, ['search', 'list', 'read', 'check_syntax', 'web_search', 'web_read']);
+    t.deepEqual(names, ['search', 'list', 'read', 'web_search', 'web_read']);
     t.false(names.includes('memory_list_summaries'), 'no deprecated memory names');
     t.false(names.includes('vault_search'), 'no deprecated vault_search');
 });

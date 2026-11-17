@@ -1,124 +1,62 @@
 import { parse } from 'acorn';
-import { isAlias, isMap, isScalar, isSeq, LineCounter, parseAllDocuments } from 'yaml';
 
-export type SyntaxKind = 'js' | 'json' | 'yaml' | 'markdown';
-export type SyntaxProblem = { line: number; column: number; message: string; type: 'syntax' | 'duplicate_key' | 'limit'; path?: string; firstLine?: number };
-export type SyntaxResult = { ok: boolean; kind: SyntaxKind; problems: SyntaxProblem[]; truncated: boolean; mode?: string };
+export type SyntaxKind = 'js' | 'json';
+export type SyntaxProblem = { line: number; column: number; message: string; type: 'syntax' | 'duplicate_key' | 'limit'; path?: string; path_truncated?: boolean; message_truncated?: boolean; firstLine?: number };
+export type SyntaxResult = { ok: boolean; kind: SyntaxKind; problems: SyntaxProblem[]; truncated: boolean; mode?: string; checked_blocks?: number; skipped_blocks?: number; note?: string };
 
 export const MAX_SYNTAX_BYTES = 2 * 1024 * 1024;
 
-export type MarkdownFence = { language: string; line: number; column: number; body: string; columns: number[]; unclosed: boolean };
+export { scanMarkdownFences } from './markdownFences.js';
 
-/** Shared Markdown fence scan, preserving source positions for syntax diagnostics. */
-export function scanMarkdownFences(text: string): MarkdownFence[] {
-    const lines = text.split(/\r?\n/);
-    let start = 0;
-    if (lines[0]?.trim() === '---') {
-        const end = lines.findIndex((line, index) => index > 0 && /^(---|\.\.\.)\s*$/.test(line));
-        if (end >= 0) start = end + 1;
+function utf8Size(text: string): number {
+    let bytes = 0;
+    for (const character of text) {
+        const code = character.codePointAt(0) ?? 0;
+        bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
     }
-    const blocks: MarkdownFence[] = [];
-    for (let i = start; i < lines.length; i++) {
-        // Strip quote containers and list indentation while retaining each original column.
-        const opening = /^( {0,3}(?:> ?)*(?: {0,3}(?:[-+*]|\d+[.)]) +| *)(?:> ?)* *)(`{3,}|~{3,})(.*)$/.exec(lines[i]);
-        if (!opening) continue;
-        const prefix = opening[1], fence = opening[2];
-        const quoteCount = (prefix.match(/>/g) ?? []).length;
-        const indent = prefix.length;
-        const strip = (line: string): number => {
-            let n = 0;
-            for (let q = 0; q < quoteCount; q++) {
-                const part = /^ {0,3}> ?/.exec(line.slice(n));
-                if (!part) return n;
-                n += part[0].length;
-            }
-            while (n < line.length && line[n] === ' ' && n < indent) n++;
-            return n;
-        };
-        let end = i + 1;
-        const body: string[] = [], columns: number[] = [];
-        while (end < lines.length) {
-            const cut = strip(lines[end]);
-            const rest = lines[end].slice(cut);
-            if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(rest)) break;
-            body.push(rest); columns.push(cut); end++;
-        }
-        blocks.push({ language: opening[3].trim().toLowerCase(), line: i + 1, column: indent + 1, body: body.join('\n'), columns, unclosed: end === lines.length });
-        i = end;
-    }
-    return blocks;
+    return bytes;
 }
 
 export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
     const problems: SyntaxProblem[] = [];
-    if (new TextEncoder().encode(text).length > MAX_SYNTAX_BYTES) return { ok: false, kind, problems: [{ line: 1, column: 1, message: 'Input exceeds 2 MB limit', type: 'limit' }], truncated: false };
+    if (utf8Size(text) > MAX_SYNTAX_BYTES) return { ok: false, kind, problems: [{ line: 1, column: 1, message: 'Input exceeds 2 MB limit', type: 'limit' }], truncated: false };
     let count = 0;
     let mode: string | undefined;
-    const add = (problem: SyntaxProblem) => { count++; if (problems.length < 20) problems.push(problem); };
+    const add = (problem: SyntaxProblem) => {
+        count++;
+        if (problem.path && problem.path.length > 120) { problem.path = problem.path.slice(0, 120); problem.path_truncated = true; }
+        if (problem.message.length > 120) { problem.message = problem.message.slice(0, 120); problem.message_truncated = true; }
+        if (problems.length < 20) problems.push(problem);
+    };
     const js = (source: string, offset: number, functionOnly: boolean, columns: number[] = []) => {
         const modes = functionOnly ? ['async_function'] : ['script', 'module', 'async_function'];
         let best: { pos?: number; loc?: { line: number; column: number }; message?: string } = {};
+        const failures: typeof best[] = [];
         // Acorn only accepts a hashbang at offset zero; replace a leading BOM without shifting offsets.
         const normalized = source.replace(/^(\ufeff?)#![^\r\n]*/, match => ' '.repeat(match.length));
         for (const candidate of modes) {
+            const prefix = candidate === 'async_function' ? 'async function __syntax_check__() {\n' : '';
+            const wrapped = prefix + normalized + (prefix ? '\n}' : '');
             try {
-                parse(normalized, { ecmaVersion: 'latest', sourceType: candidate === 'module' ? 'module' : 'script',
-                    allowReturnOutsideFunction: candidate === 'async_function', allowAwaitOutsideFunction: candidate === 'async_function', allowHashBang: true });
+                const program = parse(wrapped, { ecmaVersion: 'latest', sourceType: candidate === 'module' ? 'module' : 'script', allowHashBang: true });
+                if (prefix && (program.body.length !== 1 || program.body[0].type !== 'FunctionDeclaration' || program.body[0].end !== wrapped.length)) {
+                    throw Object.assign(new Error('Unexpected end of function body'), { pos: prefix.length + normalized.length, loc: { line: source.split('\n').length + 1, column: 0 } });
+                }
                 if (!functionOnly) mode = candidate;
                 return;
             } catch (error) {
-                const failure = error as typeof best;
-                if ((failure.pos ?? 0) > (best.pos ?? -1)) best = failure;
-            }
-        }
-        add({ line: offset + (best.loc?.line ?? 1), column: (best.loc?.column ?? 0) + 1 + (columns[(best.loc?.line ?? 1) - 1] ?? 0), message: (best.message ?? 'Syntax error').replace(/ \(\d+:\d+\)$/, '').slice(0, 120), type: 'syntax' });
-    };
-    const yaml = (source: string, offset: number) => {
-        const counter = new LineCounter();
-        const docs = parseAllDocuments(source, { lineCounter: counter, uniqueKeys: false, strict: true });
-        for (const doc of docs) {
-            for (const error of doc.errors) {
-                const pos = counter.linePos(error.pos[0]);
-                add({ line: offset + pos.line, column: pos.col, message: error.message.split('\n')[0].slice(0, 120), type: 'syntax' });
-            }
-            try { doc.toJS({ maxAliasCount: 100 }); } catch (error) {
-                if (!/Unresolved alias/.test(String(error))) add({ line: offset + counter.linePos(doc.range?.[0] ?? 0).line, column: 1, message: 'YAML alias expansion limit exceeded', type: 'syntax' });
-            }
-            const fingerprint = (node: unknown, ancestors = new Set<object>()): string => {
-                if (isAlias(node)) {
-                    const resolved = node.resolve(doc);
-                    return resolved ? fingerprint(resolved, ancestors) : 'unresolved-alias';
+                if (error instanceof RangeError || (error instanceof Error && /stack (?:space|size)|too much recursion/i.test(error.message))) {
+                    add({ line: 1, column: 1, message: 'JavaScript parser nesting limit exceeded', type: 'limit' });
+                    return;
                 }
-                if (isScalar(node)) return JSON.stringify([typeof node.value, typeof node.value === 'number' ? String(node.value) : node.value]);
-                if (!isMap(node) && !isSeq(node)) return 'null';
-                if (ancestors.has(node)) return 'recursive';
-                const next = new Set(ancestors); next.add(node);
-                if (isSeq(node)) return JSON.stringify(['sequence', node.tag ?? '', node.items.map(item => fingerprint(item, next))]);
-                return JSON.stringify(['map', node.tag ?? '', node.items.map(pair => [fingerprint(pair.key, next), fingerprint(pair.value, next)]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
-            };
-            const walk = (node: unknown, path: string) => {
-                if (isAlias(node)) {
-                    if (!node.resolve(doc)) { const pos = counter.linePos(node.range?.[0] ?? 0); add({ line: offset + pos.line, column: pos.col, message: 'Unresolved alias', type: 'syntax' }); }
-                } else if (isMap(node)) {
-                    const seen = new Map<string, number>();
-                    for (const pair of node.items) {
-                        const key = pair.key;
-                        if (!isScalar(key) && !isMap(key) && !isSeq(key) && !isAlias(key)) continue;
-                        const name = isScalar(key) ? String(key.value) : '[complex key]';
-                        if (isScalar(key) && key.value === '<<') { walk(pair.value, path); continue; }
-                        if (isAlias(key)) walk(key, path);
-                        const identity = fingerprint(key);
-                        const keyPath = path ? `${path}.${name}` : name;
-                        const pos = counter.linePos(key.range?.[0] ?? 0);
-                        const firstLine = seen.get(identity);
-                        if (firstLine !== undefined) add({ line: offset + pos.line, column: pos.col, message: 'Duplicate key', type: 'duplicate_key', path: keyPath, firstLine });
-                        else seen.set(identity, offset + pos.line);
-                        walk(pair.value, keyPath);
-                    }
-                } else if (isSeq(node)) node.items.forEach((item, index) => walk(item, `${path}[${index}]`));
-            };
-            walk(doc.contents, '');
+                const failure = error as typeof best;
+                const adjusted = prefix ? { ...failure, pos: Math.max(0, (failure.pos ?? 0) - prefix.length), loc: { line: Math.max(1, (failure.loc?.line ?? 1) - 1), column: failure.loc?.column ?? 0 }, message: failure.message } : failure;
+                failures.push(adjusted);
+                if ((adjusted.pos ?? 0) > (best.pos ?? -1)) best = adjusted;
+            }
         }
+        if (!functionOnly && failures.length === 3 && failures.slice(0, 2).every(failure => /(?:'return' outside of function|(?:keyword )?'await' outside (?:of |an async )?function)/.test(failure.message ?? ''))) best = failures[2];
+        add({ line: offset + (best.loc?.line ?? 1), column: (best.loc?.column ?? 0) + 1 + (columns[(best.loc?.line ?? 1) - 1] ?? 0), message: (best.message ?? 'Syntax error').replace(/ \(\d+:\d+\)$/, ''), type: 'syntax' });
     };
     if (kind === 'js') js(text, 0, false);
     else if (kind === 'json') {
@@ -186,18 +124,9 @@ export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
             const problem = error as { line: number; column: number; message: string };
             add({ line: problem.line, column: problem.column, message: problem.message, type: problem.message === 'JSON nesting depth limit exceeded' ? 'limit' : 'syntax' });
         }
-    } else if (kind === 'yaml') yaml(text, 0);
-    else {
-        const lines = text.split(/\r?\n/);
-        if (lines[0]?.trim() === '---') {
-            const end = lines.findIndex((line, index) => index > 0 && /^(---|\.\.\.)\s*$/.test(line));
-            if (end < 0) add({ line: 1, column: 1, message: 'Unclosed frontmatter', type: 'syntax' });
-            else { yaml(lines.slice(1, end).join('\n'), 1); }
-        }
-        for (const block of scanMarkdownFences(text)) {
-            if (/^(dataviewjs|js|javascript)$/i.test(block.language)) js(block.body, block.line, true, block.columns);
-            if (block.unclosed) add({ line: block.line, column: block.column, message: 'Unclosed code block', type: 'syntax' });
-        }
     }
-    return { ok: count === 0, kind, problems, truncated: count > problems.length, ...(mode ? { mode } : {}) };
+    const result: SyntaxResult = { ok: count === 0, kind, problems, truncated: count > problems.length, ...(mode ? { mode } : {}) };
+    // Reserve space for the tool's success envelope as well as JSON escaping.
+    while (JSON.stringify(result).length > 15980 && problems.length) { problems.pop(); result.truncated = true; }
+    return result;
 }

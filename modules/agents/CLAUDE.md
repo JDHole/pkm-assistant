@@ -343,3 +343,4 @@ composition root; decyzja o utrwaleniu go dla okna rozmowy należy do czatu.
 Inspektor promptu pobiera bieżącą migawkę środowiska mobilnego przez `getMobileEnvironment`; żywe okno czatu zamraża własną migawkę.
 
 The profile prompt editor displays the mobile environment override only when the injected environment provider supplies a snapshot; the inspector uses that same provider. On desktop the conditional section is absent, as in the built prompt.
+`check_syntax` jest domyślnie wyłączone i nie występuje w grupach profilu ani domyślnym szablonie.
