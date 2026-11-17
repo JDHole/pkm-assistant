@@ -273,7 +273,7 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
         .setDesc(t('settings.obsidian_app_enabled_desc'))
         .addToggle(toggle => toggle.setValue(pkm.obsidianAppEnabled === true).onChange(async value => {
             pkm.obsidianAppEnabled = value;
-            renderCheckSetting.settingEl.hidden = !value;
+            renderCheckSetting.settingEl.classList.toggle('is-hidden', !value);
             await save();
         }));
 
@@ -285,7 +285,7 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
             await save();
         }));
     renderCheckSetting.settingEl.addClass('pkm-render-check-setting');
-    renderCheckSetting.settingEl.hidden = pkm.obsidianAppEnabled !== true;
+    renderCheckSetting.settingEl.classList.toggle('is-hidden', pkm.obsidianAppEnabled !== true);
 
     // Globalny wyłącznik Komunikatora - poczta między agentami. Domyślnie ON i widoczny
     // dla usera. Rejestracja narzędzi i katalog serwerów czytają flagę PRZY STARCIE,
