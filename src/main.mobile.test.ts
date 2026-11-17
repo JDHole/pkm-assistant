@@ -692,7 +692,7 @@ test.serial('mobile Obsidian App registers state/open with no Electron and repor
     let nodeReads = 0;
     Object.defineProperty(window, 'require', { configurable: true, get() { nodeReads++; throw new Error('No Node'); } });
     t.teardown(() => { if (oldRequire) Object.defineProperty(window, 'require', oldRequire); else Reflect.deleteProperty(window, 'require'); });
-    const host = { settings: { pkmAssistant: { obsidianAppEnabled: true } }, toolRegistry: new ToolRegistry(),
+    const host = { register: (_callback: () => void) => {}, settings: { pkmAssistant: { obsidianAppEnabled: true } }, toolRegistry: new ToolRegistry(),
         app: { workspace: { iterateAllLeaves() {}, getActiveFile: () => null } } };
     t.true(Plugin.prototype.registerObsidianAppTool.call(host as never, host.toolRegistry));
     const tool = host.toolRegistry.getTool('obsidian_app')!;

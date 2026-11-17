@@ -60,6 +60,8 @@ export interface BuiltinToolExecutionContext {
     shouldAbort: () => boolean;
     /** Cooperative cancellation of the owning run, supplied outside model arguments. */
     abortSignal?: AbortSignal;
+    adminAccess?: boolean;
+    agentKnown?: boolean;
     /** Re-checks a canonical vault path with the current agent, autonomy, and scope. */
     authorizeFileRead: (canonicalPath: string) => { allowed: boolean; reason?: string };
     /** Serializes with MCP alias/error decorations applied exactly as for the final result. */

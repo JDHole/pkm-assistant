@@ -2,6 +2,8 @@ import { CHAT_VIEW_TYPE, sanitizePath } from '../../core/index.js';
 import { OBSIDIAN_APP_OPERATION_TIMEOUT_MS } from '../../config/limits.js';
 export { createWorkspacePort } from './workspace.js';
 export { createCapturePort } from './capture.js';
+import { buildRenderResult } from './render.js';
+import type { RenderObservation } from './render.js';
 import { encodeCapture } from './capture.js';
 import type { CapturePort } from './capture.js';
 export type { CapturePort, CapturedFrame } from './capture.js';
@@ -10,6 +12,8 @@ export type LeafIdentity = { kind: 'file'; path: string } | { kind: 'none' } | {
 export type LeafInfo = { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'unknown' } } | { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
 export interface WorkspacePort {
     listLeaves(): LeafInfo[];
+    observeRender?(path: string, waitMs: number, signal: AbortSignal): Promise<RenderObservation>;
+    dispose?(): void;
     describeCaptureTarget?(): CaptureTarget;
     getActivePath(): string | null;
     fileExists(path: string): boolean;
@@ -17,7 +21,7 @@ export interface WorkspacePort {
 }
 export type CaptureRect = { x: number; y: number; width: number; height: number };
 export type CaptureTarget = { kind: 'none' } | { kind: 'ok'; leaf: LeafInfo; rect: CaptureRect; embeds: (string | null)[]; blocked: string[]; overlays: string[] };
-export type AppAction = { action: 'state' } | { action: 'screenshot' } | { action: 'open'; path: string; newTab: boolean };
+export type AppAction = { action: 'state' } | { action: 'screenshot' } | { action: 'open'; path: string; newTab: boolean } | { action: 'render_check'; path: string; waitMs: number };
 export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large' | 'no_capturable_view' | 'overlay_visible' | 'screenshot_disabled';
 export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown } | { ok: true; success: true; verified: true; effect: 'unchanged'; kind: 'media'; summary: string; images: { mime: 'image/jpeg'; base64: string; width: number; height: number }[] };
 export function isObsidianAppEnabled(settings: { pkmAssistant?: { obsidianAppEnabled?: boolean } }): boolean {
@@ -27,11 +31,17 @@ export function parseAction(input: unknown): AppAction | null {
     if (!input || typeof input !== 'object') return null;
     if (!('action' in input)) return null;
     if (input.action === 'state' || input.action === 'screenshot') return { action: input.action };
+    if (input.action === 'render_check') {
+        if (!('path' in input) || typeof input.path !== 'string' || !input.path.trim() || !input.path.endsWith('.md')) return null;
+        const waitMs = 'wait_ms' in input ? input.wait_ms : 4000;
+        if (typeof waitMs !== 'number' || !Number.isInteger(waitMs) || waitMs < 1 || waitMs > 15000) return null;
+        return { action: 'render_check', path: input.path, waitMs };
+    }
     if (input.action !== 'open' || !('path' in input) || typeof input.path !== 'string' || !input.path.trim()) return null;
     if ('new_tab' in input && typeof input.new_tab !== 'boolean') return null;
     return { action: 'open', path: input.path, newTab: 'new_tab' in input && input.new_tab === true };
 }
-export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean }
+export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean; adminAccess?: boolean; agentKnown?: boolean }
 const fail = (code: AppErrorCode): AppResult => ({ ok: false, success: false, error: { code, message: code } });
 const FILELESS_VIEWS = new Set(['graph', 'search', 'file-explorer', 'bookmarks', 'tag', 'empty', 'all-properties', CHAT_VIEW_TYPE, 'pkm-agent-sidebar', 'pkm-release-notes-view']);
 function authorizedPath(path: string | null, authorize?: AppContext['authorizeFileRead']): path is string {
@@ -74,7 +84,8 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
         if (action.action === 'screenshot' && !screenshotEnabled) return Promise.resolve(fail('screenshot_disabled'));
         const aborted = () => context?.abortSignal?.aborted === true || context?.shouldAbort?.() === true;
         if (aborted()) return Promise.resolve(fail('aborted'));
-        if ((action.action === 'open' && suspended) || (action.action === 'screenshot' && capturing)) return Promise.resolve(fail('busy'));
+        if (((action.action === 'open' || action.action === 'render_check') && suspended) || (action.action === 'screenshot' && capturing)) return Promise.resolve(fail('busy'));
+        const controller = new AbortController();
         const run = async (expired: () => boolean): Promise<AppResult> => {
             if (aborted()) return fail('aborted');
             try {
@@ -97,33 +108,43 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                     if (!image) return fail('too_large');
                     return { ok: true, success: true, verified: true, effect: 'unchanged', kind: 'media', summary: `Obsidian active note screenshot ${image.width}x${image.height}`, images: [image] };
                 }
+                if (action.action === 'render_check' && (context?.agentKnown !== true || !authorizedPath(action.path, context?.authorizeFileRead))) return fail('access_denied');
                 if (!port.fileExists(action.path)) return fail('not_found');
                 const before = port.getActivePath();
                 if (aborted()) return fail('aborted');
-                await port.openPath(action.path, { newTab: action.newTab });
+                await port.openPath(action.path, { newTab: action.action === 'open' ? action.newTab : false });
+                if (action.action === 'render_check') {
+                    if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
+                    if (port.getActivePath() !== action.path || !port.observeRender) return fail('unavailable');
+                    const observation = await port.observeRender(action.path, action.waitMs, controller.signal);
+                    if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
+                    if (port.getActivePath() !== action.path || !authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
+                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, context?.adminAccess === true) };
+                }
                 const verified = port.getActivePath() === action.path;
                 return { ok: true, success: true, verified, effect: verified ? (before === action.path ? 'unchanged' : 'changed') : 'unknown', data: { path: action.path } };
             } catch { return fail(action.action === 'screenshot' ? 'capture_unavailable' : 'unavailable'); }
         };
         const scheduled = queue.then(async () => {
             if (aborted()) return fail('aborted');
-            if ((action.action === 'open' && suspended) || (action.action === 'screenshot' && capturing)) return fail('busy');
+            if (((action.action === 'open' || action.action === 'render_check') && suspended) || (action.action === 'screenshot' && capturing)) return fail('busy');
             let timer: number | undefined;
             let settled = false;
             let expired = false;
-            const operation = run(() => expired).finally(() => { settled = true; if (action.action === 'open') suspended = false; });
+            const operation = run(() => expired).finally(() => { settled = true; if (action.action === 'open' || action.action === 'render_check') suspended = false; });
             const timeout = new Promise<AppResult>(resolve => { timer = window.setTimeout(() => {
                 expired = true;
-                if (action.action === 'open' && !settled) suspended = true;
+                controller.abort();
+                if ((action.action === 'open' || action.action === 'render_check') && !settled) suspended = true;
                 resolve(fail('timeout'));
-            }, timeoutMs); });
+            }, action.action === 'render_check' ? timeoutMs + action.waitMs : timeoutMs); });
             try { return await Promise.race([operation, timeout]); } finally { window.clearTimeout(timer); }
         });
         queue = scheduled.then(() => undefined, () => undefined);
         const signal = context?.abortSignal;
         if (!signal) return scheduled;
         return new Promise<AppResult>(resolve => {
-            const onAbort = () => resolve(fail('aborted'));
+            const onAbort = () => { controller.abort(); resolve(fail('aborted')); };
             signal.addEventListener('abort', onAbort, { once: true });
             if (signal.aborted) onAbort();
             void scheduled.then(result => { signal.removeEventListener('abort', onAbort); resolve(result); });

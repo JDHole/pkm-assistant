@@ -1348,6 +1348,8 @@ export class MCPClient {
                 effectiveResultBudgetChars,
                 shouldAbort,
                 abortSignal: opts.abortSignal,
+                adminAccess: agent.admin_access === true,
+                agentKnown: true,
                 authorizeFileRead: (canonicalPath) => {
                     if (typeof canonicalPath !== 'string' || canonicalPath.length === 0) {
                         return { allowed: false, reason: 'Invalid path' };
