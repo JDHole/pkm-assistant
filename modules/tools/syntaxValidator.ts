@@ -4,7 +4,8 @@ export type SyntaxKind = 'js' | 'json';
 export type SyntaxProblem = { line: number; column: number; message: string; type: 'syntax' | 'duplicate_key' | 'limit'; path?: string; path_truncated?: boolean; message_truncated?: boolean; firstLine?: number };
 export type SyntaxResult = { ok: boolean; kind: SyntaxKind; problems: SyntaxProblem[]; truncated: boolean; mode?: string; checked_blocks?: number; skipped_blocks?: number; note?: string };
 
-export const MAX_SYNTAX_BYTES = 2 * 1024 * 1024;
+export const syntaxByteLimit = (kind: SyntaxKind): number => (kind === 'js' ? 512 * 1024 : 2 * 1024 * 1024);
+export const syntaxLimitMessage = (kind: SyntaxKind): string => `Input exceeds ${kind === 'js' ? '512 KiB JS' : '2 MiB JSON'} limit`;
 
 export { scanMarkdownFences } from './markdownFences.js';
 
@@ -17,9 +18,9 @@ function utf8Size(text: string): number {
     return bytes;
 }
 
-export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
+export function checkSyntax(text: string, kind: SyntaxKind, options: { shouldAbort?: () => boolean; parse?: typeof parse } = {}): SyntaxResult {
     const problems: SyntaxProblem[] = [];
-    if (utf8Size(text) > MAX_SYNTAX_BYTES) return { ok: false, kind, problems: [{ line: 1, column: 1, message: 'Input exceeds 2 MB limit', type: 'limit' }], truncated: false };
+    if (utf8Size(text) > syntaxByteLimit(kind)) return { ok: false, kind, problems: [{ line: 1, column: 1, message: syntaxLimitMessage(kind), type: 'limit' }], truncated: false };
     let count = 0;
     let mode: string | undefined;
     const add = (problem: SyntaxProblem) => {
@@ -29,16 +30,19 @@ export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
         if (problems.length < 20) problems.push(problem);
     };
     const js = (source: string, offset: number, functionOnly: boolean, columns: number[] = []) => {
-        const modes = functionOnly ? ['async_function'] : ['script', 'module', 'async_function'];
+        const modes = functionOnly ? ['async_function'] : ['async_function', 'script', 'module'];
         let best: { pos?: number; loc?: { line: number; column: number }; message?: string } = {};
-        const failures: typeof best[] = [];
+        const failures: Record<string, typeof best> = {};
+        let bestRank = Infinity;
+        const ranks: Record<string, number> = { script: 0, module: 1, async_function: 2 };
         // Acorn only accepts a hashbang at offset zero; replace a leading BOM without shifting offsets.
         const normalized = source.replace(/^(\ufeff?)#![^\r\n]*/, match => ' '.repeat(match.length));
         for (const candidate of modes) {
+            if (options.shouldAbort?.()) throw new Error('Operation cancelled');
             const prefix = candidate === 'async_function' ? 'async function __syntax_check__() {\n' : '';
             const wrapped = prefix + normalized + (prefix ? '\n}' : '');
             try {
-                const program = parse(wrapped, { ecmaVersion: 'latest', sourceType: candidate === 'module' ? 'module' : 'script', allowHashBang: true });
+                const program = (options.parse ?? parse)(wrapped, { ecmaVersion: 'latest', sourceType: candidate === 'module' ? 'module' : 'script', allowHashBang: true });
                 if (prefix && (program.body.length !== 1 || program.body[0].type !== 'FunctionDeclaration' || program.body[0].end !== wrapped.length)) {
                     throw Object.assign(new Error('Unexpected end of function body'), { pos: prefix.length + normalized.length, loc: { line: source.split('\n').length + 1, column: 0 } });
                 }
@@ -51,11 +55,12 @@ export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
                 }
                 const failure = error as typeof best;
                 const adjusted = prefix ? { ...failure, pos: Math.max(0, (failure.pos ?? 0) - prefix.length), loc: { line: Math.max(1, (failure.loc?.line ?? 1) - 1), column: failure.loc?.column ?? 0 }, message: failure.message } : failure;
-                failures.push(adjusted);
-                if ((adjusted.pos ?? 0) > (best.pos ?? -1)) best = adjusted;
+                failures[candidate] = adjusted;
+                const rank = ranks[candidate];
+                if ((adjusted.pos ?? 0) > (best.pos ?? -1) || ((adjusted.pos ?? 0) === (best.pos ?? -1) && rank < bestRank)) { best = adjusted; bestRank = rank; }
             }
         }
-        if (!functionOnly && failures.length === 3 && failures.slice(0, 2).every(failure => /(?:'return' outside of function|(?:keyword )?'await' outside (?:of |an async )?function)/.test(failure.message ?? ''))) best = failures[2];
+        if (!functionOnly && failures.script && failures.module && failures.async_function && [failures.script, failures.module].every(failure => /(?:'return' outside of function|(?:keyword )?'await' outside (?:of |an async )?function)/.test(failure.message ?? ''))) best = failures.async_function;
         add({ line: offset + (best.loc?.line ?? 1), column: (best.loc?.column ?? 0) + 1 + (columns[(best.loc?.line ?? 1) - 1] ?? 0), message: (best.message ?? 'Syntax error').replace(/ \(\d+:\d+\)$/, ''), type: 'syntax' });
     };
     if (kind === 'js') js(text, 0, false);

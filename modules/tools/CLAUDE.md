@@ -1414,7 +1414,7 @@ Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu tre�
 
 ## check_syntax
 
-`CheckSyntaxTool.ts` sprawdza tylko JS i JSON bez wykonywania kodu; `CHECK_SYNTAX_ENABLED` domyślnie wyłącza rejestrację. YAML i Markdown nie są obsługiwane, a pakiet `yaml` jest tylko zależnością developerską. Narzędzie używa paginacji `read`, limitu 2 MiB i 256 poziomów JSON oraz sprawdza anulowanie; każda strona ponownie czyta źródło. Błędy składni zwracają `ok: false`, a błędy odczytu są porażką.
+`CheckSyntaxTool.ts` sprawdza tylko JS i JSON bez wykonywania kodu; `CHECK_SYNTAX_ENABLED` włącza rejestrację. YAML i Markdown nie są obsługiwane, a pakiet `yaml` jest tylko zależnością developerską. Narzędzie używa paginacji `read`, limitów 512 KiB JS, 2 MiB JSON i 256 poziomów JSON oraz sprawdza anulowanie; każda strona ponownie czyta źródło. Błędy składni zwracają `ok: false`, a błędy odczytu są porażką. JS próbuje kolejno ciało funkcji async, skrypt i moduł; `mode` wskazuje pierwszy zaakceptowany tryb. Stop sprawdzany jest przed parsowaniem i między trybami, ale synchronicznego parsowania w tym samym wątku nie można przerwać; limit 512 KiB ogranicza jego czas.
 
 ## render_check
 

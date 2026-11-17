@@ -3,7 +3,7 @@ import type { ModelLibraryEntry } from '../models/index.js';
 import { DEFAULT_LIMITS, LIMIT_SPECS } from '../../config/limits.js';
 
 /** Narzędzia nowego suba w edytorze. Jedno źródło dla formularza i dla decyzji o "Zaawansowanych". */
-export const EDITOR_DEFAULT_TOOLS: readonly string[] = ['search', 'read', 'list'];
+export const EDITOR_DEFAULT_TOOLS: readonly string[] = ['search', 'read', 'list', 'check_syntax'];
 /** Domyślna minimalna liczba kroków nowego suba (ta sama co w SubAgentLoader). */
 export const EDITOR_DEFAULT_MIN_ITERATIONS = 1;
 // Widełki pola "Max iteracji" i walidacji biorą się z LIMIT_SPECS, nie z lokalnego literału:
