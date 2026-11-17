@@ -1572,7 +1572,11 @@ export const pl: Record<string, string> = {
   'settings.consolidation_batch_size': 'Rozmiar paczki L1',
   'settings.consolidation_batch_size_desc': 'Ile sesji wchodzi w jedno streszczenie L1 (i ile L1 w L2, ile L2 w L3). Liczba całkowita większa od zera - inaczej wraca do domyślnej (5).',
   'settings.web_search_title': 'Web Search',
-  'settings.web_search_desc': 'Pozwól agentom szukać informacji w internecie. Domyślnie Jina AI - działa BEZ klucza (3 zapytania/min), a darmowy klucz podnosi limit do 100/min. Płatni dostawcy (Tavily, Brave, Serper) siedzą na darmowej podłodze Jiny: gdy padną, wyniki i tak przyjdą.',
+  'settings.jina_key_warning': 'Brak klucza Jina: wyszukiwanie nie zadziała, dopóki go nie wpiszesz.',
+  'settings.shared_key_present': '✓ Klucz API jest wpisany',
+  'settings.shared_key_missing': 'Brak klucza API - funkcja nie zadziała, dopóki go nie wpiszesz.',
+  'settings.open_api_keys': 'Otwórz Klucze API',
+  'settings.web_search_desc': 'Wyszukiwanie przez Jina AI wymaga darmowego klucza API. Odczyt stron przez Jina Reader działa bez klucza. Gdy inny dostawca zawiedzie, plugin próbuje Jiny.',
   'settings.web_search_enable': 'Włącz Web Search',
   'settings.web_search_enable_desc': 'Agent może szukać w internecie (narzędzie web_search)',
   'settings.web_provider': 'Dostawca',
@@ -2567,7 +2571,7 @@ export const pl: Record<string, string> = {
   // ── WebSearchProvider ──
   'websearch.no_title': '(brak tytułu)',
   'websearch.no_content': 'Strona nie zwróciła żadnej treści (reader odpowiedział pustką): {{url}}. Może być za logowaniem/paywallem albo rysować się wyłącznie skryptem - spróbuj innego adresu.',
-  'websearch.jina_needs_key': 'Jina AI wymaga klucza API. Pobierz na https://jina.ai/reader/',
+  'websearch.jina_needs_key': 'Wyszukiwanie Jina wymaga darmowego klucza API. Pobierz go na https://jina.ai/reader/ i wpisz w ustawieniach PKM Assistant → Web Search → klucz API Jina.',
   'websearch.jina_reader_needs_key': 'Jina Reader wymaga klucza API do tej operacji.',
   'websearch.tavily_needs_key': 'Tavily wymaga klucza API.',
   'websearch.brave_needs_key': 'Brave Search wymaga klucza API.',
@@ -2579,7 +2583,7 @@ export const pl: Record<string, string> = {
   'websearch.read_error': 'Błąd odczytu {{url}}: {{error}}',
   'websearch.fallback_note': '{{from}} nie odpowiedział - przechodzę na darmową podłogę {{to}}.',
   'websearch.unreadable_binary': 'Nie udało się wyciągnąć tekstu z {{url}}. Reader radzi sobie ze stronami i PDF-ami; obrazów, archiwów i plików za logowaniem nie przeczyta.',
-  'websearch.key_optional_desc': 'Klucz opcjonalny - bez klucza 3 zapytania/min, z darmowym kluczem 100/min.',
+  'websearch.key_optional_desc': 'Wyszukiwanie Jina wymaga darmowego klucza API.',
   'websearch.provider.jina': 'Jina AI (darmowy, domyślny)',
   'websearch.provider.searxng': 'SearXNG (self-hosted)',
 
@@ -2972,13 +2976,13 @@ export const pl: Record<string, string> = {
   'artifact.chip.unpin': 'Odepnij',
 
   // web_search
-  'mcp.web_search.desc': 'Wyszukaj informacje w internecie.\n\nJAK DZIAŁA:\n- Zapytanie → lista wyników: tytuł, URL i FRAGMENT treści (nie cała strona)\n- Po pełną treść wybranego wyniku sięgnij narzędziem web_read\n- Domyślny dostawca: Jina AI (darmowy). Gdy skonfigurowany dostawca płatny nie odpowie, wyniki przychodzą z darmowej podłogi Jiny - jest o tym nota w wynikach\n\nKIEDY UŻYWAĆ:\n- Aktualne wydarzenia, ceny, daty, nowości, dokumentacja - cokolwiek spoza vaulta\n- User mówi: "sprawdź w necie", "wyszukaj", "co mówi internet o..."\n\nKIEDY NIE UŻYWAĆ:\n- Pytanie o notatki albo pamięć usera → search\n- Treść jest w vaultcie → read\n\nJAK FORMUŁOWAĆ ZAPYTANIA:\n- Konkretnie, najlepiej po angielsku (chyba że szukasz polskich źródeł)\n- "Obsidian 1.8 release notes 2026" lepiej niż "obsidian nowości"\n\nUWAGI:\n- Wyniki mogą być nieaktualne lub nieprawdziwe - ważne fakty weryfikuj\n- Cytuj źródła: podawaj URL z wyniku',
+  'mcp.web_search.desc': 'Wyszukaj informacje w internecie.\n\nJAK DZIAŁA:\n- Zapytanie → lista wyników: tytuł, URL i FRAGMENT treści (nie cała strona)\n- Po pełną treść wybranego wyniku sięgnij narzędziem web_read\n- Domyślna Jina wymaga darmowego klucza do wyszukiwania. Po błędzie innego dostawcy plugin próbuje Jiny; gdy ona też zawiedzie, zwraca pierwotny błąd\n\nKIEDY UŻYWAĆ:\n- Aktualne wydarzenia, ceny, daty, nowości, dokumentacja - cokolwiek spoza vaulta\n- User mówi: "sprawdź w necie", "wyszukaj", "co mówi internet o..."\n\nKIEDY NIE UŻYWAĆ:\n- Pytanie o notatki albo pamięć usera → search\n- Treść jest w vaultcie → read\n\nJAK FORMUŁOWAĆ ZAPYTANIA:\n- Konkretnie, najlepiej po angielsku (chyba że szukasz polskich źródeł)\n- "Obsidian 1.8 release notes 2026" lepiej niż "obsidian nowości"\n\nUWAGI:\n- Wyniki mogą być nieaktualne lub nieprawdziwe - ważne fakty weryfikuj\n- Cytuj źródła: podawaj URL z wyniku',
   'mcp.web_search.param.query': 'Zapytanie wyszukiwania. Precyzyjne, najlepiej po angielsku dla globalnych wyników.',
   'mcp.web_search.param.limit': 'Maksymalna liczba wyników (domyślnie 5, max 10). Dla szybkiego pytania wystarczy 3.',
   'mcp.web_search.param.lang': 'Opcjonalny język zapytania. Po podaniu do zapytania dodawane jest lang:X.',
 
   // web_read
-  'mcp.web_read.desc': 'Odczytaj treść strony internetowej.\n\nJAK DZIAŁA:\n- Podajesz URL → dostajesz tekst strony bez HTML i reklam (Jina Reader)\n- Czyta też PDF-y - reader sam wyciąga z nich tekst. Obrazów, archiwów i stron za logowaniem nie przeczyta\n- Strona dłuższa niż limit wraca jako STRESZCZENIE tanim modelem + pole citations z dosłownymi cytatami. Bez modelu Badacza treść jest ucinana - mówi o tym pole note\n- Wolno czytać tylko adresy znanego pochodzenia: zwrócone wcześniej przez web_search albo podane przez użytkownika. Nie zgaduj URL-i\n\nKIEDY UŻYWAĆ:\n- Po web_search, gdy fragment nie wystarcza i trzeba przeczytać całość\n- User podaje link: "przeczytaj ten artykuł", "co jest na tej stronie"\n\nKIEDY NIE UŻYWAĆ:\n- Gdy wystarczą fragmenty z web_search\n\nUWAGI:\n- Cytując, bierz tekst z pola citations - to dosłowne fragmenty, streszczenie jest parafrazą',
+  'mcp.web_read.desc': 'Odczytaj treść strony internetowej.\n\nJAK DZIAŁA:\n- Podajesz URL → dostajesz tekst strony bez HTML i reklam (Jina Reader; działa bez klucza)\n- Czyta też PDF-y - reader sam wyciąga z nich tekst. Obrazów, archiwów i stron za logowaniem nie przeczyta\n- Strona dłuższa niż limit wraca jako STRESZCZENIE tanim modelem + pole citations z dosłownymi cytatami. Bez modelu Badacza treść jest ucinana - mówi o tym pole note\n- Wolno czytać tylko adresy znanego pochodzenia: zwrócone wcześniej przez web_search albo podane przez użytkownika. Nie zgaduj URL-i\n\nKIEDY UŻYWAĆ:\n- Po web_search, gdy fragment nie wystarcza i trzeba przeczytać całość\n- User podaje link: "przeczytaj ten artykuł", "co jest na tej stronie"\n\nKIEDY NIE UŻYWAĆ:\n- Gdy wystarczą fragmenty z web_search\n\nUWAGI:\n- Cytując, bierz tekst z pola citations - to dosłowne fragmenty, streszczenie jest parafrazą',
   'mcp.web_read.param.url': 'Pełny URL strony do odczytania (np. https://example.com/article)',
 
   // generate_image

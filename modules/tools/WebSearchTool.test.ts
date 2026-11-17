@@ -211,3 +211,13 @@ test.serial('wyłączony Web Search i puste query odbijają się jak dotąd', as
     t.false(empty.success);
     t.is(calls.length, 0);
 });
+
+test.serial('web_search po odpowiedzi 401 Jiny zwraca instrukcję zamiast wyników', async t => {
+    const calls = mockNetwork(() => { throw Object.assign(new Error('{"code":401,"name":"AuthenticationRequiredError"}'), { status: 401 }); });
+    const result = await createWebSearchTool().execute({ query: 'jina-auth-tool-q' }, {}, pluginWith({ provider: 'jina' })) as { success: boolean; error: string };
+    t.false(result.success);
+    t.regex(result.error, /Jina/);
+    t.regex(result.error, /Web Search/);
+    t.regex(result.error, /https:\/\/jina\.ai\/reader\//);
+    t.is(calls.length, 1);
+});

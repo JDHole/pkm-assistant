@@ -560,3 +560,5 @@ M4 F2m dodaje PL/EN `subagent.draft.proposal_note`: wynik writera w kopii
 informuje o propozycji do decyzji agenta zlecającego i zakazie samodzielnego
 zatwierdzania przez suba. Tekst trafia przez MCP do modelu po udanym zapisie;
 kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
+
+PL/EN opisują wymagany klucz wyszukiwania Jina, status wspólnych kluczy mediów i skrót do sekcji Klucze API.

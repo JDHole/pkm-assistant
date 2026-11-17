@@ -1409,3 +1409,5 @@ await diagnostyki daje 2 timeouty przed startem; usunięcie startu następcy prz
 _ready daje 2 timeouty narzędzi; usunięcie dispose poprzednika oblewa 2 próby
 zastąpienia z unload; przesunięcie subskrypcji za pierwsze GC oblewa 2 próby
 payloadCollected dla A. Każda para obejmuje desktop i mobile.
+
+Sekcje STT i obrazów pokazują wyłącznie status wspólnego klucza `chat.apiKeys` i skrót przez `owner.openSection` do Kluczy API; wartości klucza nie są renderowane.

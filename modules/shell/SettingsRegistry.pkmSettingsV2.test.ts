@@ -106,7 +106,7 @@ test('SettingsRegistry.ts code does not contain the string pkm-settings-v2', t =
 
 
 for (const phone of [true, false]) {
-    test.serial(`settings render preserves active content and reveals its tab only on phone=${phone}`, async t => {
+    test.serial(`settings render preserves active content and keeps all tabs in place on phone=${phone}`, async t => {
         const previous = Platform.isPhone;
         Platform.isPhone = phone;
         t.teardown(() => { Platform.isPhone = previous; });
@@ -120,7 +120,7 @@ for (const phone of [true, false]) {
         t.deepEqual(nav.children.map(button => ({ label: button.textContent, active: button.classSet.has('is-active'),
             scroll: button.scrollRequest })), [
             { label: 'Models', active: false, scroll: null },
-            { label: 'API keys', active: true, scroll: phone ? { block: 'nearest', inline: 'nearest' } : null },
+            { label: 'API keys', active: true, scroll: null },
         ]);
     });
 }
