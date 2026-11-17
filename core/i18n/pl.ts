@@ -1577,6 +1577,7 @@ export const pl: Record<string, string> = {
   'settings.web_search_title': 'Web Search',
   'settings.jina_key_warning': 'Brak klucza Jina: wyszukiwanie nie zadziała, dopóki go nie wpiszesz.',
   'settings.shared_key_present': '✓ Klucz API jest wpisany',
+  'settings.shared_key_locked': 'Klucz API jest zapisany. Odblokuj bezpieczny magazyn, aby go użyć.',
   'settings.shared_key_missing': 'Brak klucza API - funkcja nie zadziała, dopóki go nie wpiszesz.',
   'settings.open_api_keys': 'Otwórz Klucze API',
   'settings.web_search_desc': 'Wyszukiwanie przez Jina AI wymaga darmowego klucza API. Odczyt stron przez Jina Reader działa bez klucza. Gdy inny dostawca zawiedzie, plugin próbuje Jiny.',
