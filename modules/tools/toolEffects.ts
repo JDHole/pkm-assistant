@@ -39,7 +39,7 @@ function effect(tool: string, action: string, targets: EffectTarget[], check: Ef
 // Narzędzia bez bezpośredniego skutku. `delegate` sam niczego nie zapisuje: ewentualne zapisy
 // suba to jego własne, osobne wywołania narzędzi.
 const READ_ONLY_TOOLS = new Set([
-    'read', 'list', 'search', 'web_search', 'web_read', 'ask_user',
+    'read', 'check_syntax', 'list', 'search', 'web_search', 'web_read', 'ask_user',
     'kom_list', 'kom_read', 'artifact_read', 'artifact_list', 'delegate',
 ]);
 

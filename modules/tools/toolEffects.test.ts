@@ -117,7 +117,7 @@ test('delegate has no direct effect of its own', t => {
 });
 
 test('read-only tools have no effect', t => {
-    for (const name of ['read', 'list', 'search', 'web_search', 'web_read', 'ask_user', 'kom_list', 'kom_read', 'artifact_read', 'artifact_list']) {
+    for (const name of ['read', 'check_syntax', 'list', 'search', 'web_search', 'web_read', 'ask_user', 'kom_list', 'kom_read', 'artifact_read', 'artifact_list']) {
         t.is(describeToolEffect(name, {}), null, `${name} is read-only`);
     }
 });
