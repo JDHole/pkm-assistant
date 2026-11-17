@@ -872,7 +872,9 @@ export class MCPClient {
             // deklarują właściciela tury (`chat_streaming.ts` podaje `turn.agentName`,
             // `SubAgentRunner.ts` strażuje `agentName` przed samym wywołaniem), ale gałąź musi
             // istnieć dla każdego wywołania, które tego nie robi.
-            const invocationAgentName = agentName || this.plugin.agentManager?.getActiveAgent?.()?.name || null;
+            if (toolCall.name === 'obsidian_app' && args?.action === 'render_check' && !agentName)
+                return { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' }, isError: true };
+            const invocationAgentName = agentName || (toolCall.name === 'obsidian_app' && args?.action === 'render_check' ? null : this.plugin.agentManager?.getActiveAgent?.()?.name) || null;
             const argsWithContext: ToolCallArgs = (args && typeof args === 'object' && !Array.isArray(args))
                 ? { ...args, _invocationAgentName: invocationAgentName }
                 : { _invocationAgentName: invocationAgentName };
@@ -1352,7 +1354,7 @@ export class MCPClient {
                     const current = invocationAgentName ? this.plugin.agentManager?.getAgent(invocationAgentName) : null;
                     return !!current && current.name === agent.name && current.admin_access === true;
                 },
-                agentKnown: true,
+                agentKnown: toolCall.name !== 'obsidian_app' || args.action !== 'render_check' || !!agentName,
                 authorizeFileRead: (canonicalPath) => {
                     if (typeof canonicalPath !== 'string' || canonicalPath.length === 0) {
                         return { allowed: false, reason: 'Invalid path' };

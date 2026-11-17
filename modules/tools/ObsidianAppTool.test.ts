@@ -491,3 +491,70 @@ test.serial('render_check observes only the bound reading view and rechecks admi
         t.is(toolResultStatus(rejected), 'error'); t.false(JSON.stringify(rejected).includes('PRIVATE_WIDGET'));
     } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }
 });
+
+test.serial('render_check production port refuses missing identity, revoked access and unload before source read', async t => {
+    const file = { path: 'Notes/A.md' }; let reads = 0; let opens = 0;
+    const agent = { name: 'Tola', admin_access: false, disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: false, read_notes: true } };
+    let onOpen = () => {};
+    const leaf = { openFile: async () => { opens++; onOpen(); } };
+    const app = { workspace: { getLeaf: () => leaf, getActiveFile: () => file }, vault: { getAbstractFileByPath: () => file, read: async () => { reads++; return 'private'; } } };
+    const port = createWorkspacePort(app as never, (value): value is never => value === file);
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port));
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
+    const client = new MCPClient(app as never, plugin as never, registry);
+    const call = (name: string | null) => client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'render_check', path: file.path, wait_ms: 10 } }, name);
+    t.is(toolResultStatus(await call(null)), 'error'); t.deepEqual([opens, reads], [0, 0]);
+    onOpen = () => { agent.focusFolders = []; };
+    t.is(toolResultStatus(await call('Tola')), 'error'); t.deepEqual([opens, reads], [1, 0]);
+    agent.focusFolders = ['Notes']; onOpen = () => port.dispose!();
+    t.is(toolResultStatus(await call('Tola')), 'error'); t.deepEqual([opens, reads], [2, 0]);
+});
+
+test.serial('render_check filters embedded and commented blocks, masks errors and catches transient host changes through MCP', async t => {
+    const previous = globalThis.HTMLElement;
+    class Element {
+        ownerDocument!: { defaultView: unknown };
+        parentElement: Element | null = null;
+        children: Element[] = [];
+        constructor(public classList: string[] = [], public textContent = '') {}
+        querySelectorAll() { return this.children; }
+        querySelector() { return null; }
+    }
+    Object.defineProperty(globalThis, 'HTMLElement', { value: Element, configurable: true });
+    try {
+        let mutation = () => {}; let observed = () => {};
+        class Observer { constructor(callback: () => void) { mutation = callback; } observe() { observed(); } disconnect() {} }
+        const listeners = new Map<string, (event: never) => void>();
+        const original = (..._args: unknown[]) => {};
+        const win = { MutationObserver: Observer, console: { error: original }, setTimeout, clearTimeout,
+            addEventListener: (name: string, callback: (event: never) => void) => listeners.set(name, callback), removeEventListener: (name: string) => listeners.delete(name) };
+        const root = new Element(); root.ownerDocument = { defaultView: win };
+        const embed = new Element(['internal-embed']); const embedded = new Element(['block-language-dataviewjs'], 'embedded secret'); embedded.parentElement = embed;
+        root.children = [embedded];
+        const file = { path: 'Notes/A.md' }; const other = { path: 'Secret/B.md' };
+        let active = file; let state = { file: file.path, mode: 'preview' };
+        const view = { file, previewMode: { containerEl: root }, getViewType: () => 'markdown' };
+        const leaf = { view, getViewState: () => ({ state }), setViewState: async (v: { state: typeof state }) => { state = v.state; }, openFile: async () => {} };
+        const events = new Map<string, () => void>();
+        const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => active, getLeaf: () => leaf,
+            iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf), on: (name: string, cb: () => void) => { events.set(name, cb); return name; }, offref: (name: string) => events.delete(name) },
+            vault: { getAbstractFileByPath: () => file, read: async () => '<!--\n```dataview\nx\n```\n-->\n%%\n```dataviewjs\nx\n```\n%%\n```dataviewjs\nx\n```' } };
+        const port = createWorkspacePort(app as never, (value): value is never => value === file);
+        const client = chain(port, true, true);
+        const first = await client.call({ action: 'render_check', path: file.path, wait_ms: 10 });
+        const json = JSON.stringify(first);
+        t.true(json.includes('"source_blocks":{"count":1,"dataview":[],"dataviewjs":[11]}'));
+        t.true(json.includes('"block_count":0')); t.true(json.includes('"coverage":"partial"')); t.false(json.includes('embedded secret'));
+        let ready = () => {}; const observing = new Promise<void>(resolve => { ready = resolve; }); observed = ready;
+        const pending = client.call({ action: 'render_check', path: file.path, wait_ms: 100 }); await observing;
+        const savedError = listeners.get('error')!; const savedRejection = listeners.get('unhandledrejection')!;
+        win.console.error('x'.repeat(977) + ' sk-abcdefghijklmnopqrstuvwxyz1234567890');
+        const masked = await pending; t.false(JSON.stringify(masked).includes('sk-abcdefghijklmnopqrs'));
+        let lateReads = 0; savedError({ get error() { lateReads++; return null; } } as never); savedRejection({ get reason() { lateReads++; return null; } } as never); t.is(lateReads, 0);
+        const nextReady = new Promise<void>(resolve => { observed = resolve; });
+        const changed = client.call({ action: 'render_check', path: file.path, wait_ms: 100 }); await nextReady;
+        active = other; view.file = other; state.file = other.path; events.get('file-open')!(); mutation();
+        active = file; view.file = file; state.file = file.path;
+        t.is(toolResultStatus(await changed), 'error'); t.is(events.size, 0);
+    } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }
+});

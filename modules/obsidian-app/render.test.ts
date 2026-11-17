@@ -55,6 +55,21 @@ test('executor discloses details only with trusted admin flag', async t => {
     t.deepEqual(unknown, { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' } });
 });
 
+test('detail permission exception falls back to status', async t => {
+    const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => 'A.md', fileExists: () => true,
+        openPath: async () => {}, readSource: async () => '', observeRender: async () => observation });
+    const result = await execute({ action: 'render_check', path: 'A.md' }, { agentKnown: true, authorizeFileRead: () => ({ allowed: true }), canDiscloseDetails: () => { throw new Error('detail'); } });
+    t.true(result.ok); t.true(JSON.stringify(result).includes('"status":"rendered"')); t.false(JSON.stringify(result).includes('private widget content'));
+});
+
+test('read authorization exception denies the action', async t => {
+    let opens = 0;
+    const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => 'A.md', fileExists: () => true,
+        openPath: async () => { opens++; } });
+    const result = await execute({ action: 'render_check', path: 'A.md' }, { agentKnown: true, authorizeFileRead: () => { throw new Error('read'); } });
+    t.deepEqual(result, { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' } }); t.is(opens, 0);
+});
+
 test('coverage uses source fence lines and distinguishes unrendered blocks', t => {
     const source = { dataview: [5], dataviewjs: [2] };
     const partial = buildRenderResult({ ...observation, blocks: [] }, false, source);
@@ -62,7 +77,7 @@ test('coverage uses source fence lines and distinguishes unrendered blocks', t =
     t.deepEqual(partial.observed_blocks, { count: 0, dataview: 0, dataviewjs: 0 });
     t.is(partial.coverage, 'partial'); t.is(partial.coverage_note, 'Some blocks were not rendered by Obsidian (lazy rendering or collapsed headings) and were not checked.');
     const complete = buildRenderResult(observation, false, source);
-    t.is(complete.coverage, 'complete'); t.is(complete.block_numbering, 'observed_order');
+    t.is(complete.coverage, 'counts_match'); t.is(complete.block_numbering, 'observed_order');
 });
 
 

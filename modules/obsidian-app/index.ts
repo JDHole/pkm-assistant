@@ -12,8 +12,9 @@ export type LeafIdentity = { kind: 'file'; path: string } | { kind: 'none' } | {
 export type LeafInfo = { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'unknown' } } | { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
 export interface WorkspacePort {
     listLeaves(): LeafInfo[];
-    observeRender?(path: string, waitMs: number, signal: AbortSignal): Promise<RenderObservation>;
+    observeRender?(path: string, waitMs: number, signal: AbortSignal, authorize?: () => boolean): Promise<RenderObservation>;
     dispose?(): void;
+    isDisposed?(): boolean;
     describeCaptureTarget?(): CaptureTarget;
     getActivePath(): string | null;
     readSource?(path: string): Promise<string>;
@@ -116,16 +117,23 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                 await port.openPath(action.path, { newTab: action.action === 'open' ? action.newTab : false });
                 if (action.action === 'render_check') {
                     if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
                     if (port.getActivePath() !== action.path || !port.observeRender) return fail('unavailable');
                     if (!port.readSource) return fail('unavailable');
                     const source = await port.readSource(action.path);
                     if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
-                    const observation = await port.observeRender(action.path, action.waitMs, controller.signal);
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    const observation = await port.observeRender(action.path, action.waitMs, controller.signal, () => !port.isDisposed?.() && authorizedPath(action.path, context?.authorizeFileRead));
                     if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
-                    if (port.getActivePath() !== action.path || !authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
+                    if (port.getActivePath() !== action.path) return fail('unavailable');
                     if (observation.verify && !observation.verify()) return fail('unavailable');
                     let detail = false;
                     try { detail = context?.canDiscloseDetails?.() === true; } catch { /* Fail closed. */ }
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
                     return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, detail, options.countSourceBlocks?.(source)) };
                 }
                 const verified = port.getActivePath() === action.path;

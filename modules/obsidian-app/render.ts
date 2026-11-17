@@ -1,6 +1,6 @@
 import { maskSensitiveData } from '../../core/index.js';
 
-export type RenderBlock = { language: string; text: string; error: string | null };
+export type RenderBlock = { language: string; text: string; error: string | null; textClipped?: boolean; errorClipped?: boolean };
 export type RenderObservation = { blocks: RenderBlock[]; errors: { text: string; truncated: boolean }[]; errorsTruncated: boolean; stabilized: boolean; elapsedMs: number; mode: string; verify?: () => boolean };
 
 export type SourceBlocks = { dataview: number[]; dataviewjs: number[] };
@@ -9,7 +9,7 @@ export type SourceBlocks = { dataview: number[]; dataviewjs: number[] };
 export function buildRenderResult(observation: RenderObservation, detail: boolean, lines: SourceBlocks = { dataview: [], dataviewjs: [] }) {
     const observed = { dataview: 0, dataviewjs: 0 };
     for (const block of observation.blocks) if (block.language === 'dataview' || block.language === 'dataviewjs') observed[block.language]++;
-    const coverage = lines.dataview.length === observed.dataview && lines.dataviewjs.length === observed.dataviewjs ? 'complete' : 'partial';
+    const coverage = lines.dataview.length === observed.dataview && lines.dataviewjs.length === observed.dataviewjs ? 'counts_match' : 'partial';
     let remaining = 12000;
     const blocks = observation.blocks.map((block, index) => {
         const status = block.error !== null ? 'error' : !observation.stabilized ? 'timeout' : block.text.trim() ? 'rendered' : 'empty';
@@ -23,7 +23,7 @@ export function buildRenderResult(observation: RenderObservation, detail: boolea
         const errorLimit = Math.min(1000, remaining);
         const errorValue = error?.slice(0, errorLimit) ?? null;
         remaining -= errorValue?.length ?? 0;
-        return { ...base, text: value, text_truncated: value.length < text.length, ...(error !== null ? { error: errorValue, error_truncated: (errorValue?.length ?? 0) < error.length } : {}) };
+        return { ...base, text: value, text_truncated: block.textClipped === true || value.length < text.length, ...(error !== null ? { error: errorValue, error_truncated: block.errorClipped === true || (errorValue?.length ?? 0) < error.length } : {}) };
     });
     const errors = detail ? observation.errors.slice(0, 20).map(error => {
         const masked = maskSensitiveData(error.text.replace(/\s+/g, ' ').trim());
