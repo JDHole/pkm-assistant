@@ -457,7 +457,7 @@ oraz AccessGuard odmawiają przed wyjątkiem admin_access. Narzędzia treści, i
 listingi i skany pamięci używają tego samego helpera; runtime review ma własne I/O.
 Test behawioralny publicznego MCP: `modules/tools/AdminVaultTools.test.ts` (F4).
 
-The optional `pkmAssistant.obsidianAppEnabled` setting defaults off; changing it requires a plugin reload. Permission actions `app.state` and `app.open` are read-level, with `app.open` checked against its vault target.
+The optional `pkmAssistant.obsidianAppEnabled` and experimental `pkmAssistant.obsidianAppRenderCheck` settings default off and accept only literal `true` on load. Both require a plugin reload; render checking also requires navigation to be enabled. The settings UI hides the experimental switch when navigation is off. Permission actions `app.state` and `app.open` are read-level, with `app.open` checked against its vault target.
 
 ## Mobile M1 P1
 

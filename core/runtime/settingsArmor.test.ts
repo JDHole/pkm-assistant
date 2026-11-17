@@ -396,3 +396,16 @@ for (const [label, value, expected] of [
         t.is(fake.files[SETTINGS_LAST_GOOD_PATH], original);
     });
 }
+
+for (const [label, value, expected] of [
+    ['absent', undefined, false], ['true', true, true], ['false', false, false],
+    ['string', 'true', false], ['number', 1, false], ['null', null, false],
+] as const) {
+    test(`render check setting: armor loads ${label}`, async t => {
+        const original = JSON.stringify({ pkmAssistant: { obsidianAppRenderCheck: value } });
+        const fake = makeIo({ [SETTINGS_PATH]: original });
+        const result = await loadSettingsWithArmor({ io: fake.io, defaults: defaultSettings() });
+        t.is(result.settings.pkmAssistant?.obsidianAppRenderCheck, expected);
+        t.is(fake.files[SETTINGS_PATH], original);
+    });
+}
