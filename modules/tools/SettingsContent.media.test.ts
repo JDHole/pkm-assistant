@@ -46,3 +46,17 @@ test.serial('status mediów czyta wspólne klucze, nie ujawnia ich i otwiera Klu
     statuses[1].click?.();
     t.deepEqual(opened, ['api-keys', 'api-keys']);
 });
+
+
+test.serial('saved locked media keys prompt for unlocking in both languages', t => {
+    for (const locale of ['pl', 'en'] as const) {
+        setLocale(locale); FakeSetting.rows = [];
+        const ctx = { pkm: { stt: { platform: 'google' }, imageGen: { platform: 'openai' }, chat: { apiKeys: {} }, secureStorage: { refs: { 'pkmAssistant.chat.apiKeys.gemini': 'secret-id', 'pkmAssistant.chat.apiKeys.openai': 'secret-id' } } }, plugin: { secretsStorage: { passwordKey: null } }, owner: { render() {}, openSection() {} }, icons: {}, Setting: FakeSetting, save() {} } as unknown as ToolsSettingsCtx;
+        renderMediaToolsSection(document.createElement('div'), ctx);
+        const labels = FakeSetting.rows.filter(row => row.click).map(row => row.label);
+        t.is(labels.length, 2);
+        t.true(labels.every(label => locale === 'pl' ? label.includes('Odblokuj') : label.includes('Unlock')));
+        t.false(labels.some(label => label.includes('secret-id')));
+    }
+    setLocale('en');
+});

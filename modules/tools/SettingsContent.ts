@@ -49,12 +49,14 @@ type ClaudeImportModalCtor = new (
 export type ToolsSettingsCtx = Pick<SettingsSectionCtx, 'save' | 'icons' | 'Setting'> & {
     pkm: SettingsSectionCtx['pkm'] & {
         chat?: { apiKeys?: Record<string, string> };
+        secureStorage?: { refs?: Record<string, string> };
         externalMcpServers?: ExternalMcpServerConfig[];
         imageGen?: ImageGenSettings;
         stt?: SttSettings;
     };
     owner: { app: App; render: () => unknown; openSection: (id: string) => void };
     plugin?: {
+        secretsStorage?: { passwordKey: unknown };
         serverManager?: { serverLoader?: { getServerCatalog?: () => ServerCatalogEntry[] } | null } | null;
         externalMcpManager?: {
             getStatus?: (id: string) => ExternalServerStatus;
@@ -499,9 +501,10 @@ function renderExternalRow(container: HTMLElement, cfg: ExternalMcpServerConfig,
 
 function renderSharedKeyStatus(container: HTMLElement, ctx: ToolsSettingsCtx, key: string): void {
     const hasKey = !!ctx.pkm.chat?.apiKeys?.[key]?.trim();
+    const locked = !hasKey && ctx.plugin?.secretsStorage?.passwordKey === null && !!ctx.pkm.secureStorage?.refs?.[`pkmAssistant.chat.apiKeys.${key}`];
     const setting = new ctx.Setting(container);
     setSvgLabel(setting.nameEl, hasKey ? ctx.icons?.dotGreen?.(12) || '' : '',
-        t(hasKey ? 'settings.shared_key_present' : 'settings.shared_key_missing'));
+        t(hasKey ? 'settings.shared_key_present' : locked ? 'settings.shared_key_locked' : 'settings.shared_key_missing'));
     if (!hasKey) setting.settingEl.addClass('pkm-key-warning');
     setting.addButton(button => button.setButtonText(t('settings.open_api_keys'))
         .onClick(() => ctx.owner.openSection('api-keys')));

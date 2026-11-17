@@ -1570,6 +1570,7 @@ export const en: Record<string, string> = {
   'settings.web_search_title': 'Web Search',
   'settings.jina_key_warning': 'Jina key missing: search will not work until you enter it.',
   'settings.shared_key_present': '✓ API key is configured',
+  'settings.shared_key_locked': 'The API key is saved. Unlock secure storage to use it.',
   'settings.shared_key_missing': 'API key missing - this feature will not work until you enter it.',
   'settings.open_api_keys': 'Open API Keys',
   'settings.web_search_desc': 'Jina AI search requires a free API key. Jina Reader can read pages without a key. If another provider fails, the plugin tries Jina.',
