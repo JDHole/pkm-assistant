@@ -211,16 +211,8 @@ Pure helpery `resolveDecisionTreeInstructions` / `splitDecisionTreeRules` / `bui
   format czyta `artifactIndex.js`
 - `core/security/promptFence.js` - implementacja `fenceUntrusted`
 
-## Mobile T1 — środowisko
+## Mobile T1 - środowisko
 
-Opcjonalny `mobileEnvironment` dodaje sekcję `mobile_environment` przez zwykłe
-przełączanie i override agenta/globalny; brak kontekstu nie zmienia promptu desktopu.
-Stan możliwości pochodzi z composition root, a nie z importu Platform w module.
+Opcjonalny `mobileEnvironment` dodaje edytowalną sekcję `mobile_environment` telefonu lub tabletu; na desktopie brak jej także w edytorach. `renderMobileEnvironment` współdzieli opis z runnerem sub-agentów i nie podaje liczby serwerów MCP; stan pochodzi z composition root.
 
-Sekcja kontekstu `message_time` jest stałą instrukcją PL/EN dla obu platform; bieżąca godzina pochodzi wyłącznie z wiadomości, nie z promptu systemowego.
-
-Stabilność prefiksu znaczników dotyczy żywego okna rozmowy. Format sesji pozostaje bez zmian; wcześniejsze wiadomości po wznowieniu nie mają znacznika. Sekcja urządzenia nie opisuje liczby połączonych serwerów MCP.
-
-`renderMobileEnvironment` is the shared device description used by the prompt builder and sub-agent runner; keep the wording in this renderer so both receive the same snapshot content.
-
-Desktop omits the conditional mobile section, including in the editors, like other sections whose runtime conditions do not hold.
+Sekcja `message_time` to stała instrukcja PL/EN; bieżąca godzina pochodzi ze znacznika wiadomości, nie z promptu systemowego. Po wznowieniu sesji wcześniejsze wiadomości nie mają znacznika.

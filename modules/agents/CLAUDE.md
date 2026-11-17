@@ -334,13 +334,6 @@ pełny stan pamięci, ślad zależności z watcherem/playbookami, logi i nasłuc
 rzeczywiste błędy pamięci, skilli, komunikatora, mapy, ładowania agentów i playbooków.
 Dotychczasowe asercje S1a pozostają bez zmian.
 
-## Mobile T1 — możliwości urządzenia
+## Mobile T1 - możliwości urządzenia
 
-`AgentManager.getMobileEnvironment()` pobiera opcjonalny snapshot z wstrzykniętego
-composition root; decyzja o utrwaleniu go dla okna rozmowy należy do czatu.
-`check_syntax` należy do grupy vault i przełącznika `read_notes`; można je wyłączyć osobno w `disabled_tools`. Nowo tworzony fabryczny researcher ma je na liście narzędzi; istniejące szablony nie są przepisywane.
-
-Inspektor promptu pobiera bieżącą migawkę środowiska mobilnego przez `getMobileEnvironment`; żywe okno czatu zamraża własną migawkę.
-
-The profile prompt editor displays the mobile environment override only when the injected environment provider supplies a snapshot; the inspector uses that same provider. On desktop the conditional section is absent, as in the built prompt.
-`check_syntax` jest domyślnie wyłączone i nie występuje w grupach profilu ani domyślnym szablonie.
+`AgentManager.getMobileEnvironment()` pobiera migawkę z composition root dla inspektora i edytora promptu; żywe okno czatu zamraża własną migawkę. Sekcja urządzenia jest edytowalna na mobile, a na desktopie nie występuje. `check_syntax` jest domyślnie wyłączone i nie występuje w grupach profilu ani domyślnym szablonie.

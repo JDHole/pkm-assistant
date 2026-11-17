@@ -2566,15 +2566,8 @@ Ograniczenia: atrapa AVA nie mierzy CSS ani natywnej kolejności zdarzeń.
 Rzeczywista kolejność dotyku w Android WebView, pozycja paska systemu i możliwe
 nakładanie oraz działanie z otwartą klawiaturą ekranową wymagają fizycznego telefonu.
 
-## Mobile T1 — snapshot środowiska
+## Mobile T1 - migawka środowiska
 
-`RollingWindow.mobileEnvironment` zamraża możliwości przy pierwszej turze okna;
-prompt nadal buduje się co turę, ale ta sekcja nie zmienia się po połączeniu MCP.
-Nowe okno pobiera nowy snapshot. Zmiany rzeczywistych możliwości w trakcie sesji
-nie są odzwierciedlane aż do utworzenia nowego okna.
+`RollingWindow.mobileEnvironment` zamraża możliwości przy pierwszej turze okna; nowe okno pobiera nową migawkę, więc zmiany w trakcie sesji nie są odzwierciedlane w prompcie.
 
-Czas wiadomości użytkownika jest metadanym `messageTime` nadawanym przy wysyłce; `getMessagesForAPI` dodaje linię tylko do kopii dla modelu, także dla załączników. Format sesji nie zapisuje dowolnych metadanych, więc po wznowieniu znacznik znika; treść i podsumowania pozostają czyste.
-
-Znacznik jest całą linią zamrożoną w języku interfejsu przy utworzeniu; statystyki okna liczą ją i unieważniają cache po zmianie. Stabilność prefiksu dotyczy żywego okna; format sesji nie zapisuje znacznika, więc po wznowieniu wcześniejsze wiadomości go nie mają.
-
-Queued messages preserve their rendered message time through both loop injection and the delayed drain, including when the drain calls send again; the send clock is injectable for deterministic tests.
+`messageTime` to cała zlokalizowana linia zamrożona przy wysyłce wiadomości użytkownika. `getMessagesForAPI` dodaje ją tylko do kopii dla modelu, także przy załącznikach; statystyki uwzględniają linię, a kolejka zachowuje ją podczas opóźnionej wysyłki. Format sesji nie zapisuje znacznika, więc wcześniejsze wiadomości po wznowieniu go nie mają.

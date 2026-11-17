@@ -1410,24 +1410,12 @@ _ready daje 2 timeouty narzędzi; usunięcie dispose poprzednika oblewa 2 próby
 zastąpienia z unload; przesunięcie subskrypcji za pierwsze GC oblewa 2 próby
 payloadCollected dla A. Każda para obejmuje desktop i mobile.
 
-Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu właściwej treści zadania; zachowanie znacznika i stałej instrukcji sprawdzają testy runnera sub-agentów.
-Sekcje STT i obrazów pokazują wyłącznie status wspólnego klucza `chat.apiKeys` i skrót przez `owner.openSection` do Kluczy API; wartości klucza nie są renderowane.
+Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu treści zadania. Sekcje STT i obrazów pokazują trzy stany wspólnego klucza `chat.apiKeys` (dostępny, zablokowany, brak) oraz przycisk `owner.openSection` do Kluczy API, bez wartości klucza.
+
 ## check_syntax
 
-Narzędzie sprawdza JS i JSON bez wykonywania kodu; `CHECK_SYNTAX_ENABLED` domyślnie wyłącza rejestrację do decyzji właściciela i końcowego odbioru. YAML jest poza zakresem po [recenzji R5](/tmp/claude-0/-home-user/574bd53a-639d-50df-8e0d-078cb8e11dc7/scratchpad/codex/r5-wynik.md) (zależność od Node i czas parsowania); Markdown jest poza zakresem po [recenzji R5](/tmp/claude-0/-home-user/574bd53a-639d-50df-8e0d-078cb8e11dc7/scratchpad/codex/r5-wynik.md) (błędy rozpoznawania kontenerów). Skaner `markdownFences.ts` pozostaje na potrzeby `render_check` i jest reeksportowany z `syntaxValidator.ts`. Odczyt, stat i Stop zachowują autoryzację i ograniczenie rozmiaru.
+`CheckSyntaxTool.ts` sprawdza tylko JS i JSON bez wykonywania kodu; `CHECK_SYNTAX_ENABLED` domyślnie wyłącza rejestrację. YAML i Markdown nie są obsługiwane, a pakiet `yaml` jest tylko zależnością developerską. Narzędzie używa paginacji `read`, limitu 2 MiB i 256 poziomów JSON oraz sprawdza anulowanie; każda strona ponownie czyta źródło. Błędy składni zwracają `ok: false`, a błędy odczytu są porażką.
 
-`obsidian_app render_check` uses `app.open` read permission and canonical note target; MCP passes trusted callbacks that recheck the current agent identity, read permission and administrator access outside model arguments. Only admin receives masked render text/errors; other main agents receive statuses. It opens the note on screen and uses heuristic DOM stabilization. Sub-agents remain denied. Details and device limitations: `modules/obsidian-app/CLAUDE.md`.
+## render_check
 
-F4: `obsidian_app render_check` dostaje funkcję ponownie sprawdzającą aktualny profil agenta, a nie zapamiętaną flagę administratora. Status i ograniczenia pokrycia podglądu opisuje moduł obsidian-app; brak publicznego przewijania do wiersza w typach API.
-`obsidian_app render_check` uses `app.open` read permission and canonical note target; MCP passes trusted agent identity and explicit admin status outside model arguments. Only admin receives masked render text/errors; other main agents receive statuses. It opens the note on screen and uses heuristic DOM stabilization. Sub-agents remain denied. Details and device limitations: `modules/obsidian-app/CLAUDE.md`.
-
-F3: `check_syntax` stosuje limit 2 MiB tekstu i limit 256 poziomów JSON; skaner JSON jest iteracyjny i prowadzi pozycję przyrostowo. Test 80 tys. kluczy ma luźny limit 5 s (pomiar obejmuje walidację, nie tworzenie danych). Narzędzie korzysta z paginacji `read`, sprawdza rozmiar i anulowanie przed następną stroną; `read` ogranicza wynik do 12 tys. znaków i każda strona ponownie czyta źródło, więc nie ma w tym zakresie szybszej publicznej drogi zachowującej jego bramkę oraz widok kopii. Błędy składni są udanym wykonaniem z `ok: false`, błędy odczytu są porażką. Status klucza mediów korzysta z referencji sejfu i dostępnego klucza w ustawieniach; nie pokazuje wartości.
-
-F4b: `ObsidianAppTool` injects source counts from the shared `syntaxValidator` Markdown fence scanner. Keep the scanner shared with syntax validation so nested containers and unclosed fences have identical boundaries.
-
-F4c: `ObsidianAppTool` maskuje komentarze HTML i Obsidiana przed wspólnym skanerem ogrodzeń, zachowując numery wierszy i treść ogrodzeń; `syntaxValidator.ts` nie jest zmieniany. MCP dla `render_check` wymaga jawnej tożsamości wywołującego, bez fallbacku do aktywnego agenta. Pokrycie `counts_match` porównuje tylko liczby, a globalne błędy innych wtyczek mogą zawierać dane nierozpoznane przez maskę.
-
-F4e: `render_check` jest domyślnie wyłączony i niewidoczny w schemacie oraz
-opisie modelu; MCP odmawia przed zgodą i dostępem do portów. Testy włączają go
-jawnie. Warunki ponownego włączenia: `modules/obsidian-app/CLAUDE.md`.
-`obsidian_app render_check` używa uprawnienia `app.open`, ponownie sprawdza profil i administratora, otwiera notatkę oraz heurystycznie czeka na stabilizację DOM; szczegóły i ograniczenia urządzeń opisuje `modules/obsidian-app/CLAUDE.md`.
+`obsidian_app render_check` jest wyłączony w produkcji i ukryty w schemacie; MCP odmawia przed zgodą i dostępem do portów. Po jawnym włączeniu wymaga `app.open`, jawnej tożsamości i ponownych kontroli uprawnień; sub-agenci są odrzucani. `ObsidianAppTool.ts` maskuje komentarze i używa skanera z `markdownFences.ts`, reeksportowanego przez `syntaxValidator.ts`, wyłącznie do liczenia bloków źródłowych. `counts_match` porównuje tylko liczby, a maska może nie rozpoznać danych w błędach innych wtyczek. Ograniczenia obserwacji i warunki włączenia opisuje `modules/obsidian-app/CLAUDE.md`.
