@@ -48,11 +48,12 @@ type ClaudeImportModalCtor = new (
  */
 export type ToolsSettingsCtx = Pick<SettingsSectionCtx, 'save' | 'icons' | 'Setting'> & {
     pkm: SettingsSectionCtx['pkm'] & {
+        chat?: { apiKeys?: Record<string, string> };
         externalMcpServers?: ExternalMcpServerConfig[];
         imageGen?: ImageGenSettings;
         stt?: SttSettings;
     };
-    owner: { app: App; render: () => unknown };
+    owner: { app: App; render: () => unknown; openSection: (id: string) => void };
     plugin?: {
         serverManager?: { serverLoader?: { getServerCatalog?: () => ServerCatalogEntry[] } | null } | null;
         externalMcpManager?: {
@@ -496,6 +497,16 @@ function renderExternalRow(container: HTMLElement, cfg: ExternalMcpServerConfig,
     }
 }
 
+function renderSharedKeyStatus(container: HTMLElement, ctx: ToolsSettingsCtx, key: string): void {
+    const hasKey = !!ctx.pkm.chat?.apiKeys?.[key]?.trim();
+    const setting = new ctx.Setting(container);
+    setSvgLabel(setting.nameEl, hasKey ? ctx.icons?.dotGreen?.(12) || '' : '',
+        t(hasKey ? 'settings.shared_key_present' : 'settings.shared_key_missing'));
+    if (!hasKey) setting.settingEl.addClass('pkm-key-warning');
+    setting.addButton(button => button.setButtonText(t('settings.open_api_keys'))
+        .onClick(() => ctx.owner.openSection('api-keys')));
+}
+
 function renderImageGenSettings(container: HTMLElement, ctx: ToolsSettingsCtx): void {
     const { pkm, owner, icons, Setting } = ctx;
     const h2 = container.createEl('h2', { cls: 'cs-settings-section' });
@@ -597,10 +608,7 @@ function renderImageGenSettings(container: HTMLElement, ctx: ToolsSettingsCtx): 
         }
 
         if (selected?.key && !['stability', 'replicate'].includes(ig.platform)) {
-            container.createEl('p', {
-                text: t('settings.image_gen_reuses_key', { key: selected.key }),
-                cls: 'setting-item-description',
-            });
+            renderSharedKeyStatus(container, ctx, selected.key);
         }
     }
 }
@@ -689,10 +697,7 @@ function renderSttSettings(container: HTMLElement, ctx: ToolsSettingsCtx): void 
 
         const selected = sttPlatforms.find(p => p.id === stt.platform);
         if (selected?.key && !['deepgram', 'assemblyai'].includes(stt.platform)) {
-            container.createEl('p', {
-                text: t('settings.stt_reuses_key', { key: selected.key }),
-                cls: 'setting-item-description',
-            });
+            renderSharedKeyStatus(container, ctx, selected.key);
         }
     }
 }

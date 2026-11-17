@@ -40,7 +40,7 @@ interface WebSearchToolHit {
 
 /**
  * web_search — MCP tool for searching the internet.
- * Uses configured provider (default: Jina AI, free).
+ * Uses configured provider (default: Jina AI, search requires a free key).
  *
  * KSZTAŁT WYNIKU: `results` niesie wyłącznie `{title, url, fragment}`, nigdy pełną treść
  * strony. Zwracanie pełnej treści obok przyciętego pola byłoby iluzoryczne — globalny

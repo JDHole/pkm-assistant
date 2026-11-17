@@ -1411,3 +1411,4 @@ zastąpienia z unload; przesunięcie subskrypcji za pierwsze GC oblewa 2 próby
 payloadCollected dla A. Każda para obejmuje desktop i mobile.
 
 Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu właściwej treści zadania; zachowanie znacznika i stałej instrukcji sprawdzają testy runnera sub-agentów.
+Sekcje STT i obrazów pokazują wyłącznie status wspólnego klucza `chat.apiKeys` i skrót przez `owner.openSection` do Kluczy API; wartości klucza nie są renderowane.

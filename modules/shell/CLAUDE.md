@@ -394,3 +394,5 @@ objęło picker z wyszukiwaniem i bez, `.cs-focus-dropdown`, `.cs-mem-card__cont
 0 zgniecionych pozycji, listy przewijalne do końca. Nie wymagają zmian U23.
 Nie dodano testów AVA ani asercji na tekst CSS. Pomiary geometrii nie zastępują
 próby przewijania dotykiem na Androidzie/iOS i przy większej czcionce systemowej.
+
+Telefon zawija wszystkie zakładki ustawień w wiersze z celami 44 px; aktywna zachowuje `mod-cta`. `openSection` przełącza sekcję przez ten sam hash co nawigacja.

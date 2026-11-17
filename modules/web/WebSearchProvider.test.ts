@@ -176,13 +176,23 @@ test.serial('podłoga bierze wyłącznie własny klucz Jiny, nie klucz padnięte
 test.serial('gdy padnie też podłoga, leci ORYGINALNY błąd wybranego dostawcy', async t => {
     mockNetwork((req) => {
         if (req.url.includes('serper')) throw new Error('serper: kredyty wyczerpane');
-        throw new Error('jina: brak sieci');
+        throw Object.assign(new Error('{"code":401,"name":"AuthenticationRequiredError"}'), { status: 401 });
     });
 
     await t.throwsAsync(
         executeWebSearch('obie-padly-query', { provider: 'serper', apiKeys: { serper: 'K' } }, 5),
         { message: 'serper: kredyty wyczerpane' }
     );
+});
+
+test.serial('Jina 401 AuthenticationRequiredError mówi gdzie wpisać klucz po próbie sieciowej', async t => {
+    const calls = mockNetwork(() => {
+        throw Object.assign(new Error('{"code":401,"name":"AuthenticationRequiredError","message":"Authentication required"}'), { status: 401 });
+    });
+    const error = await t.throwsAsync(executeWebSearch('jina-auth-required-q', { provider: 'jina' }, 5));
+    t.is(error?.message, tr('websearch.jina_needs_key'));
+    t.is(calls.length, 1);
+    t.is(calls[0].headers.Authorization, undefined);
 });
 
 test.serial('Jina jako wybrany dostawca nie próbuje fallbacku sama na siebie', async t => {

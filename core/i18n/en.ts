@@ -1567,7 +1567,11 @@ export const en: Record<string, string> = {
   'settings.consolidation_batch_size': 'L1 batch size',
   'settings.consolidation_batch_size_desc': 'How many sessions go into one L1 summary (and how many L1 into an L2, how many L2 into an L3). A whole number greater than zero - otherwise it falls back to the default (5).',
   'settings.web_search_title': 'Web Search',
-  'settings.web_search_desc': 'Let agents search the internet. Default is Jina AI - it works WITHOUT a key (3 searches/min), and a free key raises the limit to 100/min. Paid providers (Tavily, Brave, Serper) sit on top of the free Jina floor: when they fail, results still arrive.',
+  'settings.jina_key_warning': 'Jina key missing: search will not work until you enter it.',
+  'settings.shared_key_present': '✓ API key is configured',
+  'settings.shared_key_missing': 'API key missing - this feature will not work until you enter it.',
+  'settings.open_api_keys': 'Open API Keys',
+  'settings.web_search_desc': 'Jina AI search requires a free API key. Jina Reader can read pages without a key. If another provider fails, the plugin tries Jina.',
   'settings.web_search_enable': 'Enable Web Search',
   'settings.web_search_enable_desc': 'Agent can search the internet (web_search tool)',
   'settings.web_provider': 'Provider',
@@ -2562,7 +2566,7 @@ export const en: Record<string, string> = {
   // ── WebSearchProvider ──
   'websearch.no_title': '(no title)',
   'websearch.no_content': 'The page returned no content (the reader replied empty): {{url}}. It may sit behind a login/paywall or render purely via scripts - try another address.',
-  'websearch.jina_needs_key': 'Jina AI requires an API key. Get one at https://jina.ai/reader/',
+  'websearch.jina_needs_key': 'Jina search requires a free API key. Get one at https://jina.ai/reader/ and enter it in PKM Assistant settings → Web Search → Jina API key.',
   'websearch.jina_reader_needs_key': 'Jina Reader requires an API key for this operation.',
   'websearch.tavily_needs_key': 'Tavily requires an API key.',
   'websearch.brave_needs_key': 'Brave Search requires an API key.',
@@ -2574,7 +2578,7 @@ export const en: Record<string, string> = {
   'websearch.read_error': 'Error reading {{url}}: {{error}}',
   'websearch.fallback_note': '{{from}} did not respond - falling back to the free {{to}} floor.',
   'websearch.unreadable_binary': 'Could not extract text from {{url}}. The reader handles web pages and PDFs; images, archives and login-walled files are out of reach.',
-  'websearch.key_optional_desc': 'Key is optional - 3 requests/min without it, 100/min with a free key.',
+  'websearch.key_optional_desc': 'Jina search requires a free API key.',
   'websearch.provider.jina': 'Jina AI (free, default)',
   'websearch.provider.searxng': 'SearXNG (self-hosted)',
 
@@ -2975,13 +2979,13 @@ export const en: Record<string, string> = {
   'artifact.chip.unpin': 'Unpin',
 
   // web_search
-  'mcp.web_search.desc': 'Search the internet for information.\n\nHOW IT WORKS:\n- Query → list of results: title, URL and a FRAGMENT of the content (not the whole page)\n- For the full content of a result, use web_read\n- Default provider: Jina AI (free). If the configured paid provider fails, results come from the free Jina floor - the results say so\n\nWHEN TO USE:\n- Current events, prices, dates, news, documentation - anything outside the vault\n- User says: "search online", "look up", "what does the internet say about..."\n\nWHEN NOT TO USE:\n- Questions about the user\u2019s notes or memory → search\n- The content is in the vault → read\n\nHOW TO FORMULATE QUERIES:\n- Be specific, preferably in English (unless you need local sources)\n- "Obsidian 1.8 release notes 2026" beats "obsidian news"\n\nNOTES:\n- Results may be outdated or wrong - verify important facts\n- Cite sources: give the URL from the result',
+  'mcp.web_search.desc': 'Search the internet for information.\n\nHOW IT WORKS:\n- Query → list of results: title, URL and a FRAGMENT of the content (not the whole page)\n- For the full content of a result, use web_read\n- Default Jina search requires a free API key. If another provider fails, the plugin tries Jina; if that also fails, it returns the original error\n\nWHEN TO USE:\n- Current events, prices, dates, news, documentation - anything outside the vault\n- User says: "search online", "look up", "what does the internet say about..."\n\nWHEN NOT TO USE:\n- Questions about the user\u2019s notes or memory → search\n- The content is in the vault → read\n\nHOW TO FORMULATE QUERIES:\n- Be specific, preferably in English (unless you need local sources)\n- "Obsidian 1.8 release notes 2026" beats "obsidian news"\n\nNOTES:\n- Results may be outdated or wrong - verify important facts\n- Cite sources: give the URL from the result',
   'mcp.web_search.param.query': 'Search query. Precise, preferably in English for global results.',
   'mcp.web_search.param.limit': 'Maximum number of results (default 5, max 10). For a quick question 3 is enough.',
   'mcp.web_search.param.lang': 'Optional query language. When provided, lang:X is added to the search query.',
 
   // web_read
-  'mcp.web_read.desc': 'Read the content of a web page.\n\nHOW IT WORKS:\n- You provide a URL → you get the page text without HTML and ads (Jina Reader)\n- It also reads PDFs - the reader extracts their text. Images, archives and login-walled pages are out of reach\n- A page longer than the limit comes back as a SUMMARY from a cheap model plus a citations field with verbatim quotes. Without a Researcher model the content is truncated - the note field says so\n- Only URLs of known provenance may be read: returned by an earlier web_search or provided by the user. Do not guess URLs\n\nWHEN TO USE:\n- After web_search, when the fragment is not enough and you need the whole thing\n- User provides a link: "read this article", "what is on this page"\n\nWHEN NOT TO USE:\n- When the fragments from web_search are enough\n\nNOTES:\n- When quoting, take the text from the citations field - those are verbatim; the summary is a paraphrase',
+  'mcp.web_read.desc': 'Read the content of a web page.\n\nHOW IT WORKS:\n- You provide a URL → you get the page text without HTML and ads (Jina Reader; works without a key)\n- It also reads PDFs - the reader extracts their text. Images, archives and login-walled pages are out of reach\n- A page longer than the limit comes back as a SUMMARY from a cheap model plus a citations field with verbatim quotes. Without a Researcher model the content is truncated - the note field says so\n- Only URLs of known provenance may be read: returned by an earlier web_search or provided by the user. Do not guess URLs\n\nWHEN TO USE:\n- After web_search, when the fragment is not enough and you need the whole thing\n- User provides a link: "read this article", "what is on this page"\n\nWHEN NOT TO USE:\n- When the fragments from web_search are enough\n\nNOTES:\n- When quoting, take the text from the citations field - those are verbatim; the summary is a paraphrase',
   'mcp.web_read.param.url': 'Full URL of page to read (e.g. https://example.com/article)',
 
   // generate_image

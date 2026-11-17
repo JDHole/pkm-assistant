@@ -5,7 +5,7 @@ import { t } from '../../core/i18n/index.js';
 
 /**
  * Web Search Provider — multi-provider architecture.
- * Domyślnie: Jina AI (bez klucza API, za darmo).
+ * Domyślnie: Jina AI (wyszukiwanie wymaga darmowego klucza API).
  * Opcjonalnie: Tavily, Brave, SearXNG (wymagają klucza lub self-host).
  */
 
@@ -105,7 +105,7 @@ function _setCache(key: string, data: WebSearchResponse): void {
 /**
  * Jina AI — domyślny provider.
  * s.jina.ai → search + pełna treść stron (nie snippety!)
- * Działa BEZ klucza API (3 RPM). Z kluczem: 100 RPM + 10M tokenów/mies.
+ * Wyszukiwanie wymaga darmowego klucza; próbę bez niego pozostawiamy dla zgodności.
  */
 async function jinaSearch(query: string, limit: number, apiKey: string): Promise<WebSearchResult[]> {
     const headers: Record<string, string> = {
@@ -254,14 +254,8 @@ async function serperSearch(query: string, limit: number, apiKey: string): Promi
 // PROVIDER REGISTRY
 // ═══════════════════════════════════════════
 
-/**
- * `requiresKey` = bez klucza NIE MA jak strzelić (bramka rzuca przed requestem).
- * `keyOptional` = działa bez klucza, ale z kluczem jest lepiej (wyższy limit) —
- * Ustawienia pokazują wtedy pole klucza z opisem „opcjonalny".
- *
- * DLACZEGO Jina ma `requiresKey: false` + `keyOptional: true`: z `requiresKey: true`
- * bramka rzucałaby zanim cokolwiek poleciało, a obiecany w UI tryb bezkluczowy
- * (3 zapytania/min) byłby NIEOSIĄGALNY.
+/** `requiresKey` steruje bramką przed siecią, a `keyOptional` widocznością pola.
+ * Jina nie ma bramki, aby nadal próbować sieci, gdy dostawca zmieni zasady.
  */
 export const WEB_SEARCH_PROVIDERS: Record<string, WebSearchProviderInfo> = {
     jina:    { get label() { return t('websearch.provider.jina'); }, requiresKey: false, keyOptional: true, requiresUrl: false, fn: jinaSearch },

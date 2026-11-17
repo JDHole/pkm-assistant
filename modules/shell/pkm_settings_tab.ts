@@ -1,3 +1,4 @@
+import { hostWindow } from '../../core/index.js';
 import { PluginSettingsTab } from './PluginSettingsTab.js';
 import { Setting, Notice } from "obsidian";
 import type { App } from 'obsidian';
@@ -141,6 +142,12 @@ export class PkmSettingsTab extends PluginSettingsTab {
             owner: this,
             defaultId: 'models',
         });
+    }
+
+    openSection(id: string): void {
+        if (!SettingsRegistry.has(id)) return;
+        if (hostWindow.location) hostWindow.location.hash = `settings/${id}`;
+        void this.render();
     }
 
     _registerDefaultSettingsSections() {

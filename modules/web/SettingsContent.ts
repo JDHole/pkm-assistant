@@ -97,12 +97,14 @@ export function renderWebSearchSection(container: HTMLElement, ctx: WebSettingsS
     // (resolveProviderKey), ale zapisujemy już wyłącznie do `ws.apiKeys[id]` —
     // starego pola nie kasujemy, więc nic się userowi nie gubi.
     const currentKey = resolveProviderKey(ws, providerId);
+    const warning = providerId === 'jina' ? container.createEl('p', { text: t('settings.jina_key_warning'), cls: 'pkm-key-warning' }) : null;
+    warning?.classList.toggle('is-hidden', !!currentKey);
     if (provider?.requiresKey || provider?.keyOptional || currentKey) {
         const keySetting = new Setting(container)
-            .setName(provider?.keyOptional
+            .setName(provider?.keyOptional && providerId !== 'jina'
                 ? t('settings.web_search_key_optional')
                 : t('settings.web_api_key'))
-            .setDesc(provider?.keyOptional
+            .setDesc(provider?.keyOptional && providerId !== 'jina'
                 ? t('websearch.key_optional_desc')
                 : t('settings.web_api_key_desc', { provider: provider?.label || providerId }));
 
@@ -113,6 +115,7 @@ export function renderWebSearchSection(container: HTMLElement, ctx: WebSettingsS
                 .onChange(async (value) => {
                     if (!ws.apiKeys) ws.apiKeys = {};
                     ws.apiKeys[providerId] = value.trim();
+                    warning?.classList.toggle('is-hidden', !!resolveProviderKey(ws, providerId));
                     await save();
                 });
             text.inputEl.type = 'password';

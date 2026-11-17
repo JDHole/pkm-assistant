@@ -562,3 +562,4 @@ zatwierdzania przez suba. Tekst trafia przez MCP do modelu po udanym zapisie;
 kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
 
 Czas wiadomości: `messageTime` renderuje lokalną datę, dzień języka interfejsu i offset z wstrzykiwanego zegara; gotowy tekst należy zamrozić przy utworzeniu wiadomości.
+PL/EN opisują wymagany klucz wyszukiwania Jina, status wspólnych kluczy mediów i skrót do sekcji Klucze API.
