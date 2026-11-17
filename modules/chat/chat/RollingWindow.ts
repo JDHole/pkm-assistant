@@ -1,6 +1,6 @@
 import { sessionMessageId, bindSessionMessageId } from '../../memory/index.js';
 import type { AttachmentManager, MentionAutocomplete } from '../../ui-components/index.js';
-import { messageTimeLine, fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
+import { fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
 import { ParentConversationProjection } from '../../sub-agents/index.js';
 import { Summarizer } from './Summarizer.js';
 import { t } from '../../../core/i18n/index.js';
@@ -133,6 +133,8 @@ interface MessageStats extends TextStats {
     toolCallsRef: unknown;
     toolCallsLen: number;
     reasoningRef: unknown;
+    messageTimeRef: string | undefined;
+    roleRef: string;
 }
 
 export interface ToolCall {
@@ -319,7 +321,8 @@ export class RollingWindow {
             && cached.contentLen === contentLen
             && cached.toolCallsRef === msg.tool_calls
             && cached.toolCallsLen === toolCallsLen
-            && cached.reasoningRef === msg.reasoning_content) {
+            && cached.reasoningRef === msg.reasoning_content
+            && cached.messageTimeRef === msg.messageTime && cached.roleRef === msg.role) {
             return cached;
         }
 
@@ -332,8 +335,11 @@ export class RollingWindow {
             toolCallsRef: msg.tool_calls,
             toolCallsLen,
             reasoningRef: msg.reasoning_content,
+            messageTimeRef: msg.messageTime,
+            roleRef: msg.role,
         };
         this._addTextStats(stats, this._contentToTokenText(msg.content));
+        if (msg.role === 'user' && msg.messageTime) this._addTextStats(stats, msg.messageTime + (Array.isArray(msg.content) && !msg.content.some(block => block.type === 'text' && typeof block.text === 'string') ? '' : '\n'));
         if (msg.tool_calls) {
             for (const tc of msg.tool_calls) {
                 if (tc.function?.arguments) this._addTextStats(stats, tc.function.arguments);
@@ -695,7 +701,7 @@ export class RollingWindow {
             }
 
             const rawSummary = await this.summarizer!.summarize(
-                this.messages,
+                this.messages.map(({ messageTime: _messageTime, ...message }) => message),
                 this.conversationSummary,
                 { isEmergency, activeTaskContext, sessionPath: this.sessionPath, memoryIndex }
             );
@@ -782,7 +788,7 @@ export class RollingWindow {
         };
         const prepared = this.messages.map(message => {
             if (message.role !== 'user' || !message.messageTime) return message;
-            const prefix = messageTimeLine(message.messageTime) + '\n';
+            const prefix = message.messageTime + '\n';
             const content = message.content;
             if (typeof content === 'string') return { ...message, content: prefix + content };
             if (Array.isArray(content)) {

@@ -110,6 +110,7 @@ import type { TurnAbortHandle } from './turnAbort.js';
  */
 interface SendMessageOptions {
     injectedText?: unknown;
+    clock?: () => Date;
     meta?: unknown;
     onAccepted?: () => void;
     deliveryMessageId?: string;
@@ -298,7 +299,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const isHuman = messageOrigin === 'human';
     const turnKind = messageOrigin === 'human' ? 'user' : 'machine';
     const rawMeta = opts?.meta && typeof opts.meta === 'object' ? opts.meta : {};
-    const messageMeta = { ...rawMeta, origin: messageOrigin, messageTime: messageTime() };
+    const messageMeta = { ...rawMeta, origin: messageOrigin, messageTime: 'messageTime' in rawMeta && typeof rawMeta.messageTime === 'string' ? rawMeta.messageTime : messageTime(opts.clock) };
 
     const rawText = isInjected ? injectedText : this.input_area.value.trim();
     // Markery `@@skill:` parsujemy TYLKO w tekście od człowieka - treść artefaktu, `context_summary`

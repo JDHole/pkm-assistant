@@ -396,3 +396,5 @@ Nie dodano testów AVA ani asercji na tekst CSS. Pomiary geometrii nie zastępuj
 próby przewijania dotykiem na Androidzie/iOS i przy większej czcionce systemowej.
 
 Telefon zawija wszystkie zakładki ustawień w wiersze z celami 44 px; aktywna zachowuje `mod-cta`. `openSection` przełącza sekcję przez ten sam hash co nawigacja.
+
+Prompt settings expose the mobile environment override only on mobile. Its factory button renders the current device category and mobile capability defaults; desktop omits this conditional section.

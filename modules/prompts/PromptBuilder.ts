@@ -74,7 +74,16 @@ interface DelegateMemberItem {
     description?: string;
 }
 
-export interface MobileEnvironment { device: 'phone' | 'tablet'; semanticUnavailable: boolean; connectedMcp: number; screenshotUnavailable: boolean; }
+export interface MobileEnvironment { device: 'phone' | 'tablet'; semanticUnavailable: boolean; screenshotUnavailable: boolean; }
+
+export function renderMobileEnvironment(mobile: MobileEnvironment): string {
+    const lines = [t(`prompt.mobile.${mobile.device}`)];
+    if (mobile.semanticUnavailable) lines.push(t('prompt.mobile.semantic'));
+    lines.push(t('prompt.mobile.local_mcp'));
+    if (mobile.screenshotUnavailable) lines.push(t('prompt.mobile.screenshot'));
+    lines.push(t('prompt.mobile.no_promises'));
+    return lines.join('\n');
+}
 
 interface PromptContext {
     mobileEnvironment?: MobileEnvironment;
@@ -206,15 +215,8 @@ export class PromptBuilder {
         );
 
         if (context.mobileEnvironment) {
-            const mobile = context.mobileEnvironment;
-            const lines = [t(`prompt.mobile.${mobile.device}`)];
-            if (mobile.semanticUnavailable) lines.push(t('prompt.mobile.semantic'));
-            lines.push(t('prompt.mobile.local_mcp'));
-            if (mobile.connectedMcp === 0) lines.push(t('prompt.mobile.no_mcp'));
-            if (mobile.screenshotUnavailable) lines.push(t('prompt.mobile.screenshot'));
-            lines.push(t('prompt.mobile.no_promises'));
             this._add('mobile_environment', t('prompt.label.mobile_environment'),
-                this._resolveSection('mobile_environment', overrides, globalDefaults, lines.join('\n')),
+                this._resolveSection('mobile_environment', overrides, globalDefaults, renderMobileEnvironment(context.mobileEnvironment)),
                 { category: 'core' });
         }
 
@@ -313,7 +315,7 @@ export class PromptBuilder {
      */
     getSections() {
         const EDITABLE_KEYS = new Set([
-            'environment', 'decision_tree', 'delegate_guide', 'rules'
+            'environment', 'mobile_environment', 'decision_tree', 'delegate_guide', 'rules'
         ]);
         return [...this.sections.entries()].map(([key, data]) => ({
             key,

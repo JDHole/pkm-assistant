@@ -1583,3 +1583,19 @@ test.serial('override subagent_frame_prompt (agent > global > fabryka) wygrywa w
         t.true(zAgenta.startsWith('AGENTOWA RAMA w / Jaskier'), `${locale}: agent bije global`);
     }
 });
+
+test('runTask sends mobile environment to the model only on mobile', async t => {
+    const prompts: string[] = [];
+    const model = { stream(payload: { messages: Array<{ content: string }> }, callbacks: { done(response: unknown): void }) {
+        prompts.push(payload.messages[0].content);
+        callbacks.done({ choices: [{ message: { role: 'assistant', content: 'Done.' } }] });
+    } };
+    for (const mobile of [true, false]) {
+        const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null, filterByAgent: () => [] }, app: {}, plugin: {},
+            mobileEnvironment: () => mobile ? { device: 'phone', semanticUnavailable: true, screenshotUnavailable: true } : undefined });
+        await runner.runTask('Find', { name: 'Tester' }, { name: 'worker', tools: [] }, model, { modelTimeout: 5 });
+    }
+    t.true(prompts[0].includes('You are working in Obsidian on a phone.\nSemantic search is unavailable; search by words instead.'));
+    t.false(prompts[1].includes('You are working in Obsidian on a phone.'));
+    t.false(prompts[1].includes('Semantic search is unavailable; search by words instead.'));
+});

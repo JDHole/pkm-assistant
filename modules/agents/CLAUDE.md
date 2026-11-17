@@ -339,3 +339,7 @@ Dotychczasowe asercje S1a pozostają bez zmian.
 `AgentManager.getMobileEnvironment()` pobiera opcjonalny snapshot z wstrzykniętego
 composition root; decyzja o utrwaleniu go dla okna rozmowy należy do czatu.
 `check_syntax` należy do grupy vault i przełącznika `read_notes`; można je wyłączyć osobno w `disabled_tools`. Nowo tworzony fabryczny researcher ma je na liście narzędzi; istniejące szablony nie są przepisywane.
+
+Inspektor promptu pobiera bieżącą migawkę środowiska mobilnego przez `getMobileEnvironment`; żywe okno czatu zamraża własną migawkę.
+
+The profile prompt editor displays the mobile environment override only when the injected environment provider supplies a snapshot; the inspector uses that same provider. On desktop the conditional section is absent, as in the built prompt.

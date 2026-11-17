@@ -1,4 +1,4 @@
-import { Setting } from 'obsidian';
+import { Platform, Setting } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
 // Factory work-prompts surfaced here for "insert factory" / "restore default". Imported
 // through each module's barrel (golden rule - no deep imports). The barrels expose pure string
@@ -9,7 +9,7 @@ import { factoryWorkPrompt, factoryWorkPromptRaw } from '../memory/index.js';
 // Szkielet kompresji mieszka w `config/` (nie w barrelu czatu) - przecięta krawędź shell→chat.
 import { defaultCompressionPrompt } from '../../config/default_prompts.js';
 import { defaultSubAgentFramePrompt } from '../sub-agents/index.js';
-import { FACTORY_DEFAULTS } from '../prompts/index.js';
+import { FACTORY_DEFAULTS, renderMobileEnvironment } from '../prompts/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 
 /**
@@ -43,6 +43,7 @@ const WORK_PROMPTS = [
 // Factory prompt sections - resolved from FACTORY_DEFAULTS (getters → current locale).
 const SECTION_PROMPTS = [
     { key: 'environment', factory: () => FACTORY_DEFAULTS.environment, warn: false },
+    { key: 'mobile_environment', factory: () => renderMobileEnvironment({ device: Platform.isPhone ? 'phone' : 'tablet', semanticUnavailable: true, screenshotUnavailable: true }), warn: false, mobileOnly: true },
     { key: 'rules', factory: () => FACTORY_DEFAULTS.rules, warn: false },
     { key: 'delegate_guide', factory: () => FACTORY_DEFAULTS.delegate_guide, warn: false },
 ];
@@ -126,5 +127,5 @@ export function renderPromptSection(container: HTMLElement, ctx: PromptSettingsC
     // ── Prompt sections (system prompt) ──
     container.createEl('h4', { text: t('settings.prompt_sections_title') });
     container.createEl('p', { text: t('settings.prompt_sections_desc'), cls: 'setting-item-description' });
-    for (const item of SECTION_PROMPTS) renderEditor(container, item);
+    for (const item of SECTION_PROMPTS) if (!('mobileOnly' in item) || Platform.isMobile) renderEditor(container, item);
 }

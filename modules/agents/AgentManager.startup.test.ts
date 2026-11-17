@@ -19,6 +19,7 @@ export async function load(url, context, next) {
     return next(url, context);
 }`));
 const { AgentManager } = await import('./AgentManager.js');
+const { Agent } = await import('./Agent.js');
 
 test.serial('fresh device, unrelated settings save and restart preserve shared types; explicit en translates them', async t => {
     setLocale('en');
@@ -97,4 +98,21 @@ test.serial('fresh device, unrelated settings save and restart preserve shared t
     t.is(files.get(`${TYPES}/notatka.md`), NOTATKA_TYPE_CONTENT_EN);
     t.is(files.get(`${TYPES}/raport.md`), RAPORT_TYPE_CONTENT_EN);
     t.deepEqual(writes, [`${TYPES}/plan.md`, `${TYPES}/notatka.md`, `${TYPES}/raport.md`]);
+});
+
+
+test.serial('inspector builds the mobile section from the injected snapshot', async t => {
+    setLocale('en');
+    let mobile = true;
+    const manager = new AgentManager({ adapter: {} } as never, {}, null, null, undefined,
+        () => mobile ? { device: 'phone', semanticUnavailable: true, screenshotUnavailable: true } : undefined);
+    t.teardown(() => manager.dispose());
+    manager.agents.set('Ada', new Agent({ name: 'Ada' }));
+    const phone = await manager.getPromptInspectorDataForAgent('Ada');
+    const section = phone.sections.find(item => item.key === 'mobile_environment');
+    t.is(section?.content, 'You are working in Obsidian on a phone.\nSemantic search is unavailable; search by words instead.\nLocal MCP servers (stdio) are unavailable.\nScreen capture is unavailable.\nDo not promise features listed as unavailable.');
+    t.is(section?.editable, true);
+    mobile = false;
+    const desktop = await manager.getPromptInspectorDataForAgent('Ada');
+    t.false(desktop.sections.some(item => item.key === 'mobile_environment'));
 });

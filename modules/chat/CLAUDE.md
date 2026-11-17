@@ -2574,3 +2574,7 @@ Nowe okno pobiera nowy snapshot. Zmiany rzeczywistych możliwości w trakcie ses
 nie są odzwierciedlane aż do utworzenia nowego okna.
 
 Czas wiadomości użytkownika jest metadanym `messageTime` nadawanym przy wysyłce; `getMessagesForAPI` dodaje linię tylko do kopii dla modelu, także dla załączników. Format sesji nie zapisuje dowolnych metadanych, więc po wznowieniu znacznik znika; treść i podsumowania pozostają czyste.
+
+Znacznik jest całą linią zamrożoną w języku interfejsu przy utworzeniu; statystyki okna liczą ją i unieważniają cache po zmianie. Stabilność prefiksu dotyczy żywego okna; format sesji nie zapisuje znacznika, więc po wznowieniu wcześniejsze wiadomości go nie mają.
+
+Queued messages preserve their rendered message time through both loop injection and the delayed drain, including when the drain calls send again; the send clock is injectable for deterministic tests.

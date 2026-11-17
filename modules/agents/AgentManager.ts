@@ -817,7 +817,7 @@ export class AgentManager {
             return { sections: [], breakdown: { total: 0, sections: [] } };
         }
 
-        const enrichedContext = this._buildBaseContext(agent);
+        const enrichedContext = { ...this._buildBaseContext(agent), mobileEnvironment: this.getMobileEnvironment() };
 
         // Include memory + projects for realistic token count
         const memEnabled = agent.permissions?.memory !== false;

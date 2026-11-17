@@ -1128,3 +1128,7 @@ oraz zachowany przegląd prowadzącego. Nie wymagają żywego Obsidiana ani siec
 
 Runner zamraża czas na początku `runTask` w metadanych i dodaje linię wyłącznie przy serializacji zadania dla modelu; jego osobna rama otrzymuje tę samą stałą instrukcję co główny prompt.
 Domyślne zestawy workera i nowego szablonu obejmują `check_syntax`; jawna lista narzędzi istniejącego suba nadal ma pierwszeństwo.
+
+Znacznik zadania jest całą linią zamrożoną w języku interfejsu w chwili startu.
+
+Mobile environment: the runner snapshots the injected provider once at the start of each run and appends the shared prompts renderer to its frame; desktop has no section. The composition root supplies the same provider to AgentManager and the runner factory.
