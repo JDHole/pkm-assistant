@@ -160,6 +160,7 @@ export const en: Record<string, string> = {
 
   // ── Tool labels (ToolCallDisplay TOOL_INFO) ──
   // read/list carry a scope param (vault|memory):
+  'tool.check_syntax': 'Check syntax',
   'tool.read': 'Read',
   'tool.list': 'List files',
   'tool.write': 'Write note',
@@ -2730,6 +2731,10 @@ export const en: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary consolidated into one scoped primitive)
+  'mcp.check_syntax.desc': 'Check JS, JSON, YAML or Markdown frontmatter and JS blocks without executing code.',
+  'mcp.check_syntax.path': 'File path in the vault.',
+  'mcp.check_syntax.kind': 'Optional file kind.',
+  'mcp.check_syntax.unsupported': 'Supported extensions: .js, .mjs, .cjs, .json, .yaml, .yml, .md.',
   'mcp.read.desc': 'Read ONE file. scope="vault" (default) = a user note by path (full markdown). scope="memory" = a note from the CURRENT agent memory: a brain/ filename (e.g. "user_kuba.md") or a summary "summaries/L1/<file>.md". Returns {success, content, path} or {success:false, error}. Don\'t know the path → use list or search first.',
   'mcp.read.param.path': 'What to read. scope=vault: path relative to vault root (e.g. "Projects/plan.md"). scope=memory: a brain/ note filename (e.g. "user_kuba.md") or "summaries/L1/<file>.md".',
   'mcp.read.param.scope': '"vault" (default) = user notes. "memory" = current agent brain/ notes and L1-L3 summaries. It does not include session files. Requires the memory permission.',

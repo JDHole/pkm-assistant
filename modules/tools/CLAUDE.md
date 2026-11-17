@@ -1412,3 +1412,6 @@ payloadCollected dla A. Każda para obejmuje desktop i mobile.
 
 Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu właściwej treści zadania; zachowanie znacznika i stałej instrukcji sprawdzają testy runnera sub-agentów.
 Sekcje STT i obrazów pokazują wyłącznie status wspólnego klucza `chat.apiKeys` i skrót przez `owner.openSection` do Kluczy API; wartości klucza nie są renderowane.
+## check_syntax
+
+`check_syntax` waliduje JS, JSON, YAML i Markdown bez wykonania kodu; czysty parser jest w `syntaxValidator.ts`. Odczyt przechodzi przez `read` (w tym autoryzację, stronicowanie i host kopii); `subToolExecution` musi rozpoznawać nowe narzędzie jako vaultowe. Parser YAML jest lokalny i nie zmienia wstrzykiwanego silnika pluginu.

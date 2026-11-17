@@ -10,6 +10,7 @@ import { prepareSubToolExecution } from './subToolExecution.js';
 import { createDraftToolHost } from './draftToolHost.js';
 import { createWriteTool } from './WriteTool.js';
 import { createReadTool } from './ReadTool.js';
+import { createCheckSyntaxTool } from './CheckSyntaxTool.js';
 import { createListTool } from './ListTool.js';
 import { createDeleteTool } from './DeleteTool.js';
 import { createCreateFolderTool } from './CreateFolderTool.js';
@@ -709,4 +710,15 @@ test('F2h root and folder children preserve technical insertion and proposal ord
         before: { root: ['base.md', 'Notes', 'Z', 'A'], notes: ['Notes/a.md', 'Notes/z.md', 'Notes/Z', 'Notes/A'] },
         after: { root: ['base.md', 'A', 'Notes', 'Z'], notes: ['Notes/a.md', 'Notes/m.md', 'Notes/z.md', 'Notes/A', 'Notes/Z'] },
     });
+});
+
+
+test('check_syntax reads the freshly written draft, not the live file', async t => {
+    const f = await fixture({ 'x.js': 'const x = 1;' }), view = await f.view('syntax');
+    const writer = await f.prepare(view, 'write', { path: 'x.js' });
+    await createWriteTool().execute({ path: 'x.js', mode: 'replace', content: 'const x = ;' }, writer.app, writer.plugin);
+    const host = await f.prepare(view, 'check_syntax', { path: 'x.js' });
+    const result = await createCheckSyntaxTool().execute({ path: 'x.js' }, host.app, host.plugin, context);
+    t.like(result, { ok: false, kind: 'js', problems: [{ line: 1, column: 11, type: 'syntax' }] });
+    t.is(await f.app.vault.read({ path: 'x.js' }), 'const x = 1;');
 });

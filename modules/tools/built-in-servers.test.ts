@@ -54,9 +54,10 @@ test('multimodal manifest has 180s timeout (long-running image gen)', t => {
     t.is(mm.timeout_ms, 180_000);
 });
 
-test('vault manifest has 6 prymitywów (read/list/write/delete/create_folder + search)', t => {
+test('vault manifest exposes check_syntax with the file tools', t => {
     const vault = getBuiltinManifest('vault')!;
-    t.is(vault.tools.length, 6);
+    t.is(vault.tools.length, 7);
+    t.true(vault.tools.includes('check_syntax'));
     t.true(vault.tools.includes('read'));
     t.true(vault.tools.includes('list'));
     t.true(vault.tools.includes('write'));

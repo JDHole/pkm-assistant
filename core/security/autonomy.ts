@@ -119,7 +119,7 @@ export function classifyToolRisk({
 
 
     const greenTools = new Set([
-        'read', 'list', 'search',
+        'read', 'check_syntax', 'list', 'search',
         'artifact_read', 'artifact_list',
         'vault_read', 'vault_list', 'vault_search',
         // Czytanie WŁASNEJ skrzynki. `kom_read` odhacza `ai_read` w swoim pliku, ale to

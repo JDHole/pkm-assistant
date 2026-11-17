@@ -100,6 +100,7 @@ export type ToolInfoEntry = ReturnType<typeof _toolEntry>;
 export const TOOL_INFO = {
     obsidian_app: _toolEntry(() => UiIcons.file(14), 'obsidian_app'),
     // Prymitywy (read/list ze scope vault|memory):
+    check_syntax:    _toolEntry(() => UiIcons.file(14), 'check_syntax'),
     read:            _toolEntry(() => UiIcons.file(14), 'read'),
     list:            _toolEntry(() => UiIcons.folder(14), 'list'),
     write:           _toolEntry(() => UiIcons.edit(14), 'write'),
@@ -240,6 +241,7 @@ function formatToolInputHint(toolName: string, input: unknown): string {
                 return data.query || '';
             case 'web_read':
                 return data.url ? data.url.replace(/^https?:\/\//, '').slice(0, 50) : '';
+            case 'check_syntax':
             case 'read':
             case 'vault_read':
                 return data.path ? _shortPath(data.path) : '';

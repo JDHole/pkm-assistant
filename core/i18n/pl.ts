@@ -160,6 +160,7 @@ export const pl: Record<string, string> = {
 
   // ── Tool labels (ToolCallDisplay TOOL_INFO) ──
   // read/list niosą parametr scope (vault|memory):
+  'tool.check_syntax': 'Sprawdź składnię',
   'tool.read': 'Odczyt',
   'tool.list': 'Lista plików',
   'tool.write': 'Zapis notatki',
@@ -2736,6 +2737,10 @@ export const pl: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary skonsolidowane w jeden prymityw ze scope)
+  'mcp.check_syntax.desc': 'Sprawdź składnię pliku JS, JSON, YAML lub frontmatteru i bloków JS w Markdown bez wykonywania kodu.',
+  'mcp.check_syntax.path': 'Ścieżka pliku w vaulcie.',
+  'mcp.check_syntax.kind': 'Opcjonalny rodzaj pliku.',
+  'mcp.check_syntax.unsupported': 'Obsługiwane rozszerzenia: .js, .mjs, .cjs, .json, .yaml, .yml, .md.',
   'mcp.read.desc': 'Odczytaj JEDEN plik. scope="vault" (domyślnie) = notatka usera po ścieżce (pełny markdown). scope="memory" = notatka pamięci AKTUALNEGO agenta: nazwa pliku brain/ (np. "user_kuba.md") albo podsumowanie "summaries/L1/<plik>.md". Zwraca {success, content, path} lub {success:false, error}. Nie znasz ścieżki → najpierw list albo search.',
   'mcp.read.param.path': 'Co przeczytać. scope=vault: ścieżka relatywna do roota vaulta (np. "Projekty/plan.md"). scope=memory: nazwa notatki brain/ (np. "user_kuba.md") lub "summaries/L1/<plik>.md".',
   'mcp.read.param.scope': '"vault" (domyślnie) = notatki usera. "memory" = notatki brain/ aktualnego agenta i summaries L1-L3. Nie obejmuje plików sesji. Wymaga uprawnienia memory.',

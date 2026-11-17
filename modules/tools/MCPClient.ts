@@ -331,6 +331,7 @@ const ACTION_TYPE_MAP: Record<string, string> = {
     'ask_user': 'vault.read',
     // Prymitywy (scope vault|memory dla read/list). Ten sam actionType co legacy vault_*.
     'read': 'vault.read',
+    'check_syntax': 'vault.read',
     'list': 'vault.read',
     'write': 'vault.write',
     'delete': 'vault.delete',

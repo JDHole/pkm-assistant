@@ -338,3 +338,4 @@ Dotychczasowe asercje S1a pozostają bez zmian.
 
 `AgentManager.getMobileEnvironment()` pobiera opcjonalny snapshot z wstrzykniętego
 composition root; decyzja o utrwaleniu go dla okna rozmowy należy do czatu.
+`check_syntax` należy do grupy vault i przełącznika `read_notes`; można je wyłączyć osobno w `disabled_tools`. Nowo tworzony fabryczny researcher ma je na liście narzędzi; istniejące szablony nie są przepisywane.
