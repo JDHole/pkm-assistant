@@ -10,11 +10,11 @@ import { buildPlanNotice } from './planNotice.js';
  * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
 import { runAgentLoop, ArrayMessageStore, formatAgentLoopPartial } from '../agent-loop/index.js';
-import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
+import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason, LoopMessage } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits, sanitizeLimit, DEFAULT_LIMITS } from '../../config/limits.js';
-import { AccessGuard, countTokens } from '../../core/index.js';
+import { messageTime, messageTimeLine, AccessGuard, countTokens } from '../../core/index.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus, configuredChatSecrets } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
@@ -292,6 +292,18 @@ function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | 
     return { text: sections.join('\n\n').slice(0, Math.max(0, cap)), ...(note ? { note } : {}) };
 }
 
+function taskMessagesForAPI(messages: LoopMessage[]): LoopMessage[] {
+    return messages.map(message => {
+        if (message.role !== 'user' || typeof message.messageTime !== 'string' || typeof message.content !== 'string') return message;
+        const { messageTime: stamp, ...rest } = message;
+        return { ...rest, content: `${messageTimeLine(stamp)}\n${message.content}` };
+    });
+}
+
+class TaskMessageStore extends ArrayMessageStore {
+    override getMessagesForAPI(): LoopMessage[] { return taskMessagesForAPI(super.getMessagesForAPI()); }
+}
+
 export class SubAgentRunner {
     declare toolRegistry: RunnerToolRegistry;
     declare app: AppLike;
@@ -300,6 +312,7 @@ export class SubAgentRunner {
     declare effectTargetIo: EffectTargetIo;
     private readonly drafts?: SubRunDrafts | { kind: 'unavailable' };
     private readonly isMobile: boolean;
+    private readonly clock: () => Date;
     /**
      * @param {Object} options
      * @param {Object} options.toolRegistry - ToolRegistry instance
@@ -312,7 +325,8 @@ export class SubAgentRunner {
     // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
     // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
     // realne obiekty `ToolRegistry`/`App`/plugin.
-    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts, isMobile = false }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' }; isMobile?: boolean }) {
+    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts, isMobile = false, clock = () => new Date() }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' }; isMobile?: boolean; clock?: () => Date }) {
+        this.clock = clock;
         this.drafts = drafts;
         this.isMobile = isMobile;
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
@@ -361,6 +375,7 @@ export class SubAgentRunner {
      *   i `failed: true` w gałęzi błędu. Patrz `SubRunResult`.
      */
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
+        const taskTime = messageTime(this.clock);
         const startTime = Date.now();
         let parentConversation: ParentConversationPreparation | undefined;
         const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
@@ -682,12 +697,12 @@ export class SubAgentRunner {
                 return t('subagent.thread_effect_unchecked', { target });
             }).join('\n') ?? '';
             const transcript = thread?.transcript.map(m => structuredClone(m)) ?? [];
-            const messages = [{ role: 'system' as const, content: systemPrompt }, ...transcript, { role: 'user' as const, content: `${nextTask}${options.threadId && effectsNote ? `\n${effectsNote}` : ''}` }];
+            const messages = [{ role: 'system' as const, content: systemPrompt }, ...transcript, { role: 'user' as const, content: `${nextTask}${options.threadId && effectsNote ? `\n${effectsNote}` : ''}`, messageTime: taskTime }];
 
             if (thread && !options.threadId) thread.config.toolNames = tools.map(tool => tool.function.name).filter(name => name !== 'ask_parent' && !(controlOnly && name === 'sub_agent'));
             if (thread && options.threadId) {
                 const budget = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_context_tokens) || getLimits(this.plugin?.env?.settings).subagent_thread_context_tokens;
-                const serialized = JSON.stringify(messages);
+                const serialized = JSON.stringify(taskMessagesForAPI(messages));
                 const answerMargin = SUB_AGENT_MAX_OUTPUT_TOKENS;
                 if (countTokens(serialized) + answerMargin > budget) {
                     const refusal = t('subagent.thread_refused');
@@ -704,7 +719,7 @@ export class SubAgentRunner {
                     overrides: this.plugin?.env?.settings?.pkmAssistant?.model_context_limits,
                     fallbackTokens: limits.parent_conversation_fallback_tokens,
                 });
-                const prepared = fitParentConversation(options.parentConversation, messages, tools, window);
+                const prepared = fitParentConversation(options.parentConversation, taskMessagesForAPI(messages), tools, window);
                 if (prepared.message) messages.splice(1, 0, prepared.message);
                 parentConversation = prepared.metadata;
                 maxOutputTokens = prepared.metadata.maxOutputTokens;
@@ -714,7 +729,7 @@ export class SubAgentRunner {
             // Wspólna pętla (runAgentLoop). Store = ArrayMessageStore (system+user).
             // resolveTools = zamrożona lista jak dotąd. Obcinanie wyniku narzędzia przejmuje
             // pętla (limits.maxToolResultLength) - _executeTool już nie truncuje.
-            const store = new ArrayMessageStore(messages);
+            const store = new TaskMessageStore(messages);
             conversationStore = store;
             const steerHooks = (registry && subTask)
                 ? {
@@ -1182,7 +1197,7 @@ export class SubAgentRunner {
             .replace('{{SCOPE}}', () => scopeBlock)
             .replace('{{BUDGET}}', () => budgetBlock)
             .replace(/\n{3,}/g, '\n\n')
-            .trimEnd();
+            .trimEnd() + '\n\n' + t('prompt.message_time');
     }
 
     /**

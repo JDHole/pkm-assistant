@@ -1,6 +1,6 @@
 import { sessionMessageId, bindSessionMessageId } from '../../memory/index.js';
 import type { AttachmentManager, MentionAutocomplete } from '../../ui-components/index.js';
-import { fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
+import { messageTimeLine, fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
 import { ParentConversationProjection } from '../../sub-agents/index.js';
 import { Summarizer } from './Summarizer.js';
 import { t } from '../../../core/i18n/index.js';
@@ -8,6 +8,7 @@ import { t } from '../../../core/i18n/index.js';
 import { sanitizeToolTranscript } from '../../agent-loop/index.js';
 import { parseMemoryCandidates } from './memoryCandidates.js';
 import { log } from '../../../core/utils/Logger.js';
+import type { MobileEnvironment } from '../../prompts/index.js';
 import type { LoopMessage } from '../../agent-loop/index.js';
 import type { MemoryCandidate } from './memoryCandidates.js';
 import type { CacheMetadata } from '../../models/index.js';
@@ -145,6 +146,7 @@ export interface ToolCall {
 }
 
 export interface RollingMessage extends LoopMessage {
+    messageTime?: string;
     userAttachments?: AttachmentManager['attachments'];
     userMentions?: ReturnType<MentionAutocomplete['getMentions']>;
     sessionMessageId?: string;
@@ -235,6 +237,7 @@ export class RollingWindow {
     declare onMemoryCandidates: RollingWindowOptions['onMemoryCandidates'];
     declare memoryIndexProvider: RollingWindowOptions['memoryIndexProvider'];
     declare sessionPath: string;
+    mobileEnvironment: MobileEnvironment | null | undefined;
     /** Statystyki per wiadomość (klucz = obiekt wiadomości). */
     declare _msgStatsCache: WeakMap<object, MessageStats>;
     /** Statystyki promptu systemowego + odciski, z których powstały. */
@@ -777,7 +780,19 @@ export class RollingWindow {
         const logger = {
             warn: (_tag: string, message: string) => log.warn('RollingWindow', message),
         };
-        apiMessages.push(...sanitizeToolTranscript(this.messages, { logger, tag: 'RollingWindow' }).messages);
+        const prepared = this.messages.map(message => {
+            if (message.role !== 'user' || !message.messageTime) return message;
+            const prefix = messageTimeLine(message.messageTime) + '\n';
+            const content = message.content;
+            if (typeof content === 'string') return { ...message, content: prefix + content };
+            if (Array.isArray(content)) {
+                const index = content.findIndex(block => block.type === 'text' && typeof block.text === 'string');
+                if (index < 0) return { ...message, content: [{ type: 'text', text: prefix.trimEnd() }, ...content] };
+                return { ...message, content: content.map((block, i) => i === index ? { ...block, text: prefix + block.text } : block) };
+            }
+            return message;
+        });
+        apiMessages.push(...sanitizeToolTranscript(prepared, { logger, tag: 'RollingWindow' }).messages);
 
         return apiMessages;
     }

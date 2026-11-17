@@ -10,6 +10,7 @@
 
 // Klasa główna - buduje system prompt dla agenta + sub-agenta
 export { PromptBuilder } from './PromptBuilder.js';
+export type { MobileEnvironment } from './PromptBuilder.js';
 export type { PromptSkill } from './skillIndex.js';
 export type { DecisionTreeOverride, DecisionTreeOverrides, DecisionTreeRule } from './decisionTree.js';
 

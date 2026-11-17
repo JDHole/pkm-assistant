@@ -186,7 +186,7 @@ test.serial('nowa wiadomość użytkownika odbiera zatrzymany wynik w pierwszym 
     };
     await send_message.call(view as never, { meta: { origin: 'human' } });
     t.is(payloads.length, 1);
-    t.true(payloads[0].messages.some(message => message.role === 'user' && message.content === 'Kontynuuj'));
+    t.true(payloads[0].messages.some(message => message.role === 'user' && message.content === `[czas wiadomości: ${rw.messages.find(item => item.content === 'Kontynuuj')?.messageTime}]\nKontynuuj`));
     t.true(payloads[0].messages.some(message => message.role === 'user' && String(message.content).includes('ZACHOWANY DOROBEK')));
     const userMessage = rw.messages.find(message => message.content === 'Kontynuuj');
     const resultMessage = rw.messages.find(message => String(message.content).includes('ZACHOWANY DOROBEK'));

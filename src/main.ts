@@ -684,7 +684,15 @@ export default class PkmAssistantPlugin extends PluginBase {
       // node-safe `AppLike` z core - a `this.app` to prawdziwy `App` Obsidiana, którego
       // `vault.adapter` (`DataAdapter`) nie ma otwartego indeksu `VaultAdapterLike`.
       // Ta sama luka core co przy `PluginRuntime`/`PkmSettingsTab` wyżej.
-      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin, this._loadDeviceId());
+      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin, this._loadDeviceId(), undefined, () => {
+        if (!Platform.isMobile) return undefined;
+        return {
+          device: Platform.isPhone ? 'phone' : 'tablet',
+          semanticUnavailable: this.vaultIndexer?.getStatus().status === 'disabled_mobile',
+          connectedMcp: this.externalMcpManager?.listServersForUi().filter(server => server.connected).length ?? 0,
+          screenshotUnavailable: true,
+        };
+      });
       await this.agentManager.initialize();
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';

@@ -2619,6 +2619,16 @@ export const en: Record<string, string> = {
 
   // ── PromptBuilder — permissions ──
   'prompt.identity': 'You are {{name}} - an AI agent in "{{vault}}" vault.',
+  'prompt.label.mobile_environment': 'Mobile device',
+  'prompt.mobile.phone': 'You are working in Obsidian on a phone.',
+  'prompt.mobile.tablet': 'You are working in Obsidian on a tablet.',
+  'prompt.mobile.semantic': 'Semantic search is unavailable; search by words instead.',
+  'prompt.mobile.local_mcp': 'Local MCP servers (stdio) are unavailable.',
+  'prompt.mobile.no_mcp': 'No external MCP server is connected.',
+  'prompt.mobile.screenshot': 'Screen capture is unavailable.',
+  'prompt.mobile.no_promises': 'Do not promise features listed as unavailable.',
+  'prompt.message_time': 'Messages begin with a system-added timestamp that is not user text; the last message time is the current time, and use that date and time when writing files.',
+  'prompt.label.message_time': 'Message time',
   'prompt.current_date': 'Current date: {{date}}.',
   'prompt.label.identity': 'Identity',
   'prompt.label.personality': 'Personality',

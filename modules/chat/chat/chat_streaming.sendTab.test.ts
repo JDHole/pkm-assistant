@@ -121,7 +121,7 @@ for (const stage of ['structure', 'filename', 'header', 'state', 'question', 'se
         t.deepEqual((await f.memory.loadActiveSession(f.tabs[1].sessionPath)).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
         t.is(f.view.input_area.value, 'Szkic B');
         t.is(f.memory.activeSessionPath, f.memory.paths.sessionsActive + '/B.md');
-        t.deepEqual(f.modelInputs, [[{ role: 'system', content: 'system A' }, { role: 'user', content: 'Pierwsze pytanie A' }]]);
+        t.deepEqual(f.modelInputs, [[{ role: 'system', content: 'system A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[0].messageTime}]\nPierwsze pytanie A` }]]);
     });
 }
 
@@ -358,7 +358,7 @@ for (const editing of [true, false]) for (const stage of stages) {
         t.is(f.view.attachmentManager.buildMessageContent('Szkic B').content, '📎 Załącznik: B.txt\n```\nMateriał B\n```\n\nSzkic B');
         t.deepEqual(f.modelInputs, [[{ role: 'system', content: 'system A' },
             ...(!editing ? [{ role: 'user', content: 'Pytanie A' }, { role: 'assistant', content: 'Odpowiedź A' }] : []),
-            { role: 'user', content: apiQuestion }]]);
+            { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[editing ? 0 : 2].messageTime}]\n${apiQuestion}` }]]);
         t.is(f.view.is_generating, false, 'B pozostaje bezczynna');
         t.is(f.view._agentStates.get('A')?.isGenerating, false, 'A kończy generowanie');
         t.deepEqual([...f.view.messages_container.children].map(el => el.textContent), [], 'wysyłka A nie maluje dymka w B');
@@ -765,8 +765,8 @@ for (const timing of ['podczas przygotowania', 'przed mikrozadaniem doręczenia'
     t.deepEqual(f.windows[0].messages.map(m => m.content), ['Poprawka A', 'Odpowiedź na poprawkę A', result, 'Odpowiedź na poprawkę A']);
     t.deepEqual((await f.memory.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Poprawka A', 'Odpowiedź na poprawkę A', result, 'Odpowiedź na poprawkę A']);
     t.deepEqual(f.modelInputs, [
-        [{ role: 'system', content: 'system A' }, { role: 'user', content: 'Poprawka A' }],
-        [{ role: 'system', content: 'system A' }, { role: 'user', content: 'Poprawka A' }, { role: 'assistant', content: 'Odpowiedź na poprawkę A' }, { role: 'user', content: result }],
+        [{ role: 'system', content: 'system A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[0].messageTime}]\nPoprawka A` }],
+        [{ role: 'system', content: 'system A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[0].messageTime}]\nPoprawka A` }, { role: 'assistant', content: 'Odpowiedź na poprawkę A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[2].messageTime}]\n${result}` }],
     ]);
 });
 

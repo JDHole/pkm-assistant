@@ -1,3 +1,4 @@
+import { withoutTaskTime } from './test-support/withoutTaskTime.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { createDelegateTool, createSubAgentTool, __test__, stopAllDelegations } from './DelegateTool.js';
@@ -28,7 +29,7 @@ function fixture(t: ExecutionContext, local = false) {
         modelId = 'worker-model'; providerId = 'ollama';
         _streamGateLimit() { return local ? 1 : 0; }
         stream(payload: { messages: Array<{ role: string; content: string }> }, handlers: { done(value: unknown): void }) {
-            const task = payload.messages.filter(message => message.role === 'user').at(-1)!.content;
+            const task = withoutTaskTime(payload.messages).filter(message => message.role === 'user').at(-1)!.content;
             starts.push(task);
             requests.push({ task, complete: text => handlers.done({ choices: [{ message: { role: 'assistant', content: text } }] }) });
         }

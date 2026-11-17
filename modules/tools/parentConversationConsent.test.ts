@@ -1,3 +1,4 @@
+import { withoutTaskTime } from './test-support/withoutTaskTime.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { ApprovalManager, PermissionSystem } from '../../core/index.js';
@@ -37,7 +38,7 @@ function fixture(t: ExecutionContext) {
     modelTest.setChatModelFactory(deps => ({ providerId: deps.provider.info.id, modelId: deps.ctx.modelId,
         listModels: async () => [{ id: deps.ctx.modelId, max_input_tokens: 4096 }],
         stream(payload: ChatRequest, handlers: { done(response: unknown): void }) {
-            requests.push(structuredClone(payload)); streaming.resolve(handlers);
+            requests.push({ ...structuredClone(payload), messages: withoutTaskTime(structuredClone(payload.messages)) }); streaming.resolve(handlers);
         },
     }) as unknown as ChatModel);
     const config: SubAgentConfigLike = { name: 'worker', description: 'worker', role: 'worker', model: 'anthropic/child', tools: [], prompt: 'METHOD' };

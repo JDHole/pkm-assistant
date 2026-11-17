@@ -74,7 +74,10 @@ interface DelegateMemberItem {
     description?: string;
 }
 
+export interface MobileEnvironment { device: 'phone' | 'tablet'; semanticUnavailable: boolean; connectedMcp: number; screenshotUnavailable: boolean; }
+
 interface PromptContext {
+    mobileEnvironment?: MobileEnvironment;
     vaultName?: string; currentDate?: string; hasResearcher?: boolean; hasStrategist?: boolean; hasDelegates?: boolean;
     promptDefaults?: PromptGlobalDefaults; availableToolNames?: string[]; skills?: PromptSkill[]; extendedPromptRules?: boolean;
     vaultGroups?: unknown[]; vaultMapDescriptions?: Record<string, string>; artifactTypes?: unknown[]; artifactList?: unknown[]; activeArtifact?: unknown;
@@ -202,6 +205,19 @@ export class PromptBuilder {
             { category: 'core' }
         );
 
+        if (context.mobileEnvironment) {
+            const mobile = context.mobileEnvironment;
+            const lines = [t(`prompt.mobile.${mobile.device}`)];
+            if (mobile.semanticUnavailable) lines.push(t('prompt.mobile.semantic'));
+            lines.push(t('prompt.mobile.local_mcp'));
+            if (mobile.connectedMcp === 0) lines.push(t('prompt.mobile.no_mcp'));
+            if (mobile.screenshotUnavailable) lines.push(t('prompt.mobile.screenshot'));
+            lines.push(t('prompt.mobile.no_promises'));
+            this._add('mobile_environment', t('prompt.label.mobile_environment'),
+                this._resolveSection('mobile_environment', overrides, globalDefaults, lines.join('\n')),
+                { category: 'core' });
+        }
+
         this._add('permissions', t('prompt.label.permissions'),
             this._buildPermissions(agent, context), {
                 category: 'rules'
@@ -255,6 +271,8 @@ export class PromptBuilder {
             this._buildCurrentDate(context),
             { category: 'context' }
         );
+
+        this._add('message_time', t('prompt.label.message_time'), t('prompt.message_time'), { category: 'context' });
 
         return this;
     }

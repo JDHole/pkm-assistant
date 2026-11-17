@@ -1125,3 +1125,5 @@ rzeczywistego runnera, MCP i magazynu oraz sterowanego modelu: literalne listy
 narzędzi i zamrożonych uprawnień, kontynuacje czterech wariantów suba na obu
 platformach, whitelistę wnuka, notę PL/EN, odmowy bez zmiany pliku i manifestu
 oraz zachowany przegląd prowadzącego. Nie wymagają żywego Obsidiana ani sieci.
+
+Runner zamraża czas na początku `runTask` w metadanych i dodaje linię wyłącznie przy serializacji zadania dla modelu; jego osobna rama otrzymuje tę samą stałą instrukcję co główny prompt.

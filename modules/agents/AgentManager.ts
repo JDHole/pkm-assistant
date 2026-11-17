@@ -28,6 +28,7 @@ import {
     findKomunikatorAgent,
 } from '../../modules/komunikator/index.js';
 import { log } from '../../core/utils/Logger.js';
+import type { MobileEnvironment } from '../prompts/index.js';
 import { clearModelCache } from '../../modules/models/index.js';
 import { getDateLocale, t } from '../../core/i18n/index.js';
 import { getAgentSafeName } from '../../core/index.js';
@@ -88,6 +89,10 @@ export class AgentManager {
     declare listeners: Array<(event: string, data: Record<string, unknown>) => void>;
     private startupMetrics: AgentStartupMetrics = {};
 
+    getMobileEnvironment(): MobileEnvironment | undefined {
+        return this.mobileEnvironmentProvider();
+    }
+
     get startupTimings(): Readonly<AgentStartupMetrics> {
         return { ...this.startupMetrics };
     }
@@ -97,7 +102,7 @@ export class AgentManager {
      * @param {Object} vault - Obsidian Vault object
      * @param {Object} settings - Plugin settings
      */
-    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null, readonly deviceId: DeviceId | null = null, private readonly startupNow: () => number = () => performance.now()) {
+    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null, readonly deviceId: DeviceId | null = null, private readonly startupNow: () => number = () => performance.now(), private readonly mobileEnvironmentProvider: () => MobileEnvironment | undefined = () => undefined) {
         this.vault = vault;
         this.settings = settings;
         this.plugin = plugin;

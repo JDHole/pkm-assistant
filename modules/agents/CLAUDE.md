@@ -333,3 +333,8 @@ pełny stan pamięci, ślad zależności z watcherem/playbookami, logi i nasłuc
 `unhandledRejection`. Osobne przypadki stale rzucającego zegara sprawdzają
 rzeczywiste błędy pamięci, skilli, komunikatora, mapy, ładowania agentów i playbooków.
 Dotychczasowe asercje S1a pozostają bez zmian.
+
+## Mobile T1 — możliwości urządzenia
+
+`AgentManager.getMobileEnvironment()` pobiera opcjonalny snapshot z wstrzykniętego
+composition root; decyzja o utrwaleniu go dla okna rozmowy należy do czatu.
