@@ -446,12 +446,33 @@ test.serial('render_check observes only the bound reading view and rechecks admi
         const whole = new Element(); whole.children = [new Element(['block-language-dataviewjs'], 'OLD', 'OLD ERROR'), ...preview.children];
         let state = { file: 'Notes/A.md', mode: 'source' };
         const file = { path: 'Notes/A.md' };
+        let source = '```dataviewjs\nx\n```'; let opens = 0;
         const leaf = { view: { file, contentEl: whole, previewMode: { containerEl: preview }, getViewType: () => 'markdown' },
-            getViewState: () => ({ state }), setViewState: async (next: { state: typeof state }) => { state = next.state; }, openFile: async () => {} };
+            getViewState: () => ({ state }), setViewState: async (next: { state: typeof state }) => { state = next.state; }, openFile: async () => { opens++; } };
         const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => file, getLeaf: () => leaf, iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf) },
-            vault: { getAbstractFileByPath: () => file, read: async () => '```dataviewjs\nx\n```' } };
+            vault: { getAbstractFileByPath: () => file, read: async () => source } };
         const port = createWorkspacePort(app as never, (value): value is never => value === file);
         const client = chain(port, true, true);
+        const refused = await client.call({ action: 'render_check', path: 'Notes/A.md' }, { callerToolNames: ['obsidian_app'] });
+        t.is(toolResultStatus(refused), 'error'); t.is(opens, 0);
+        source = '---\ntitle: example\n---\n> ```dataviewjs\n> x\n> ```\n- ~~~dataviewjs\n  x\n  ~~~\n~~~dataview\nx\n~~~\n```js\n~~~dataviewjs\n```\n~~~dataviewjs\nunclosed';
+        const coverage = await client.call({ action: 'render_check', path: 'Notes/A.md', wait_ms: 10 });
+        t.true(JSON.stringify(coverage).includes('"source_blocks":{"count":4,"dataview":[10],"dataviewjs":[4,7,16]}'));
+        let conversions = 0;
+        const observing = client.call({ action: 'render_check', path: 'Notes/A.md', wait_ms: 100 });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        win.console.error('a'.repeat(1000));
+        win.console.error('b'.repeat(1001));
+        const wrapper = win.console.error;
+        win.console.error = (...args: unknown[]) => wrapper(...args);
+        const errors = await observing;
+        const errorJson = JSON.stringify(errors);
+        t.true(errorJson.includes(`"text":"${'a'.repeat(1000)}","truncated":false`));
+        t.true(errorJson.includes(`"text":"${'b'.repeat(1000)}","truncated":true`));
+        t.true(errorJson.includes('"global_errors_truncated":false'));
+        win.console.error({ toString: () => { conversions++; return 'late'; } });
+        t.is(conversions, 0);
+        win.console.error = original; calls.length = 0;
         const pending = client.call({ action: 'render_check', path: 'Notes/A.md' });
         await new Promise(resolve => setTimeout(resolve, 30));
         win.console.error(Object.create(null));
@@ -465,7 +486,7 @@ test.serial('render_check observes only the bound reading view and rechecks admi
         client.agent.admin_access = true;
         const changed = client.call({ action: 'render_check', path: 'Notes/A.md' });
         await new Promise(resolve => setTimeout(resolve, 30));
-        leaf.view.previewMode = { containerEl: new Element() };
+        leaf.view = { ...leaf.view, previewMode: { containerEl: new Element() } };
         const rejected = await changed;
         t.is(toolResultStatus(rejected), 'error'); t.false(JSON.stringify(rejected).includes('PRIVATE_WIDGET'));
     } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }

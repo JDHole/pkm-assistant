@@ -3,7 +3,7 @@ import { OBSIDIAN_APP_OPERATION_TIMEOUT_MS } from '../../config/limits.js';
 export { createWorkspacePort } from './workspace.js';
 export { createCapturePort } from './capture.js';
 import { buildRenderResult } from './render.js';
-import type { RenderObservation } from './render.js';
+import type { RenderObservation, SourceBlocks } from './render.js';
 import { encodeCapture } from './capture.js';
 import type { CapturePort } from './capture.js';
 export type { CapturePort, CapturedFrame } from './capture.js';
@@ -72,7 +72,7 @@ export function decideCapture(target: CaptureTarget, authorize?: AppContext['aut
     if (target.blocked.length || target.embeds.some(path => !authorizedPath(path, authorize))) return { kind: 'error', code: 'restricted_content_visible' };
     return { kind: 'ok', rect };
 }
-export type AppExecutorOptions = { screenshot?: 'disabled' | 'enabled' };
+export type AppExecutorOptions = { screenshot?: 'disabled' | 'enabled'; countSourceBlocks?: (source: string) => SourceBlocks };
 export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS, capturePort: CapturePort | null = null, options: AppExecutorOptions = {}) {
     const screenshotEnabled = options.screenshot === 'enabled';
     let queue: Promise<void> = Promise.resolve();
@@ -126,7 +126,7 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                     if (observation.verify && !observation.verify()) return fail('unavailable');
                     let detail = false;
                     try { detail = context?.canDiscloseDetails?.() === true; } catch { /* Fail closed. */ }
-                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, detail, source) };
+                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, detail, options.countSourceBlocks?.(source)) };
                 }
                 const verified = port.getActivePath() === action.path;
                 return { ok: true, success: true, verified, effect: verified ? (before === action.path ? 'unchanged' : 'changed') : 'unknown', data: { path: action.path } };

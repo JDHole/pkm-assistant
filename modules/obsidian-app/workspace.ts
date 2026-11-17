@@ -39,26 +39,27 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
             const win = content.ownerDocument.defaultView;
             if (!win || !win.MutationObserver) throw new Error('Observer unavailable');
             const start = Date.now();
-            let errors: string[] = [];
+            let errors: { text: string; truncated: boolean }[] = [];
             let errorsTruncated = false;
             let active = true;
             const safe = (value: unknown): string => {
-                try { return String(value).slice(0, 1000); } catch { return '[unprintable]'; }
+                try { return String(value); } catch { return '[unprintable]'; }
             };
             const add = (values: unknown[]) => {
                 if (!active) return;
                 try {
                     if (errors.length >= 20) { errorsTruncated = true; return; }
                     let message = '';
+                    let truncated = false;
                     for (const value of values) {
-                        if (message.length >= 1000) { errorsTruncated = true; break; }
+                        if (message.length >= 1000) { truncated = true; break; }
                         const part = safe(value);
                         const available = 1000 - message.length;
                         const next = (message ? ' ' : '') + part;
-                        if (next.length > available || part.length === 1000) errorsTruncated = true;
+                        if (next.length > available) truncated = true;
                         message += next.slice(0, available);
                     }
-                    errors.push(message);
+                    errors.push({ text: message, truncated });
                 } catch { errorsTruncated = true; }
             };
             const original = win.console.error;

@@ -1,3 +1,4 @@
+import { scanMarkdownFences } from './syntaxValidator.js';
 import { t } from '../../core/i18n/index.js';
 import { createAppExecutor } from '../obsidian-app/index.js';
 import type { AppExecutorOptions, AppResult, CapturePort, WorkspacePort } from '../obsidian-app/index.js';
@@ -5,7 +6,11 @@ import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 
 export function createObsidianAppTool(port: WorkspacePort, capture: CapturePort | null = null, options: AppExecutorOptions & { isMobile?: boolean } = {}) {
     const screenshotEnabled = options.screenshot === 'enabled';
-    const execute = createAppExecutor(port, undefined, capture, { screenshot: screenshotEnabled ? 'enabled' : 'disabled' });
+    const execute = createAppExecutor(port, undefined, capture, { screenshot: screenshotEnabled ? 'enabled' : 'disabled', countSourceBlocks: source => {
+        const result: { dataview: number[]; dataviewjs: number[] } = { dataview: [], dataviewjs: [] };
+        for (const block of scanMarkdownFences(source)) if (block.language === 'dataview' || block.language === 'dataviewjs') result[block.language].push(block.line);
+        return result;
+    } });
     return {
         name: 'obsidian_app', source: 'built-in', serverName: 'app',
         description: t('mcp.obsidian_app.desc') + (screenshotEnabled ? ' ' + t('mcp.obsidian_app.screenshot_desc') : ''),
