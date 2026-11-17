@@ -32,6 +32,8 @@ export function defaultSettings(): SettingsBag {
         pkmAssistant: {
             defaultAutonomy: DEFAULT_AUTONOMY,
             useDeviceModels: false,
+            obsidianAppEnabled: false,
+            obsidianAppRenderCheck: false,
             chat: {
                 platform: '',
                 apiKeys: {},

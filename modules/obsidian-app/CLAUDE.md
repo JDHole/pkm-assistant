@@ -31,7 +31,7 @@ The existing implementation already covers view selection, overlays, zoom, busy/
 
 ## render_check
 
-`render_check` jest wyłączony w produkcji i ukryty przed modelem; odmowa następuje przed zgodą i dostępem do portów. Testy włączają akcję jawnie. Ponowne włączenie wymaga osobnego odbioru i próby na fizycznym telefonie z Dataview.
+`render_check` jest domyślnie wyłączony i ukryty przed modelem; odmowa następuje przed zgodą i dostępem do portów. Eksperymentalny przełącznik użytkownika włącza go po przeładowaniu pluginu tylko przy włączonej nawigacji Obsidiana. Uznanie za funkcję domyślną wymaga osobnego odbioru i próby na fizycznym telefonie z Dataview.
 
 Po włączeniu akcja otwiera autoryzowaną notatkę Markdown i obserwuje podgląd do 500 ms bez zmian lub `wait_ms` (1-15000 ms, domyślnie 4000). Stabilizacja jest heurystyką, a rozpoczętego otwarcia nie można cofnąć. Sprawdzenia tożsamości i dostępu są ponawiane, Stop i dispose kończą obserwację; sub-agenci nie mają dostępu. Statusy bloków otrzymują agenci z dostępem do odczytu, maskowany tekst i błędy tylko administrator po ponownym sprawdzeniu. Błędy innych wtyczek mogą zawierać dane nierozpoznane przez maskę.
 

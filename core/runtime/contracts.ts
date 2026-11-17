@@ -230,6 +230,7 @@ export interface PkmAssistantSettings {
     indexArtifacts?: boolean;
     komunikatorEnabled?: boolean;
     obsidianAppEnabled?: boolean;
+    obsidianAppRenderCheck?: boolean;
     onboardingCompleted?: number | boolean;
     /** Use this device's model library instead of agent/sub-agent YAML overrides. */
     useDeviceModels?: boolean;

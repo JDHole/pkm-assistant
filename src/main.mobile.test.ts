@@ -8,6 +8,7 @@ import { ToolRegistry, ServerManager, createWriteTool } from '../modules/tools/i
 import { SubAgentRunner, SubTaskRegistry } from '../modules/sub-agents/index.js';
 import { MemoryAdapter } from '../modules/vault-drafts/test-support/MemoryAdapter.js';
 import { log } from '../core/utils/Logger.js';
+import { PermissionSystem } from '../core/security/PermissionSystem.js';
 import { setLocale } from '../core/i18n/index.js';
 import { CHAT_PROVIDERS } from '../modules/models/index.js';
 import type { ExecutionContext } from 'ava';
@@ -702,6 +703,77 @@ test.serial('mobile Obsidian App registers state/open with no Electron and repor
     const result = await tool.execute({ action: 'screenshot' }, host.app as never, {} as never);
     t.deepEqual(result, { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'Screenshots are not available on mobile. Use workspace state or open a note instead.' } });
     t.is(nodeReads, 0);
+});
+
+for (const mobile of [false, true]) for (const [appEnabled, renderEnabled] of [[false, false], [false, true], [true, false], [true, true]] as const) {
+    test.serial(`render check registration: mobile=${mobile}, app=${appEnabled}, render=${renderEnabled}`, async t => {
+        Platform.isMobile = mobile;
+        let hostAccess = 0;
+        const workspace = { iterateAllLeaves() { hostAccess++; }, getActiveFile() { hostAccess++; return null; },
+            on() { hostAccess++; throw new Error('unexpected listener'); } };
+        const cleanups: Array<() => void> = [];
+        const registry = new ToolRegistry();
+        const host = { register: (callback: () => void) => cleanups.push(callback),
+            settings: { pkmAssistant: { obsidianAppEnabled: appEnabled, obsidianAppRenderCheck: renderEnabled } },
+            app: { workspace }, toolRegistry: registry };
+        let timers = 0;
+        const originalTimer = globalThis.setTimeout;
+        if (!appEnabled || !renderEnabled) {
+            globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => { timers++; return originalTimer(...args); }) as typeof setTimeout;
+        }
+        try {
+            t.is(Plugin.prototype.registerObsidianAppTool.call(host as never, registry), appEnabled);
+        } finally { globalThis.setTimeout = originalTimer; }
+        t.is(timers, 0);
+        const tool = registry.getTool('obsidian_app');
+        if (appEnabled && tool) {
+            t.is(JSON.stringify(tool.inputSchema).includes('render_check'), renderEnabled);
+            t.is(tool.description.includes('render_check'), renderEnabled);
+            if (!renderEnabled) {
+                t.deepEqual(await tool.execute({ action: 'render_check', path: 'A.md' }),
+                    { ok: false, success: false, error: { code: 'render_check_disabled', message: 'render_check_disabled' } });
+            }
+        } else t.is(tool, null);
+        cleanups.forEach(cleanup => cleanup());
+        t.is(hostAccess, 0);
+    });
+}
+
+test.serial('enabled settings connect MCP to the production render port', async t => {
+    const previous = globalThis.HTMLElement;
+    class Element {
+        ownerDocument!: { defaultView: unknown };
+        classList: string[] = [];
+        children: Element[] = [];
+        querySelectorAll() { return this.children; }
+        querySelector() { return null; }
+    }
+    Object.defineProperty(globalThis, 'HTMLElement', { value: Element, configurable: true });
+    t.teardown(() => Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }));
+    class Observer { observe() {} disconnect() {} }
+    const win = { MutationObserver: Observer, console: { error: () => {} }, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} };
+    const preview = new Element(); preview.ownerDocument = { defaultView: win };
+    const file = new Obsidian.TFile(); file.path = 'Notes/A.md';
+    let state = { file: file.path, mode: 'source' };
+    let opens = 0; let reads = 0;
+    const leaf = { view: { file, previewMode: { containerEl: preview }, getViewType: () => 'markdown' },
+        getViewState: () => ({ state }), setViewState: async (next: { state: typeof state }) => { state = next.state; },
+        openFile: async () => { opens++; } };
+    const workspace = { getMostRecentLeaf: () => leaf, getActiveFile: () => file, getLeaf: () => leaf,
+        iterateAllLeaves: (fn: (item: typeof leaf) => void) => fn(leaf), on: () => ({}), offref: () => {} };
+    const app = { workspace, vault: { getAbstractFileByPath: () => file, read: async () => { reads++; return ''; } } };
+    const registry = new ToolRegistry(); const cleanups: Array<() => void> = [];
+    const host = { app, settings: { pkmAssistant: { obsidianAppEnabled: true, obsidianAppRenderCheck: true } },
+        register: (callback: () => void) => cleanups.push(callback) };
+    Plugin.prototype.registerObsidianAppTool.call(host as never, registry);
+    t.teardown(() => cleanups.forEach(cleanup => cleanup()));
+    const agent = { name: 'Tola', admin_access: true, disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
+    const client = new MCPClient(app as never, plugin as never, registry);
+    const result = await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'render_check', path: file.path, wait_ms: 10 } }, 'Tola');
+    t.true(typeof result === 'object' && result !== null && 'ok' in result && result.ok === true); t.is(opens, 1); t.is(reads, 1);
+    t.true(JSON.stringify(result).includes('source_blocks'));
 });
 
 for (const { mobile, missingAbort } of [{ mobile: false, missingAbort: false }, { mobile: true, missingAbort: false }, { mobile: true, missingAbort: true }]) for (const choice of ['local', 'connection', 'close', 'unload'] as const) test.serial(`device diagnostics composition: ${mobile ? 'mobile' : 'desktop'}, missing AbortController=${missingAbort}, ${choice}`, async t => {

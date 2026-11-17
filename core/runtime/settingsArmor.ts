@@ -91,7 +91,11 @@ export async function loadSettingsWithArmor(deps: SettingsArmorDeps): Promise<Se
     wynik.settings = deepMergeMissing(cloneConfig(worek) as SettingsBag, cloneConfig(defaults ?? {}));
     // Validate only this opt-in at the disk boundary; never coerce "true" or 1.
     const pkm = wynik.settings.pkmAssistant;
-    if (isPlainObject(pkm)) pkm.useDeviceModels = pkm.useDeviceModels === true;
+    if (isPlainObject(pkm)) {
+        pkm.useDeviceModels = pkm.useDeviceModels === true;
+        pkm.obsidianAppEnabled = pkm.obsidianAppEnabled === true;
+        pkm.obsidianAppRenderCheck = pkm.obsidianAppRenderCheck === true;
+    }
     wynik.source = source;
 
     // Awans na kopię i backup dzienny robimy WYŁĄCZNIE z treści głównego pliku, która się

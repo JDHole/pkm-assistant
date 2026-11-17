@@ -25,6 +25,7 @@ interface PkmSettingsSlice {
     extendedPromptRules?: boolean;
     komunikatorEnabled?: boolean;
     obsidianAppEnabled?: boolean;
+    obsidianAppRenderCheck?: boolean;
     debugMode?: boolean;
     traceEnabled?: boolean;
     cacheTelemetryEnabled?: boolean;
@@ -266,13 +267,25 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
                 await save();
             }));
 
+    let renderCheckSetting: ObsidianSetting;
     new Setting(container)
         .setName(t('settings.obsidian_app_enabled'))
         .setDesc(t('settings.obsidian_app_enabled_desc'))
         .addToggle(toggle => toggle.setValue(pkm.obsidianAppEnabled === true).onChange(async value => {
             pkm.obsidianAppEnabled = value;
+            renderCheckSetting.settingEl.hidden = !value;
             await save();
         }));
+
+    renderCheckSetting = new Setting(container)
+        .setName(t('settings.obsidian_app_render_check'))
+        .setDesc(t('settings.obsidian_app_render_check_desc'))
+        .addToggle(toggle => toggle.setValue(pkm.obsidianAppRenderCheck === true).onChange(async value => {
+            pkm.obsidianAppRenderCheck = value;
+            await save();
+        }));
+    renderCheckSetting.settingEl.addClass('pkm-render-check-setting');
+    renderCheckSetting.settingEl.hidden = pkm.obsidianAppEnabled !== true;
 
     // Globalny wyłącznik Komunikatora - poczta między agentami. Domyślnie ON i widoczny
     // dla usera. Rejestracja narzędzi i katalog serwerów czytają flagę PRZY STARCIE,
