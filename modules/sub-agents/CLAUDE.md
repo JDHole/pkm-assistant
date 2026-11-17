@@ -1126,10 +1126,4 @@ narzędzi i zamrożonych uprawnień, kontynuacje czterech wariantów suba na obu
 platformach, whitelistę wnuka, notę PL/EN, odmowy bez zmiany pliku i manifestu
 oraz zachowany przegląd prowadzącego. Nie wymagają żywego Obsidiana ani sieci.
 
-Runner zamraża czas na początku `runTask` w metadanych i dodaje linię wyłącznie przy serializacji zadania dla modelu; jego osobna rama otrzymuje tę samą stałą instrukcję co główny prompt.
-Domyślne zestawy workera i nowego szablonu obejmują `check_syntax`; jawna lista narzędzi istniejącego suba nadal ma pierwszeństwo.
-
-Znacznik zadania jest całą linią zamrożoną w języku interfejsu w chwili startu.
-
-Mobile environment: the runner snapshots the injected provider once at the start of each run and appends the shared prompts renderer to its frame; desktop has no section. The composition root supplies the same provider to AgentManager and the runner factory.
-`check_syntax` jest domyślnie wyłączone; jawna lista narzędzi istniejącego suba nadal ma pierwszeństwo.
+Runner zamraża całą zlokalizowaną linię czasu na początku `runTask` i dodaje ją przy serializacji zadania dla modelu; rama otrzymuje stałą instrukcję czasu. Na mobile runner pobiera migawkę urządzenia raz na bieg i dołącza wspólny `renderMobileEnvironment`; na desktopie sekcji nie ma. `check_syntax` jest domyślnie wyłączone; jawna lista narzędzi istniejącego suba zachowuje pierwszeństwo.

@@ -561,13 +561,6 @@ informuje o propozycji do decyzji agenta zlecającego i zakazie samodzielnego
 zatwierdzania przez suba. Tekst trafia przez MCP do modelu po udanym zapisie;
 kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
 
-Czas wiadomości: `messageTime` renderuje lokalną datę, dzień języka interfejsu i offset z wstrzykiwanego zegara; gotowy tekst należy zamrozić przy utworzeniu wiadomości.
-PL/EN opisują wymagany klucz wyszukiwania Jina, status wspólnych kluczy mediów i skrót do sekcji Klucze API.
-`check_syntax` używa istniejącej akcji `vault.read`, z ryzykiem GREEN; kanonizacja i No-Go działają jak dla odczytu.
+`core/messageTime.ts` renderuje całą zlokalizowaną linię czasu przy utworzeniu wiadomości, nie przy serializacji; nie jest to metadana pochodzenia bezpieczeństwa. PL/EN opisują także klucz wyszukiwania Jina, status wspólnych kluczy mediów i skrót do Kluczy API.
 
-`messageTime` w `core/messageTime.ts` renderuje całą linię i18n przy utworzeniu, nie przy serializacji; to nie jest metadana pochodzenia bezpieczeństwa.
-F4c: opisy `obsidian_app` w PL i EN wyjaśniają znaczenie `counts_match` i ograniczenie maskowania błędów innych wtyczek.
-
-F4e: opisy PL/EN `obsidian_app` domyślnie pokazują tylko `state` i `open`;
-osobny opis `render_check` jest dołączany jedynie przy jawnym włączeniu akcji.
-`check_syntax` jest domyślnie wyłączone; po rejestracji używa akcji `vault.read` oraz kanonizacji i No-Go jak odczyt.
+`check_syntax` jest domyślnie wyłączone; po rejestracji używa akcji `vault.read` z ryzykiem GREEN, kanonizacją i No-Go jak przy odczycie. Opis `obsidian_app` domyślnie obejmuje `state` i `open`; opis `render_check`, w tym znaczenie `counts_match` i ograniczenia maskowania, jest dołączany po jawnym włączeniu.

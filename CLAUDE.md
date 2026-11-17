@@ -41,7 +41,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/embedding/` | Vectorization (Orama): `EmbeddingModel` + `EmbeddingRegistry` + `providers/` (OpenAI/Ollama/Gemini/LM Studio and others) + `VaultIndexer` |
 | `modules/prompts/` | `PromptBuilder` + Decision Tree - agent behavior instructions, grouped and toggleable |
 | `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegation) + system roles loaded via `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + per-task timeout |
-| `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP) |
+| `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP); `check_syntax` supports JS/JSON and is disabled by default |
 | `modules/skills/` | Skill engine (recipes for agents) |
 | `modules/chat/` | `ChatView` + mixins + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline `/` trigger; `@` = MentionAutocomplete) |
 | `modules/models/` | `ChatModel` + providers in `providers/` (many platforms: DeepSeek, Anthropic, OpenAI, Google, Groq, OpenRouter, Ollama, LM Studio, xAI...) + `registry.ts`; DI from `config/runtimeConfig.ts` |
@@ -49,7 +49,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/agents/` | `AgentManager`, `AgentProfile`, the built-in onboarding agent, agent personality model (Persona + Skills + Permissions + Team + Memory) |
 | `modules/multimodal/` | Audio STT + image generation + vision + active-note awareness |
 | `modules/onboarding/` | Wizard + `PlaybookManager` |
-| `modules/obsidian-app/` | Opt-in workspace state and navigation |
+| `modules/obsidian-app/` | Opt-in workspace state and navigation; `render_check` is disabled in production |
 | `modules/komunikator/` | Inter-agent mail: one file per message, `kom_send`/`kom_list`/`kom_read` primitives, per-agent invisibility, semi-automatic cleanup |
 | `modules/crystal-soul/` | UI generators (icons, crystals, colors) + `SkinManager` |
 | `modules/shell/` | Settings tab, sidebar, modals |

@@ -31,30 +31,8 @@ The existing implementation already covers view selection, overlays, zoom, busy/
 
 ## render_check
 
-`render_check` opens an authorized canonical Markdown path in the existing queue, requests preview and observes rendered block DOM until 500 ms of quiet or `wait_ms` (1–15000, default 4000). Its operation timeout adds the wait budget to the existing 5000 ms; other actions retain their limits. Stop and dispose cancel observation and restore listeners and `console.error`; a pending host open cannot be undone. Identity is checked before and after observation; uncertainty fails closed.
+`render_check` jest wyłączony w produkcji i ukryty przed modelem; odmowa następuje przed zgodą i dostępem do portów. Testy włączają akcję jawnie. Ponowne włączenie wymaga osobnego odbioru i próby na fizycznym telefonie z Dataview.
 
-All main agents with read access receive only block number, language and rendered/empty/error/timeout, count, elapsed time, stabilization and mode. Only an agent with trusted `admin_access === true` receives masked, bounded block text, DOM error messages and unassigned global errors with truncation flags. Renderers and error stacks can contain data from other vault files, which is why read access to the note alone is insufficient. `rendered` means nonempty without a DOM error, not correctness; quiet is a heuristic. Screenshot remains disabled. Physical phone checks remain necessary for actual Dataview DOM, preview switching, timing, delayed asynchronous rendering and Stop/unload behavior on device.
+Po włączeniu akcja otwiera autoryzowaną notatkę Markdown i obserwuje podgląd do 500 ms bez zmian lub `wait_ms` (1-15000 ms, domyślnie 4000). Stabilizacja jest heurystyką, a rozpoczętego otwarcia nie można cofnąć. Sprawdzenia tożsamości i dostępu są ponawiane, Stop i dispose kończą obserwację; sub-agenci nie mają dostępu. Statusy bloków otrzymują agenci z dostępem do odczytu, maskowany tekst i błędy tylko administrator po ponownym sprawdzeniu. Błędy innych wtyczek mogą zawierać dane nierozpoznane przez maskę.
 
-### F4: render_check
-
-Odczyt źródła po autoryzacji liczy ogrodzenia dataview/dataviewjs i wiersze; coverage porównuje liczby ze znalezionymi w DOM. `partial` oznacza możliwe leniwe renderowanie lub zwinięte sekcje; numeracja dotyczy tylko zaobserwowanych bloków. Obserwowany jest wyłącznie kontener preview, związany z tym samym liściem, widokiem, korzeniem i ścieżką. Brak trybu czytania lub zmiana tożsamości daje unavailable. Publiczne typy Obsidiana nie oferują przewijania podglądu do wiersza, więc argument line nie jest dostępny.
-
-Status zawiera wyłącznie liczby, boolean i zamknięte słowniki (rodzaj dataviewjs/dataview/other, stan, coverage, numeracja i nota). Szczegóły wymagają ponownego sprawdzenia aktualnego profilu administratora bezpośrednio przed wynikiem; brak tożsamości lub wyjątek oznacza status. Przechwytywanie błędów ma ograniczony bufor i jest dezaktywowane także po opakowaniu przez inną wtyczkę. Bez fizycznego telefonu nie sprawdzono faktycznego renderowania, leniwego montowania sekcji, przewijania ani zachowania interfejsu mobilnego.
-
-F4b: `render_check` receives source-block counts through an injected port; the module does not parse Markdown fences. Each captured global error retains its own collection truncation flag, while the aggregate flag reports omitted errors.
-
-### F4c: granice obserwacji
-
-Wywołanie wymaga jawnej tożsamości tury; po otwarciu i przed odczytami oraz wynikiem ponownie sprawdzany jest dostęp. Dispose przerywa obserwację i blokuje dalszy odczyt. Port nasłuchuje zmian pliku, aktywnego liścia i układu oraz sprawdza tożsamość przy mutacjach, synchronicznych odczytach DOM i co 50 ms przez cały czas oczekiwania, w tym referencję pliku widoku, gdy jest dostępna. Mutacje wewnątrz osadzeń są ignorowane, a ich bloki i tekst wyłączone z wyników. `counts_match` oznacza wyłącznie zgodność liczby bloków, nie ich tożsamość. Bufor tekstu błędów jest łącznie ograniczony do 20 tys. znaków w 20 własnych napisach, a maskowanie poprzedza ograniczenie wyniku. Błędy innych wtyczek mogą zawierać dane, których maska po kształcie nie rozpozna; szczegóły trafiają wyłącznie do agenta z pełnym dostępem. Zamiana i powrót trwające krócej niż odstęp kontroli, bez mutacji DOM i zdarzeń, pozostają niewykrywalne. Treść dostaje wyłącznie agent z pełnym dostępem, więc skutkiem takiej zamiany byłby błędny wynik, a nie ujawnienie danych.
-
-Wyjątek sprawdzenia uprawnienia do szczegółów daje status; wyjątek autoryzacji odczytu notatki oznacza odmowę całej akcji.
-
-## render_check: wyłączony w produkcji
-
-Po trzech odrzuconych niezależnych recenzjach akcja jest wyłączona, ukryta przed
-modelem i odmawiana przed zgodą oraz dostępem do portów. Port obserwacji powstaje
-wyłącznie po jawnym włączeniu w testach. Recenzje wykazywały klasy wad dotyczące
-ujawniania przez pola DOM, tożsamości wywołującego i widoku, sprzątania zasobów
-oraz pokrycia renderowania. Włączenie wymaga osobnej karty, niezależnego odbioru
-oraz próby na fizycznym telefonie z prawdziwym Dataview. Status niepustości jest
-liczony niezależnie od budżetu tekstu; dodatnia głębokość delegacji odmawia dostępu.
+Liczby bloków źródłowych są wstrzykiwane przez port z `ObsidianAppTool.ts`; `counts_match` oznacza zgodność liczby, a nie tożsamości bloków, zaś `partial` może wynikać z leniwego renderowania lub zwiniętych sekcji. Numeracja dotyczy zaobserwowanych bloków, osadzenia są pomijane, a argumentu `line` nie ma w publicznym API podglądu.
