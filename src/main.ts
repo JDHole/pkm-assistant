@@ -61,6 +61,7 @@ import {
   ExternalMcpManager,
   // Vault prymitywy: read/list mają scope vault|memory; write/delete/create_folder vault-only
   createReadTool,
+  createCheckSyntaxTool,
   createListTool,
   createWriteTool,
   createDeleteTool,
@@ -823,6 +824,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // Fabryki niżej nie czytają `app` (realny `app` dociera do narzędzia dopiero jako
       // 2. argument `execute(args, app, plugin)`).
       this.toolRegistry.registerTool(createReadTool());
+      this.toolRegistry.registerTool(createCheckSyntaxTool());
       this.toolRegistry.registerTool(createListTool());
       this.toolRegistry.registerTool(createWriteTool());
       this.toolRegistry.registerTool(createDeleteTool());

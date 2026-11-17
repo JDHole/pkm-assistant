@@ -333,3 +333,5 @@ pełny stan pamięci, ślad zależności z watcherem/playbookami, logi i nasłuc
 `unhandledRejection`. Osobne przypadki stale rzucającego zegara sprawdzają
 rzeczywiste błędy pamięci, skilli, komunikatora, mapy, ładowania agentów i playbooków.
 Dotychczasowe asercje S1a pozostają bez zmian.
+
+`check_syntax` należy do grupy vault i przełącznika `read_notes`; można je wyłączyć osobno w `disabled_tools`. Nowo tworzony fabryczny researcher ma je na liście narzędzi; istniejące szablony nie są przepisywane.

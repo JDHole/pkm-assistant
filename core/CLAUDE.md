@@ -560,3 +560,5 @@ M4 F2m dodaje PL/EN `subagent.draft.proposal_note`: wynik writera w kopii
 informuje o propozycji do decyzji agenta zlecającego i zakazie samodzielnego
 zatwierdzania przez suba. Tekst trafia przez MCP do modelu po udanym zapisie;
 kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
+
+`check_syntax` używa istniejącej akcji `vault.read`, z ryzykiem GREEN; kanonizacja i No-Go działają jak dla odczytu.

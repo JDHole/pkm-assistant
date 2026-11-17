@@ -1409,3 +1409,7 @@ await diagnostyki daje 2 timeouty przed startem; usunięcie startu następcy prz
 _ready daje 2 timeouty narzędzi; usunięcie dispose poprzednika oblewa 2 próby
 zastąpienia z unload; przesunięcie subskrypcji za pierwsze GC oblewa 2 próby
 payloadCollected dla A. Każda para obejmuje desktop i mobile.
+
+## check_syntax
+
+`check_syntax` waliduje JS, JSON, YAML i Markdown bez wykonania kodu; czysty parser jest w `syntaxValidator.ts`. Odczyt przechodzi przez `read` (w tym autoryzację, stronicowanie i host kopii); `subToolExecution` musi rozpoznawać nowe narzędzie jako vaultowe. Parser YAML jest lokalny i nie zmienia wstrzykiwanego silnika pluginu.

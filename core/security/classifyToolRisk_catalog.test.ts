@@ -36,6 +36,7 @@ const EXPECTED: Record<string, ToolRiskLevel> = {
     todo: TOOL_RISK_LEVELS.YELLOW, // bez operationMode = zapis; get/list/read = GREEN, patrz test osobny
     // vault
     read: TOOL_RISK_LEVELS.GREEN,
+    check_syntax: TOOL_RISK_LEVELS.GREEN,
     write: TOOL_RISK_LEVELS.RED, // bez operationMode='create' = RED, patrz test osobny
     list: TOOL_RISK_LEVELS.GREEN,
     delete: TOOL_RISK_LEVELS.RED,

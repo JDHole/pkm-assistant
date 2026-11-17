@@ -422,3 +422,5 @@ Strażnik AST obejmuje pięć drzew produkcyjnych, pomijając testy, komentarze
 i importy typów. Test sprzątania pickera ma własną granicę DOM śledzącą rodzica
 i usuwanie; mutacja usuwająca `input.remove()` powoduje jego porażkę. Macierz
 MIME/rozszerzenia sprawdza telefon, desktop i tablet bez zmiany klasyfikacji.
+
+`check_syntax` ma etykietę PL/EN i pokazuje ścieżkę wywołania w widoku narzędzi.

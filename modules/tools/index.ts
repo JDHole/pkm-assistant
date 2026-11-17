@@ -49,6 +49,8 @@ export { createSubAgentTool } from './DelegateTool.js';
 export { stopAllDelegations } from './DelegateTool.js';
 export { createAgentDelegateTool } from './AgentDelegateTool.js';
 
+export { createCheckSyntaxTool } from './CheckSyntaxTool.js';
+
 // ── Vault prymitywy: read/list mają scope vault|memory; write/delete/create_folder vault-only.
 export { createReadTool } from './ReadTool.js';
 export { createListTool } from './ListTool.js';

@@ -4,7 +4,7 @@ export default {
     // Opis dla UI: resolveServerDescription('vault') → t('mcp.server.vault.desc') (index.ts).
     icon: 'folder',
     tools: [
-        'read', 'write', 'list',
+        'read', 'check_syntax', 'write', 'list',
         'delete', 'create_folder', 'search'
     ],
     requires_permission: ['read_notes'],
