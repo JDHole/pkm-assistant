@@ -24,12 +24,12 @@ function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restric
         fileExists: (path: string) => ['Notes/A.md', 'Notes/B.md', 'Secret/S.md'].includes(path),
         openPath: async (path: string) => { calls.push(`start:${path}`); await Promise.resolve(); active = path; calls.push(`end:${path}`); },
     };
-    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(customPort ?? port));
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(customPort ?? port, null, { renderCheck: 'enabled' }));
     const agent = { name: 'Tola', admin_access: admin, disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: !restricted, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
     const call = (args: Record<string, unknown>, opts: Parameters<typeof client.executeToolCall>[2] = {}) => client.executeToolCall({ name: 'obsidian_app', arguments: args }, 'Tola', opts);
-    return { call, calls, active: () => active, setActive: (path: string) => { active = path; } };
+    return { call, calls, agent, active: () => active, setActive: (path: string) => { active = path; } };
 }
 
 test.serial('open, missing, No-Go and trusted sub marker through MCP', async t => {
@@ -374,8 +374,10 @@ test('default screenshot is hidden and rejected through MCP without approval or 
     let portCalls = 0; let approvals = 0;
     const port = { listLeaves: () => { portCalls++; return []; }, describeCaptureTarget: () => { portCalls++; return { kind: 'none' as const }; }, getActivePath: () => { portCalls++; return null; }, fileExists: () => false, openPath: async () => {} };
     const tool = createObsidianAppTool(port, { capture: async () => { portCalls++; return null; } });
-    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open', 'render_check']);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
     t.false(tool.description.includes('screenshot'));
+    t.false(JSON.stringify(tool.inputSchema).includes('render_check'));
+    t.false(tool.description.includes('render_check'));
     const registry = new ToolRegistry(); registry.registerTool(tool);
     const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => { approvals++; return { result: 'approve' }; } } };
@@ -383,6 +385,9 @@ test('default screenshot is hidden and rejected through MCP without approval or 
     const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'screenshot_disabled' } };
     t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola', { autonomy: 'edge' }), expected);
     t.deepEqual(await createAppExecutor(port)({ action: 'screenshot' }), expected);
+    const renderDisabled = { ok: false, success: false, error: { code: 'render_check_disabled', message: 'render_check_disabled' } };
+    t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'render_check', path: 'Notes/A.md' } }, 'Tola', { autonomy: 'edge' }), renderDisabled);
+    t.deepEqual(await tool.execute({ action: 'render_check' }), renderDisabled);
     t.is(portCalls, 0); t.is(approvals, 0);
 });
 
@@ -401,7 +406,7 @@ for (const [locale, message] of [
     const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message } };
     t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola'), expected);
     t.deepEqual(await tool.execute({ action: 'screenshot' }), expected);
-    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open', 'render_check']);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
     t.deepEqual([portCalls, approvals], [0, 0]);
 });
 
@@ -410,6 +415,7 @@ test('render_check through MCP uses read access and trusted admin identity', asy
     let active = 'Notes/B.md'; let opens = 0;
     const port = { listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
         openPath: async (path: string) => { opens++; active = path; },
+        readSource: async () => '```dataviewjs\ncode\n```',
         observeRender: async () => ({ blocks: [{ language: 'dataviewjs', text: 'PRIVATE_WIDGET', error: 'PRIVATE_ERROR' }], errors: [], errorsTruncated: false, stabilized: true, elapsedMs: 500, mode: 'preview' }) };
     const regular = chain(port, true);
     const result = await regular.call({ action: 'render_check', path: 'Notes/A.md', adminAccess: true });
@@ -423,4 +429,160 @@ test('render_check through MCP uses read access and trusted admin identity', asy
     t.is(toolResultStatus(denied), 'error'); t.is(opens, before);
     const sub = await regular.call({ action: 'render_check', path: 'Notes/A.md' }, { callerToolNames: ['obsidian_app'] });
     t.is(toolResultStatus(sub), 'error'); t.is(opens, before);
+});
+
+test.serial('render_check observes only the bound reading view and rechecks administrator through MCP', async t => {
+    const previous = globalThis.HTMLElement;
+    class Element {
+        ownerDocument!: { defaultView: unknown };
+        children: Element[] = [];
+        constructor(public classList: string[] = [], public textContent = '', public error: string | null = null) {}
+        querySelectorAll() { return this.children; }
+        querySelector() { return this.error === null ? null : { textContent: this.error }; }
+    }
+    Object.defineProperty(globalThis, 'HTMLElement', { value: Element, configurable: true });
+    try {
+        const calls: unknown[][] = [];
+        class Observer { observe() {} disconnect() {} }
+        const original = (...args: unknown[]) => { calls.push(args); };
+        const win = { MutationObserver: Observer, console: { error: original }, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} };
+        const preview = new Element(); preview.ownerDocument = { defaultView: win };
+        preview.children = [new Element(['block-language-WYNAGRODZENIE_ALICJI_27000'], 'PRIVATE_WIDGET')];
+        const whole = new Element(); whole.children = [new Element(['block-language-dataviewjs'], 'OLD', 'OLD ERROR'), ...preview.children];
+        let state = { file: 'Notes/A.md', mode: 'source' };
+        const file = { path: 'Notes/A.md' };
+        let source = '```dataviewjs\nx\n```'; let opens = 0;
+        const leaf = { view: { file, contentEl: whole, previewMode: { containerEl: preview }, getViewType: () => 'markdown' },
+            getViewState: () => ({ state }), setViewState: async (next: { state: typeof state }) => { state = next.state; }, openFile: async () => { opens++; } };
+        const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => file, getLeaf: () => leaf, iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf) },
+            vault: { getAbstractFileByPath: () => file, read: async () => source } };
+        const port = createWorkspacePort(app as never, (value): value is never => value === file, { renderCheck: 'enabled' });
+        const client = chain(port, true, true);
+        const refused = await client.call({ action: 'render_check', path: 'Notes/A.md' }, { callerToolNames: ['obsidian_app'] });
+        t.is(toolResultStatus(refused), 'error'); t.is(opens, 0);
+        source = '---\ntitle: example\n---\n> ```dataviewjs\n> x\n> ```\n- ~~~dataviewjs\n  x\n  ~~~\n~~~dataview\nx\n~~~\n```js\n~~~dataviewjs\n```\n~~~dataviewjs\nunclosed';
+        const coverage = await client.call({ action: 'render_check', path: 'Notes/A.md', wait_ms: 10 });
+        t.true(JSON.stringify(coverage).includes('"source_blocks":{"count":4,"dataview":[10],"dataviewjs":[4,7,16]}'));
+        let conversions = 0;
+        const observing = client.call({ action: 'render_check', path: 'Notes/A.md', wait_ms: 100 });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        win.console.error('a'.repeat(1000));
+        win.console.error('b'.repeat(1001));
+        const wrapper = win.console.error;
+        win.console.error = (...args: unknown[]) => wrapper(...args);
+        const errors = await observing;
+        const errorJson = JSON.stringify(errors);
+        t.true(errorJson.includes(`"text":"${'a'.repeat(1000)}","truncated":false`));
+        t.true(errorJson.includes(`"text":"${'b'.repeat(1000)}","truncated":true`));
+        t.true(errorJson.includes('"global_errors_truncated":false'));
+        win.console.error({ toString: () => { conversions++; return 'late'; } });
+        t.is(conversions, 0);
+        win.console.error = original; calls.length = 0;
+        const pending = client.call({ action: 'render_check', path: 'Notes/A.md' });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        win.console.error(Object.create(null));
+        client.agent.admin_access = false;
+        const result = await pending;
+        const json = JSON.stringify(result);
+        t.true(json.includes('"language":"other"')); t.true(json.includes('"coverage":"partial"'));
+        t.true(json.includes('"block_count":1')); t.false(json.includes('WYNAGRODZENIE_ALICJI_27000'));
+        t.false(json.includes('PRIVATE_WIDGET')); t.false(json.includes('OLD ERROR')); t.is(calls.length, 1);
+        t.is(win.console.error, original);
+        client.agent.admin_access = true;
+        const changed = client.call({ action: 'render_check', path: 'Notes/A.md' });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        leaf.view = { ...leaf.view, previewMode: { containerEl: new Element() } };
+        const rejected = await changed;
+        t.is(toolResultStatus(rejected), 'error'); t.false(JSON.stringify(rejected).includes('PRIVATE_WIDGET'));
+    } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }
+});
+
+test.serial('render_check production port refuses missing identity, revoked access and unload before source read', async t => {
+    const file = { path: 'Notes/A.md' }; let reads = 0; let opens = 0;
+    const agent = { name: 'Tola', admin_access: false, disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: false, read_notes: true } };
+    let onOpen = () => {};
+    const leaf = { openFile: async () => { opens++; onOpen(); } };
+    const app = { workspace: { getLeaf: () => leaf, getActiveFile: () => file }, vault: { getAbstractFileByPath: () => file, read: async () => { reads++; return 'private'; } } };
+    const port = createWorkspacePort(app as never, (value): value is never => value === file, { renderCheck: 'enabled' });
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port, null, { renderCheck: 'enabled' }));
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
+    const client = new MCPClient(app as never, plugin as never, registry);
+    const call = (name: string | null) => client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'render_check', path: file.path, wait_ms: 10 } }, name);
+    t.is(toolResultStatus(await call(null)), 'error'); t.deepEqual([opens, reads], [0, 0]);
+    onOpen = () => { agent.focusFolders = []; };
+    t.is(toolResultStatus(await call('Tola')), 'error'); t.deepEqual([opens, reads], [1, 0]);
+    agent.focusFolders = ['Notes']; onOpen = () => port.dispose!();
+    t.is(toolResultStatus(await call('Tola')), 'error'); t.deepEqual([opens, reads], [2, 0]);
+});
+
+test.serial('render_check filters embedded and commented blocks, masks errors and catches transient host changes through MCP', async t => {
+    const previous = globalThis.HTMLElement;
+    class Element {
+        ownerDocument!: { defaultView: unknown };
+        parentElement: Element | null = null;
+        children: Element[] = [];
+        constructor(public classList: string[] = [], public textContent = '') {}
+        querySelectorAll() { return this.children; }
+        querySelector() { return null; }
+    }
+    Object.defineProperty(globalThis, 'HTMLElement', { value: Element, configurable: true });
+    try {
+        let mutation = () => {}; let observed = () => {};
+        class Observer { constructor(callback: () => void) { mutation = callback; } observe() { observed(); } disconnect() {} }
+        const listeners = new Map<string, (event: never) => void>();
+        const original = (..._args: unknown[]) => {};
+        const win = { MutationObserver: Observer, console: { error: original }, setTimeout, clearTimeout,
+            addEventListener: (name: string, callback: (event: never) => void) => listeners.set(name, callback), removeEventListener: (name: string) => listeners.delete(name) };
+        const root = new Element(); root.ownerDocument = { defaultView: win };
+        const embed = new Element(['internal-embed']); const embedded = new Element(['block-language-dataviewjs'], 'embedded secret'); embedded.parentElement = embed;
+        root.children = [embedded];
+        const file = { path: 'Notes/A.md' }; const other = { path: 'Secret/B.md' };
+        let active = file; let state = { file: file.path, mode: 'preview' };
+        const view = { file, previewMode: { containerEl: root }, getViewType: () => 'markdown' };
+        const leaf = { view, getViewState: () => ({ state }), setViewState: async (v: { state: typeof state }) => { state = v.state; }, openFile: async () => {} };
+        const events = new Map<string, () => void>();
+        const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => active, getLeaf: () => leaf,
+            iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf), on: (name: string, cb: () => void) => { events.set(name, cb); return name; }, offref: (name: string) => events.delete(name) },
+            vault: { getAbstractFileByPath: () => file, read: async () => '<!--\n```dataview\nx\n```\n-->\n%%\n```dataviewjs\nx\n```\n%%\n```dataviewjs\nx\n```' } };
+        const port = createWorkspacePort(app as never, (value): value is never => value === file, { renderCheck: 'enabled' });
+        const client = chain(port, true, true);
+        const first = await client.call({ action: 'render_check', path: file.path, wait_ms: 10 });
+        const json = JSON.stringify(first);
+        t.true(json.includes('"source_blocks":{"count":1,"dataview":[],"dataviewjs":[11]}'));
+        t.true(json.includes('"block_count":0')); t.true(json.includes('"coverage":"partial"')); t.false(json.includes('embedded secret'));
+        let ready = () => {}; const observing = new Promise<void>(resolve => { ready = resolve; }); observed = ready;
+        const pending = client.call({ action: 'render_check', path: file.path, wait_ms: 100 }); await observing;
+        const savedError = listeners.get('error')!; const savedRejection = listeners.get('unhandledrejection')!;
+        win.console.error('x'.repeat(977) + ' sk-abcdefghijklmnopqrstuvwxyz1234567890');
+        const masked = await pending; t.false(JSON.stringify(masked).includes('sk-abcdefghijklmnopqrs'));
+        let lateReads = 0; savedError({ get error() { lateReads++; return null; } } as never); savedRejection({ get reason() { lateReads++; return null; } } as never); t.is(lateReads, 0);
+        const nextReady = new Promise<void>(resolve => { observed = resolve; });
+        const changed = client.call({ action: 'render_check', path: file.path, wait_ms: 100 }); await nextReady;
+        active = other; view.file = other; state.file = other.path; events.get('file-open')!(); mutation();
+        active = file; view.file = file; state.file = file.path;
+        t.is(toolResultStatus(await changed), 'error'); t.is(events.size, 0);
+    } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }
+});
+
+
+test('default tool retains state and open through MCP without a render observer', async t => {
+    let active: string | null = null;
+    const port = { listLeaves: () => [], getActivePath: () => active, fileExists: (path: string) => path === 'Notes/A.md', openPath: async (path: string) => { active = path; } };
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port));
+    const agent = { name: 'Tola', disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: false, read_notes: true } };
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}) };
+    const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
+    const opened = await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'open', path: 'Notes/A.md' } }, 'Tola');
+    t.true(JSON.stringify(opened).includes('"success":true'));
+    const state = await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'state' } }, 'Tola');
+    t.true(JSON.stringify(state).includes('"active_file":"Notes/A.md"'));
+});
+
+test('default production workspace port does not attach render observation', t => {
+    const app = { workspace: {}, vault: {} };
+    const port = createWorkspacePort(app as never, (_value): _value is never => false);
+    t.is(port.observeRender, undefined);
+    t.is(port.isDisposed?.(), false);
+    port.dispose?.();
+    t.is(port.isDisposed?.(), true);
 });

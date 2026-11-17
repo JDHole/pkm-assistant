@@ -3,7 +3,7 @@ import { OBSIDIAN_APP_OPERATION_TIMEOUT_MS } from '../../config/limits.js';
 export { createWorkspacePort } from './workspace.js';
 export { createCapturePort } from './capture.js';
 import { buildRenderResult } from './render.js';
-import type { RenderObservation } from './render.js';
+import type { RenderObservation, SourceBlocks } from './render.js';
 import { encodeCapture } from './capture.js';
 import type { CapturePort } from './capture.js';
 export type { CapturePort, CapturedFrame } from './capture.js';
@@ -12,17 +12,19 @@ export type LeafIdentity = { kind: 'file'; path: string } | { kind: 'none' } | {
 export type LeafInfo = { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'unknown' } } | { visible: boolean | 'unknown'; active: boolean; identity: { kind: 'file'; path: string } | { kind: 'none' }; title: string; viewType: string };
 export interface WorkspacePort {
     listLeaves(): LeafInfo[];
-    observeRender?(path: string, waitMs: number, signal: AbortSignal): Promise<RenderObservation>;
+    observeRender?(path: string, waitMs: number, signal: AbortSignal, authorize?: () => boolean): Promise<RenderObservation>;
     dispose?(): void;
+    isDisposed?(): boolean;
     describeCaptureTarget?(): CaptureTarget;
     getActivePath(): string | null;
+    readSource?(path: string): Promise<string>;
     fileExists(path: string): boolean;
     openPath(path: string, options: { newTab: boolean }): Promise<void>;
 }
 export type CaptureRect = { x: number; y: number; width: number; height: number };
 export type CaptureTarget = { kind: 'none' } | { kind: 'ok'; leaf: LeafInfo; rect: CaptureRect; embeds: (string | null)[]; blocked: string[]; overlays: string[] };
 export type AppAction = { action: 'state' } | { action: 'screenshot' } | { action: 'open'; path: string; newTab: boolean } | { action: 'render_check'; path: string; waitMs: number };
-export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large' | 'no_capturable_view' | 'overlay_visible' | 'screenshot_disabled';
+export type AppErrorCode = 'invalid_args' | 'not_found' | 'access_denied' | 'sub_agent_denied' | 'aborted' | 'unavailable' | 'timeout' | 'busy' | 'capture_unavailable' | 'restricted_content_visible' | 'too_large' | 'no_capturable_view' | 'overlay_visible' | 'screenshot_disabled' | 'render_check_disabled';
 export type AppResult = { ok: false; success: false; error: { code: AppErrorCode; message: string } } | { ok: true; success: true; verified: boolean; effect: 'changed' | 'unchanged' | 'unknown'; data: unknown } | { ok: true; success: true; verified: true; effect: 'unchanged'; kind: 'media'; summary: string; images: { mime: 'image/jpeg'; base64: string; width: number; height: number }[] };
 export function isObsidianAppEnabled(settings: { pkmAssistant?: { obsidianAppEnabled?: boolean } }): boolean {
     return settings.pkmAssistant?.obsidianAppEnabled === true;
@@ -41,7 +43,7 @@ export function parseAction(input: unknown): AppAction | null {
     if ('new_tab' in input && typeof input.new_tab !== 'boolean') return null;
     return { action: 'open', path: input.path, newTab: 'new_tab' in input && input.new_tab === true };
 }
-export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean; adminAccess?: boolean; agentKnown?: boolean }
+export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean; canDiscloseDetails?: () => boolean; agentKnown?: boolean }
 const fail = (code: AppErrorCode): AppResult => ({ ok: false, success: false, error: { code, message: code } });
 const FILELESS_VIEWS = new Set(['graph', 'search', 'file-explorer', 'bookmarks', 'tag', 'empty', 'all-properties', CHAT_VIEW_TYPE, 'pkm-agent-sidebar', 'pkm-release-notes-view']);
 function authorizedPath(path: string | null, authorize?: AppContext['authorizeFileRead']): path is string {
@@ -71,14 +73,15 @@ export function decideCapture(target: CaptureTarget, authorize?: AppContext['aut
     if (target.blocked.length || target.embeds.some(path => !authorizedPath(path, authorize))) return { kind: 'error', code: 'restricted_content_visible' };
     return { kind: 'ok', rect };
 }
-export type AppExecutorOptions = { screenshot?: 'disabled' | 'enabled' };
+export type AppExecutorOptions = { screenshot?: 'disabled' | 'enabled'; renderCheck?: 'disabled' | 'enabled'; countSourceBlocks?: (source: string) => SourceBlocks };
 export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_OPERATION_TIMEOUT_MS, capturePort: CapturePort | null = null, options: AppExecutorOptions = {}) {
     const screenshotEnabled = options.screenshot === 'enabled';
     let queue: Promise<void> = Promise.resolve();
     let suspended = false;
     let capturing = false;
     return (args: Record<string, unknown>, context?: AppContext): Promise<AppResult> => {
-        if ('_invocationToolNames' in args || '_invocationSubRunContext' in args) return Promise.resolve(fail('sub_agent_denied'));
+        if (args.action === 'render_check' && options.renderCheck !== 'enabled') return Promise.resolve(fail('render_check_disabled'));
+        if ('_invocationToolNames' in args || '_invocationSubRunContext' in args || (typeof args._invocationDelegationDepth === 'number' && args._invocationDelegationDepth >= 1)) return Promise.resolve(fail('sub_agent_denied'));
         const action = parseAction(args);
         if (!action) return Promise.resolve(fail('invalid_args'));
         if (action.action === 'screenshot' && !screenshotEnabled) return Promise.resolve(fail('screenshot_disabled'));
@@ -115,15 +118,31 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                 await port.openPath(action.path, { newTab: action.action === 'open' ? action.newTab : false });
                 if (action.action === 'render_check') {
                     if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
                     if (port.getActivePath() !== action.path || !port.observeRender) return fail('unavailable');
-                    const observation = await port.observeRender(action.path, action.waitMs, controller.signal);
+                    if (!port.readSource) return fail('unavailable');
+                    const source = await port.readSource(action.path);
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    const observation = await port.observeRender(action.path, action.waitMs, controller.signal, () => !port.isDisposed?.() && authorizedPath(action.path, context?.authorizeFileRead));
                     if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
-                    if (port.getActivePath() !== action.path || !authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
-                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, context?.adminAccess === true) };
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
+                    if (port.getActivePath() !== action.path) return fail('unavailable');
+                    if (observation.verify && !observation.verify()) return fail('unavailable');
+                    let detail = false;
+                    try { detail = context?.canDiscloseDetails?.() === true; } catch { /* Fail closed. */ }
+                    if (port.isDisposed?.()) return fail('unavailable');
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
+                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, detail, options.countSourceBlocks?.(source)) };
                 }
                 const verified = port.getActivePath() === action.path;
                 return { ok: true, success: true, verified, effect: verified ? (before === action.path ? 'unchanged' : 'changed') : 'unknown', data: { path: action.path } };
-            } catch { return fail(action.action === 'screenshot' ? 'capture_unavailable' : 'unavailable'); }
+            } catch {
+                if (action.action === 'render_check') return { ok: false, success: false, error: { code: 'unavailable', message: 'Reading view unavailable or changed' } };
+                return fail(action.action === 'screenshot' ? 'capture_unavailable' : 'unavailable');
+            }
         };
         const scheduled = queue.then(async () => {
             if (aborted()) return fail('aborted');

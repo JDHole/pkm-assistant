@@ -566,3 +566,7 @@ PL/EN opisują wymagany klucz wyszukiwania Jina, status wspólnych kluczy medió
 `check_syntax` używa istniejącej akcji `vault.read`, z ryzykiem GREEN; kanonizacja i No-Go działają jak dla odczytu.
 
 `messageTime` w `core/messageTime.ts` renderuje całą linię i18n przy utworzeniu, nie przy serializacji; to nie jest metadana pochodzenia bezpieczeństwa.
+F4c: opisy `obsidian_app` w PL i EN wyjaśniają znaczenie `counts_match` i ograniczenie maskowania błędów innych wtyczek.
+
+F4e: opisy PL/EN `obsidian_app` domyślnie pokazują tylko `state` i `open`;
+osobny opis `render_check` jest dołączany jedynie przy jawnym włączeniu akcji.

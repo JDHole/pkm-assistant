@@ -7,6 +7,48 @@ export type SyntaxResult = { ok: boolean; kind: SyntaxKind; problems: SyntaxProb
 
 export const MAX_SYNTAX_BYTES = 2 * 1024 * 1024;
 
+export type MarkdownFence = { language: string; line: number; column: number; body: string; columns: number[]; unclosed: boolean };
+
+/** Shared Markdown fence scan, preserving source positions for syntax diagnostics. */
+export function scanMarkdownFences(text: string): MarkdownFence[] {
+    const lines = text.split(/\r?\n/);
+    let start = 0;
+    if (lines[0]?.trim() === '---') {
+        const end = lines.findIndex((line, index) => index > 0 && /^(---|\.\.\.)\s*$/.test(line));
+        if (end >= 0) start = end + 1;
+    }
+    const blocks: MarkdownFence[] = [];
+    for (let i = start; i < lines.length; i++) {
+        // Strip quote containers and list indentation while retaining each original column.
+        const opening = /^( {0,3}(?:> ?)*(?: {0,3}(?:[-+*]|\d+[.)]) +| *)(?:> ?)* *)(`{3,}|~{3,})(.*)$/.exec(lines[i]);
+        if (!opening) continue;
+        const prefix = opening[1], fence = opening[2];
+        const quoteCount = (prefix.match(/>/g) ?? []).length;
+        const indent = prefix.length;
+        const strip = (line: string): number => {
+            let n = 0;
+            for (let q = 0; q < quoteCount; q++) {
+                const part = /^ {0,3}> ?/.exec(line.slice(n));
+                if (!part) return n;
+                n += part[0].length;
+            }
+            while (n < line.length && line[n] === ' ' && n < indent) n++;
+            return n;
+        };
+        let end = i + 1;
+        const body: string[] = [], columns: number[] = [];
+        while (end < lines.length) {
+            const cut = strip(lines[end]);
+            const rest = lines[end].slice(cut);
+            if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(rest)) break;
+            body.push(rest); columns.push(cut); end++;
+        }
+        blocks.push({ language: opening[3].trim().toLowerCase(), line: i + 1, column: indent + 1, body: body.join('\n'), columns, unclosed: end === lines.length });
+        i = end;
+    }
+    return blocks;
+}
+
 export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
     const problems: SyntaxProblem[] = [];
     if (new TextEncoder().encode(text).length > MAX_SYNTAX_BYTES) return { ok: false, kind, problems: [{ line: 1, column: 1, message: 'Input exceeds 2 MB limit', type: 'limit' }], truncated: false };
@@ -147,40 +189,14 @@ export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
     } else if (kind === 'yaml') yaml(text, 0);
     else {
         const lines = text.split(/\r?\n/);
-        let start = 0;
         if (lines[0]?.trim() === '---') {
             const end = lines.findIndex((line, index) => index > 0 && /^(---|\.\.\.)\s*$/.test(line));
             if (end < 0) add({ line: 1, column: 1, message: 'Unclosed frontmatter', type: 'syntax' });
-            else { yaml(lines.slice(1, end).join('\n'), 1); start = end + 1; }
+            else { yaml(lines.slice(1, end).join('\n'), 1); }
         }
-        for (let i = start; i < lines.length; i++) {
-            // Strip quote containers and list indentation while retaining each original column.
-            const opening = /^( {0,3}(?:> ?)*(?: {0,3}(?:[-+*]|\d+[.)]) +| *)(?:> ?)* *)(`{3,}|~{3,})(.*)$/.exec(lines[i]);
-            if (!opening) continue;
-            const prefix = opening[1], fence = opening[2];
-            const quoteCount = (prefix.match(/>/g) ?? []).length;
-            const indent = prefix.length;
-            const strip = (line: string): number => {
-                let n = 0;
-                for (let q = 0; q < quoteCount; q++) {
-                    const part = /^ {0,3}> ?/.exec(line.slice(n));
-                    if (!part) return n;
-                    n += part[0].length;
-                }
-                while (n < line.length && line[n] === ' ' && n < indent) n++;
-                return n;
-            };
-            let end = i + 1;
-            const body: string[] = [], columns: number[] = [];
-            while (end < lines.length) {
-                const cut = strip(lines[end]);
-                const rest = lines[end].slice(cut);
-                if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(rest)) break;
-                body.push(rest); columns.push(cut); end++;
-            }
-            if (/^\s*(dataviewjs|js|javascript)\s*$/i.test(opening[3])) js(body.join('\n'), i + 1, true, columns);
-            if (end === lines.length) add({ line: i + 1, column: indent + 1, message: 'Unclosed code block', type: 'syntax' });
-            i = end;
+        for (const block of scanMarkdownFences(text)) {
+            if (/^(dataviewjs|js|javascript)$/i.test(block.language)) js(block.body, block.line, true, block.columns);
+            if (block.unclosed) add({ line: block.line, column: block.column, message: 'Unclosed code block', type: 'syntax' });
         }
     }
     return { ok: count === 0, kind, problems, truncated: count > problems.length, ...(mode ? { mode } : {}) };

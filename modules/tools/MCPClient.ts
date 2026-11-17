@@ -872,7 +872,11 @@ export class MCPClient {
             // deklarują właściciela tury (`chat_streaming.ts` podaje `turn.agentName`,
             // `SubAgentRunner.ts` strażuje `agentName` przed samym wywołaniem), ale gałąź musi
             // istnieć dla każdego wywołania, które tego nie robi.
-            const invocationAgentName = agentName || this.plugin.agentManager?.getActiveAgent?.()?.name || null;
+            if (toolCall.name === 'obsidian_app' && args?.action === 'render_check' && this.toolRegistry.getTool(toolCall.name)?.renderCheckEnabled === false)
+                return { ok: false, success: false, error: { code: 'render_check_disabled', message: 'render_check_disabled' } };
+            if (toolCall.name === 'obsidian_app' && args?.action === 'render_check' && !agentName)
+                return { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' }, isError: true };
+            const invocationAgentName = agentName || (toolCall.name === 'obsidian_app' && args?.action === 'render_check' ? null : this.plugin.agentManager?.getActiveAgent?.()?.name) || null;
             const argsWithContext: ToolCallArgs = (args && typeof args === 'object' && !Array.isArray(args))
                 ? { ...args, _invocationAgentName: invocationAgentName }
                 : { _invocationAgentName: invocationAgentName };
@@ -887,7 +891,9 @@ export class MCPClient {
             // nie od modelu. Poza delegacją pole jest USUWANE (model mógłby podać ujemną
             // wartość i wyzerować licznik głębi u dziecka), w delegacji zawsze nadpisywane.
             if (opts.subRunContext || delegationDepth > 0) {
-                argsWithContext._invocationDelegationDepth = opts.subRunContext?.level ?? delegationDepth;
+                argsWithContext._invocationDelegationDepth = toolCall.name === 'obsidian_app'
+                    ? Math.max(delegationDepth, opts.subRunContext?.level ?? 0)
+                    : opts.subRunContext?.level ?? delegationDepth;
             } else {
                 delete argsWithContext._invocationDelegationDepth;
             }
@@ -1341,21 +1347,27 @@ export class MCPClient {
                 if (finalCandidate === 'B' && _isBudgetedReadTextResult(toolCall.name, args, finalCandidate)) return 'B';
                 return JSON.stringify(finalCandidate) ?? '';
             };
-            const builtInContext: BuiltinToolExecutionContext = {
+            const builtInContext: BuiltinToolExecutionContext & { canDiscloseDetails?: () => boolean } = {
                 ...(tool.source === 'built-in' && toolCall.name === 'delegate' && opts.parentConversation
                     ? { parentConversation: opts.parentConversation } : {}),
                 resultBudgetChars: requestedResultBudgetChars,
                 effectiveResultBudgetChars,
                 shouldAbort,
                 abortSignal: opts.abortSignal,
-                adminAccess: agent.admin_access === true,
-                agentKnown: true,
+                canDiscloseDetails: () => {
+                    const current = invocationAgentName ? this.plugin.agentManager?.getAgent(invocationAgentName) : null;
+                    return !!current && current.name === agent.name && current.admin_access === true;
+                },
+                agentKnown: toolCall.name !== 'obsidian_app' || args.action !== 'render_check' || !!agentName,
                 authorizeFileRead: (canonicalPath) => {
                     if (typeof canonicalPath !== 'string' || canonicalPath.length === 0) {
                         return { allowed: false, reason: 'Invalid path' };
                     }
+                    const current = toolCall.name === 'obsidian_app'
+                        ? (invocationAgentName ? this.plugin.agentManager?.getAgent(invocationAgentName) : null) : agent;
+                    if (!current || current.name !== agent.name) return { allowed: false, reason: 'Agent unavailable' };
                     return this.plugin.permissionSystem.checkPermission(
-                        agent,
+                        current,
                         'vault.read',
                         canonicalPath,
                         { autonomy, scopeFolders },

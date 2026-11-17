@@ -8,15 +8,18 @@ const OVERLAY_SELECTORS = ['.modal-container', '.hover-popover', '.popover', '.m
 const EMBED_SELECTORS = '.internal-embed, .markdown-embed, .file-embed, .image-embed, .pdf-embed, .media-embed, .cm-embed-block';
 
 /** Obsidian API boundary. File identity is supplied by the composition root. */
-export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile): WorkspacePort {
+export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile, options: { renderCheck?: 'enabled' } = {}): WorkspacePort {
     const { workspace, vault } = app;
     const pending = new Set<() => void>();
     let disposed = false;
     const port: WorkspacePort = {
         dispose: () => { disposed = true; for (const cancel of pending) cancel(); },
-        observeRender: async (path, waitMs, signal) => {
+        isDisposed: () => disposed,
+        ...(options.renderCheck === 'enabled' ? { observeRender: async (path: string, waitMs: number, signal: AbortSignal, authorize = () => true) => {
+            if (disposed || !authorize()) throw new Error('Unavailable');
             const leaf = workspace.getMostRecentLeaf();
             const valid = () => {
+                if (disposed || signal.aborted || !authorize()) return false;
                 const info = port.listLeaves().find(item => item.active);
                 return leaf === workspace.getMostRecentLeaf() && info?.identity.kind === 'file'
                     && info.identity.path === path && 'viewType' in info && info.viewType === 'markdown'
@@ -26,54 +29,162 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
             const state = leaf.getViewState();
             try { await leaf.setViewState({ ...state, state: { ...state.state, mode: 'preview' } }); } catch { /* Inspect the current mode. */ }
             if (disposed || signal.aborted || !valid()) throw new Error('View unavailable');
-            const content: unknown = 'contentEl' in leaf.view ? leaf.view.contentEl : null;
-            if (!(content instanceof HTMLElement)) throw new Error('View unavailable');
-            const win = content.ownerDocument.defaultView;
-            if (!win || !win.MutationObserver) throw new Error('Observer unavailable');
+            const view = leaf.view;
+            const hasViewFile = 'file' in view;
+            const viewFile = 'file' in view ? view.file : undefined;
+            const preview: unknown = 'previewMode' in view ? view.previewMode : null;
+            const content: unknown = preview && typeof preview === 'object' && 'containerEl' in preview ? preview.containerEl : null;
+            if (!(content instanceof HTMLElement)) throw new Error('Reading view unavailable');
+            const sameView = () => leaf.view === view && 'previewMode' in view && view.previewMode === preview
+                && ('file' in view) === hasViewFile && (!('file' in view) || view.file === viewFile)
+                && preview !== null && typeof preview === 'object' && 'containerEl' in preview && preview.containerEl === content
+                && leaf.getViewState().state?.mode === 'preview';
             const viewState = leaf.getViewState().state;
             const mode = viewState && typeof viewState === 'object' && 'mode' in viewState && viewState.mode === 'preview' ? 'preview' : 'other';
+            if (mode !== 'preview') throw new Error('Reading mode unavailable');
+            const win = content.ownerDocument.defaultView;
+            if (!win || !win.MutationObserver) throw new Error('Observer unavailable');
             const start = Date.now();
-            const errors: string[] = [];
+            let errors: { text: string; truncated: boolean }[] = [];
             let errorsTruncated = false;
-            const add = (value: unknown) => { if (errors.length < 20) errors.push(String(value)); else errorsTruncated = true; };
+            let active = true;
+            const safe = (value: unknown): string => {
+                try { return String(value); } catch { return '[unprintable]'; }
+            };
+            const add = (values: unknown[]) => {
+                if (!active) return;
+                try {
+                    if (errors.length >= 20) { errorsTruncated = true; return; }
+                    const budget = 20000 - errors.reduce((sum, item) => sum + item.text.length, 0);
+                    if (budget <= 0) { errorsTruncated = true; return; }
+                    let message = '';
+                    let truncated = false;
+                    for (const value of values) {
+                        if (message.length >= budget) { truncated = true; break; }
+                        const part = safe(value);
+                        const available = budget - message.length;
+                        const prefix = message ? ' ' : '';
+                        if (prefix.length + part.length > available) truncated = true;
+                        message += prefix + Array.from(part.slice(0, Math.max(0, available - prefix.length))).join('');
+                    }
+                    if (truncated) message = message.replace(/\S+$/, '');
+                    errors.push({ text: message, truncated });
+                } catch { errorsTruncated = true; }
+            };
             const original = win.console.error;
-            const wrapped: typeof console.error = (...args: unknown[]) => { add(args.map(String).join(' ')); original.apply(win.console, args); };
-            const onError = (event: ErrorEvent) => { const error: unknown = event.error; add(error instanceof Error ? error.stack ?? error.message : event.message); };
-            const onRejection = (event: PromiseRejectionEvent) => add(event.reason instanceof Error ? event.reason.stack ?? event.reason.message : event.reason);
+            const wrapped: typeof console.error = function (this: Console, ...args: unknown[]) {
+                try { add(args); } finally { original.apply(this, args); }
+            };
+            const onError = (event: ErrorEvent) => { if (!active) return; try { add([event.error instanceof Error ? event.error.stack ?? event.error.message : event.message]); } catch { /* Ignore hostile events. */ } };
+            const onRejection = (event: PromiseRejectionEvent) => { if (!active) return; try { add([event.reason instanceof Error ? event.reason.stack ?? event.reason.message : event.reason]); } catch { /* Ignore hostile events. */ } };
             return await new Promise((resolve, reject) => {
                 let quiet: number | undefined;
                 let deadline: number | undefined;
+                let identityTimer: number | undefined;
                 let done = false;
+                let changed = false;
+                const refs: ReturnType<typeof workspace.on>[] = [];
+                const check = () => { if (changed || !valid() || !sameView()) { changed = true; throw new Error('View changed'); } };
+                const onWorkspace = () => { if (!active) return; try { check(); } catch { changed = true; } };
                 const cleanup = () => {
-                    observer.disconnect(); win.clearTimeout(quiet); win.clearTimeout(deadline);
+                    active = false; errors = [];
+                    for (const ref of refs) workspace.offref(ref);
+                    observer.disconnect(); win.clearTimeout(quiet); win.clearTimeout(deadline); win.clearTimeout(identityTimer);
                     win.removeEventListener('error', onError); win.removeEventListener('unhandledrejection', onRejection);
                     if (win.console.error === wrapped) win.console.error = original;
                     signal.removeEventListener('abort', cancel); pending.delete(cancel);
                 };
+                const insideEmbed = (el: HTMLElement | null) => {
+                    let parent = el;
+                    while (parent && parent !== content) {
+                        if (Array.from(parent.classList).some(name => EMBED_SELECTORS.split(', ').includes(`.${name}`))) return true;
+                        parent = parent.parentElement;
+                    }
+                    return false;
+                };
                 const finish = (stabilized: boolean) => {
                     if (done) return; done = true;
                     try {
-                        if (!valid()) throw new Error('View changed');
-                        const blocks = Array.from(content.querySelectorAll<HTMLElement>('[class*="block-language-"]')).map(el => ({
-                            language: Array.from(el.classList).find(name => name.startsWith('block-language-'))?.slice(15) ?? 'unknown',
-                            text: el.textContent ?? '', error: el.querySelector('.dataview-error')?.textContent ?? null,
-                        }));
-                        resolve({ blocks, errors, errorsTruncated, stabilized, elapsedMs: Date.now() - start, mode });
+                        check();
+                        const elements = Array.from(content.querySelectorAll<HTMLElement>('[class*="block-language-"]'));
+                        check();
+                        let remainingText = 20000;
+                        const collect = (text: string) => {
+                            const clipped = text.length > remainingText;
+                            let value = Array.from(text.slice(0, remainingText)).join('');
+                            if (clipped) value = value.replace(/\S+$/, '');
+                            remainingText -= value.length;
+                            return { value, clipped };
+                        };
+                        const collectText = (el: HTMLElement) => {
+                            check();
+                            if (!el.childNodes) { const text = el.textContent ?? ''; return { ...collect(text), nonempty: !!text.trim() }; }
+                            let value = ''; let clipped = false; let nonempty = false;
+                            const walk = (node: Node) => {
+                                check();
+                                if (node.nodeType === 1 && insideEmbed(node as HTMLElement)) return;
+                                if (node.nodeType === 3) {
+                                    const part = node.nodeValue ?? '';
+                                    if (part.trim()) nonempty = true;
+                                    const available = remainingText - value.length;
+                                    if (part.length > available) clipped = true;
+                                    value += Array.from(part.slice(0, available)).join('');
+                                } else for (const child of Array.from(node.childNodes)) walk(child);
+                            };
+                            walk(el);
+                            if (clipped) value = value.replace(/\S+$/, '');
+                            remainingText -= value.length;
+                            return { value, clipped, nonempty };
+                        };
+                        const blocks = elements.filter(el => { check(); return !insideEmbed(el); }).map(el => {
+                            check();
+                            const language = Array.from(el.classList).find(name => name.startsWith('block-language-'))?.slice(15) ?? 'unknown';
+                            check();
+                            const text = collectText(el);
+                            check();
+                            const errorEl = el.querySelector<HTMLElement>('.dataview-error');
+                            check();
+                            const error = errorEl && !insideEmbed(errorEl) ? collectText(errorEl) : null;
+                            check();
+                            return { language, text: text.value, nonempty: text.nonempty, textClipped: text.clipped, error: error?.value ?? null, errorClipped: error?.clipped === true };
+                        });
+                        check();
+                        resolve({ blocks, errors: [...errors], errorsTruncated, stabilized, elapsedMs: Date.now() - start, mode, verify: () => !changed && valid() && sameView() });
                     } catch (error) { reject(error instanceof Error ? error : new Error('View unavailable')); } finally { cleanup(); }
                 };
                 const cancel = () => { if (done) return; done = true; cleanup(); reject(new Error('Cancelled')); };
-                const reset = () => { win.clearTimeout(quiet); quiet = win.setTimeout(() => finish(true), 500); };
+                const reset = (records?: MutationRecord[]) => {
+                    if (!active) return;
+                    if (records?.length && records.every(record => insideEmbed(record.target.nodeType === 1 ? record.target as HTMLElement : record.target.parentElement))) return;
+                    try { check(); } catch { cancel(); return; } win.clearTimeout(quiet); if (active) quiet = win.setTimeout(() => finish(true), 500);
+                };
+                const pollIdentity = () => {
+                    if (!active) return;
+                    try { check(); } catch { cancel(); return; }
+                    if (active) identityTimer = win.setTimeout(pollIdentity, 50);
+                };
                 const observer = new win.MutationObserver(reset);
                 try {
-                    pending.add(cancel); signal.addEventListener('abort', cancel, { once: true });
-                    win.addEventListener('error', onError); win.addEventListener('unhandledrejection', onRejection);
-                    win.console.error = wrapped;
-                    observer.observe(content, { subtree: true, childList: true, characterData: true, attributes: true });
-                    deadline = win.setTimeout(() => finish(false), waitMs); reset();
+                    if (typeof workspace.on === 'function') {
+                        for (const subscribe of [() => workspace.on('file-open', onWorkspace), () => workspace.on('active-leaf-change', onWorkspace), () => workspace.on('layout-change', onWorkspace)]) {
+                            if (!active) break;
+                            const ref = subscribe();
+                            if (active) refs.push(ref); else workspace.offref(ref);
+                        }
+                    }
+                    if (active) pending.add(cancel);
+                    if (active) signal.addEventListener('abort', cancel, { once: true });
+                    if (active) win.addEventListener('error', onError);
+                    if (active) win.addEventListener('unhandledrejection', onRejection);
+                    if (active) win.console.error = wrapped;
+                    if (active) observer.observe(content, { subtree: true, childList: true, characterData: true, attributes: true });
+                    if (active) deadline = win.setTimeout(() => finish(false), waitMs);
+                    if (active) reset();
+                    if (active) identityTimer = win.setTimeout(pollIdentity, 50);
                 } catch (error) { cleanup(); reject(error instanceof Error ? error : new Error('Observer unavailable')); return; }
                 if (signal.aborted) cancel();
             });
-        },
+        } } : {}),
         listLeaves: () => {
             const leaves: LeafInfo[] = [];
             workspace.iterateAllLeaves(leaf => {
@@ -155,6 +266,7 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
             if (path !== null && typeof path !== 'string') throw new Error('Invalid active file');
             return path;
         },
+        readSource: async path => { if (disposed) throw new Error('Disposed'); const file = vault.getAbstractFileByPath(path); if (!isFile(file)) throw new Error('File unavailable'); return vault.read(file); },
         fileExists: path => isFile(vault.getAbstractFileByPath(path)),
         openPath: async (path, { newTab }) => {
             const file: unknown = vault.getAbstractFileByPath(path);
