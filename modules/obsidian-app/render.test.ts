@@ -10,7 +10,7 @@ const observation = { blocks: [
 
 test('status is content free; details classify, mask and limit text', t => {
     const status = buildRenderResult(observation, false);
-    t.deepEqual(status.blocks, [{ number: 1, language: 'dataviewjs', status: 'rendered' }, { number: 2, language: 'dataview', status: 'error' }, { number: 3, language: 'js', status: 'empty' }]);
+    t.deepEqual(status.blocks, [{ number: 1, language: 'dataviewjs', status: 'rendered' }, { number: 2, language: 'dataview', status: 'error' }, { number: 3, language: 'other', status: 'empty' }]);
     t.false(JSON.stringify(status).includes('private widget content'));
     t.false(JSON.stringify(status).includes('private error message'));
     const detail = buildRenderResult(observation, true);
@@ -29,7 +29,7 @@ test('executor denies before open and aborts render wait', async t => {
     let opens = 0; let active = '';
     let started = () => {}; const ready = new Promise<void>(resolve => { started = resolve; });
     const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
-        openPath: async path => { opens++; active = path; },
+        openPath: async path => { opens++; active = path; }, readSource: async () => '',
         observeRender: async (_path, _wait, signal) => { started(); await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); return observation; },
     });
     const denied = await execute({ action: 'render_check', path: 'A.md' }, { agentKnown: true, authorizeFileRead: () => ({ allowed: false }) });
@@ -45,12 +45,22 @@ test('executor denies before open and aborts render wait', async t => {
 test('executor discloses details only with trusted admin flag', async t => {
     let active = '';
     const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
-        openPath: async path => { active = path; }, observeRender: async () => observation });
+        openPath: async path => { active = path; }, readSource: async () => '', observeRender: async () => observation });
     const context = { agentKnown: true, authorizeFileRead: () => ({ allowed: true }) };
     const status = await execute({ action: 'render_check', path: 'A.md', adminAccess: true }, context);
     t.true(status.ok); t.false(JSON.stringify(status).includes('private widget content')); t.false(JSON.stringify(status).includes('private error message'));
-    const detail = await execute({ action: 'render_check', path: 'A.md' }, { ...context, adminAccess: true });
+    const detail = await execute({ action: 'render_check', path: 'A.md' }, { ...context, canDiscloseDetails: () => true });
     t.true(detail.ok); t.true(JSON.stringify(detail).includes('private widget content')); t.true(JSON.stringify(detail).includes('private error message'));
-    const unknown = await execute({ action: 'render_check', path: 'A.md' }, { authorizeFileRead: () => ({ allowed: true }), adminAccess: true });
+    const unknown = await execute({ action: 'render_check', path: 'A.md' }, { authorizeFileRead: () => ({ allowed: true }), canDiscloseDetails: () => true });
     t.deepEqual(unknown, { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' } });
+});
+
+test('coverage uses source fence lines and distinguishes unrendered blocks', t => {
+    const source = 'intro\n```dataviewjs\nx\n```\n~~~dataview\ny\n~~~';
+    const partial = buildRenderResult({ ...observation, blocks: [] }, false, source);
+    t.deepEqual(partial.source_blocks, { count: 2, dataview: [5], dataviewjs: [2] });
+    t.deepEqual(partial.observed_blocks, { count: 0, dataview: 0, dataviewjs: 0 });
+    t.is(partial.coverage, 'partial'); t.is(partial.coverage_note, 'Some blocks were not rendered by Obsidian (lazy rendering or collapsed headings) and were not checked.');
+    const complete = buildRenderResult(observation, false, source);
+    t.is(complete.coverage, 'complete'); t.is(complete.block_numbering, 'observed_order');
 });

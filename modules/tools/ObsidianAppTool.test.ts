@@ -29,7 +29,7 @@ function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restric
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
     const call = (args: Record<string, unknown>, opts: Parameters<typeof client.executeToolCall>[2] = {}) => client.executeToolCall({ name: 'obsidian_app', arguments: args }, 'Tola', opts);
-    return { call, calls, active: () => active, setActive: (path: string) => { active = path; } };
+    return { call, calls, agent, active: () => active, setActive: (path: string) => { active = path; } };
 }
 
 test.serial('open, missing, No-Go and trusted sub marker through MCP', async t => {
@@ -410,6 +410,7 @@ test('render_check through MCP uses read access and trusted admin identity', asy
     let active = 'Notes/B.md'; let opens = 0;
     const port = { listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
         openPath: async (path: string) => { opens++; active = path; },
+        readSource: async () => '```dataviewjs\ncode\n```',
         observeRender: async () => ({ blocks: [{ language: 'dataviewjs', text: 'PRIVATE_WIDGET', error: 'PRIVATE_ERROR' }], errors: [], errorsTruncated: false, stabilized: true, elapsedMs: 500, mode: 'preview' }) };
     const regular = chain(port, true);
     const result = await regular.call({ action: 'render_check', path: 'Notes/A.md', adminAccess: true });
@@ -423,4 +424,49 @@ test('render_check through MCP uses read access and trusted admin identity', asy
     t.is(toolResultStatus(denied), 'error'); t.is(opens, before);
     const sub = await regular.call({ action: 'render_check', path: 'Notes/A.md' }, { callerToolNames: ['obsidian_app'] });
     t.is(toolResultStatus(sub), 'error'); t.is(opens, before);
+});
+
+test.serial('render_check observes only the bound reading view and rechecks administrator through MCP', async t => {
+    const previous = globalThis.HTMLElement;
+    class Element {
+        ownerDocument!: { defaultView: unknown };
+        children: Element[] = [];
+        constructor(public classList: string[] = [], public textContent = '', public error: string | null = null) {}
+        querySelectorAll() { return this.children; }
+        querySelector() { return this.error === null ? null : { textContent: this.error }; }
+    }
+    Object.defineProperty(globalThis, 'HTMLElement', { value: Element, configurable: true });
+    try {
+        const calls: unknown[][] = [];
+        class Observer { observe() {} disconnect() {} }
+        const original = (...args: unknown[]) => { calls.push(args); };
+        const win = { MutationObserver: Observer, console: { error: original }, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} };
+        const preview = new Element(); preview.ownerDocument = { defaultView: win };
+        preview.children = [new Element(['block-language-WYNAGRODZENIE_ALICJI_27000'], 'PRIVATE_WIDGET')];
+        const whole = new Element(); whole.children = [new Element(['block-language-dataviewjs'], 'OLD', 'OLD ERROR'), ...preview.children];
+        let state = { file: 'Notes/A.md', mode: 'source' };
+        const file = { path: 'Notes/A.md' };
+        const leaf = { view: { file, contentEl: whole, previewMode: { containerEl: preview }, getViewType: () => 'markdown' },
+            getViewState: () => ({ state }), setViewState: async (next: { state: typeof state }) => { state = next.state; }, openFile: async () => {} };
+        const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => file, getLeaf: () => leaf, iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf) },
+            vault: { getAbstractFileByPath: () => file, read: async () => '```dataviewjs\nx\n```' } };
+        const port = createWorkspacePort(app as never, (value): value is never => value === file);
+        const client = chain(port, true, true);
+        const pending = client.call({ action: 'render_check', path: 'Notes/A.md' });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        win.console.error(Object.create(null));
+        client.agent.admin_access = false;
+        const result = await pending;
+        const json = JSON.stringify(result);
+        t.true(json.includes('"language":"other"')); t.true(json.includes('"coverage":"partial"'));
+        t.true(json.includes('"block_count":1')); t.false(json.includes('WYNAGRODZENIE_ALICJI_27000'));
+        t.false(json.includes('PRIVATE_WIDGET')); t.false(json.includes('OLD ERROR')); t.is(calls.length, 1);
+        t.is(win.console.error, original);
+        client.agent.admin_access = true;
+        const changed = client.call({ action: 'render_check', path: 'Notes/A.md' });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        leaf.view.previewMode = { containerEl: new Element() };
+        const rejected = await changed;
+        t.is(toolResultStatus(rejected), 'error'); t.false(JSON.stringify(rejected).includes('PRIVATE_WIDGET'));
+    } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }
 });

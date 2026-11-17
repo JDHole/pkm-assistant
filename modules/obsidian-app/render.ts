@@ -1,14 +1,35 @@
 import { maskSensitiveData } from '../../core/index.js';
 
 export type RenderBlock = { language: string; text: string; error: string | null };
-export type RenderObservation = { blocks: RenderBlock[]; errors: string[]; errorsTruncated: boolean; stabilized: boolean; elapsedMs: number; mode: string };
+export type RenderObservation = { blocks: RenderBlock[]; errors: string[]; errorsTruncated: boolean; stabilized: boolean; elapsedMs: number; mode: string; verify?: () => boolean };
 
 /** Only the detailed branch may copy DOM or global error text into the result. */
-export function buildRenderResult(observation: RenderObservation, detail: boolean) {
+export function sourceBlocks(source: string) {
+    const result: { dataview: number[]; dataviewjs: number[] } = { dataview: [], dataviewjs: [] };
+    let fence: { char: string; length: number } | null = null;
+    source.split(/\r?\n/).forEach((line, index) => {
+        const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        if (!match) return;
+        if (fence) {
+            if (match[1][0] === fence.char && match[1].length >= fence.length && !match[2].trim()) fence = null;
+        } else {
+            fence = { char: match[1][0], length: match[1].length };
+            const language = match[2].trim().split(/\s+/)[0].toLowerCase();
+            if (language === 'dataview' || language === 'dataviewjs') result[language].push(index + 1);
+        }
+    });
+    return result;
+}
+
+export function buildRenderResult(observation: RenderObservation, detail: boolean, source = '') {
+    const lines = sourceBlocks(source);
+    const observed = { dataview: 0, dataviewjs: 0 };
+    for (const block of observation.blocks) if (block.language === 'dataview' || block.language === 'dataviewjs') observed[block.language]++;
+    const coverage = lines.dataview.length === observed.dataview && lines.dataviewjs.length === observed.dataviewjs ? 'complete' : 'partial';
     let remaining = 12000;
     const blocks = observation.blocks.map((block, index) => {
         const status = block.error !== null ? 'error' : !observation.stabilized ? 'timeout' : block.text.trim() ? 'rendered' : 'empty';
-        const base = { number: index + 1, language: maskSensitiveData(block.language.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)), status };
+        const base = { number: index + 1, language: block.language === 'dataview' || block.language === 'dataviewjs' ? block.language : 'other', status };
         if (!detail) return base;
         const text = maskSensitiveData(block.text.replace(/\s+/g, ' ').trim());
         const limit = Math.min(2000, remaining);
@@ -26,6 +47,6 @@ export function buildRenderResult(observation: RenderObservation, detail: boolea
         remaining -= value.length;
         return { text: value, truncated: value.length < masked.length, attribution: 'unassigned' as const };
     }) : undefined;
-    return { blocks, block_count: blocks.length, stabilized: observation.stabilized, elapsed_ms: observation.elapsedMs, mode: observation.mode,
+    return { blocks, block_count: blocks.length, stabilized: observation.stabilized, elapsed_ms: observation.elapsedMs, mode: 'preview' as const, source_blocks: { count: lines.dataview.length + lines.dataviewjs.length, dataview: lines.dataview, dataviewjs: lines.dataviewjs }, observed_blocks: { count: blocks.length, ...observed }, coverage, block_numbering: 'observed_order' as const, ...(coverage === 'partial' ? { coverage_note: 'Some blocks were not rendered by Obsidian (lazy rendering or collapsed headings) and were not checked.' as const } : {}),
         ...(detail ? { global_errors: errors, global_errors_truncated: observation.errorsTruncated || observation.errors.length > 20 } : {}) };
 }

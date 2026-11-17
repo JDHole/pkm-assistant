@@ -1341,21 +1341,27 @@ export class MCPClient {
                 if (finalCandidate === 'B' && _isBudgetedReadTextResult(toolCall.name, args, finalCandidate)) return 'B';
                 return JSON.stringify(finalCandidate) ?? '';
             };
-            const builtInContext: BuiltinToolExecutionContext = {
+            const builtInContext: BuiltinToolExecutionContext & { canDiscloseDetails?: () => boolean } = {
                 ...(tool.source === 'built-in' && toolCall.name === 'delegate' && opts.parentConversation
                     ? { parentConversation: opts.parentConversation } : {}),
                 resultBudgetChars: requestedResultBudgetChars,
                 effectiveResultBudgetChars,
                 shouldAbort,
                 abortSignal: opts.abortSignal,
-                adminAccess: agent.admin_access === true,
+                canDiscloseDetails: () => {
+                    const current = invocationAgentName ? this.plugin.agentManager?.getAgent(invocationAgentName) : null;
+                    return !!current && current.name === agent.name && current.admin_access === true;
+                },
                 agentKnown: true,
                 authorizeFileRead: (canonicalPath) => {
                     if (typeof canonicalPath !== 'string' || canonicalPath.length === 0) {
                         return { allowed: false, reason: 'Invalid path' };
                     }
+                    const current = toolCall.name === 'obsidian_app'
+                        ? (invocationAgentName ? this.plugin.agentManager?.getAgent(invocationAgentName) : null) : agent;
+                    if (!current || current.name !== agent.name) return { allowed: false, reason: 'Agent unavailable' };
                     return this.plugin.permissionSystem.checkPermission(
-                        agent,
+                        current,
                         'vault.read',
                         canonicalPath,
                         { autonomy, scopeFolders },

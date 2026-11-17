@@ -26,25 +26,53 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
             const state = leaf.getViewState();
             try { await leaf.setViewState({ ...state, state: { ...state.state, mode: 'preview' } }); } catch { /* Inspect the current mode. */ }
             if (disposed || signal.aborted || !valid()) throw new Error('View unavailable');
-            const content: unknown = 'contentEl' in leaf.view ? leaf.view.contentEl : null;
-            if (!(content instanceof HTMLElement)) throw new Error('View unavailable');
-            const win = content.ownerDocument.defaultView;
-            if (!win || !win.MutationObserver) throw new Error('Observer unavailable');
+            const view = leaf.view;
+            const preview: unknown = 'previewMode' in view ? view.previewMode : null;
+            const content: unknown = preview && typeof preview === 'object' && 'containerEl' in preview ? preview.containerEl : null;
+            if (!(content instanceof HTMLElement)) throw new Error('Reading view unavailable');
+            const sameView = () => leaf.view === view && 'previewMode' in view && view.previewMode === preview
+                && preview !== null && typeof preview === 'object' && 'containerEl' in preview && preview.containerEl === content
+                && leaf.getViewState().state?.mode === 'preview';
             const viewState = leaf.getViewState().state;
             const mode = viewState && typeof viewState === 'object' && 'mode' in viewState && viewState.mode === 'preview' ? 'preview' : 'other';
+            if (mode !== 'preview') throw new Error('Reading mode unavailable');
+            const win = content.ownerDocument.defaultView;
+            if (!win || !win.MutationObserver) throw new Error('Observer unavailable');
             const start = Date.now();
-            const errors: string[] = [];
+            let errors: string[] = [];
             let errorsTruncated = false;
-            const add = (value: unknown) => { if (errors.length < 20) errors.push(String(value)); else errorsTruncated = true; };
+            let active = true;
+            const safe = (value: unknown): string => {
+                try { return String(value).slice(0, 1000); } catch { return '[unprintable]'; }
+            };
+            const add = (values: unknown[]) => {
+                if (!active) return;
+                try {
+                    if (errors.length >= 20) { errorsTruncated = true; return; }
+                    let message = '';
+                    for (const value of values) {
+                        if (message.length >= 1000) { errorsTruncated = true; break; }
+                        const part = safe(value);
+                        const available = 1000 - message.length;
+                        const next = (message ? ' ' : '') + part;
+                        if (next.length > available || part.length === 1000) errorsTruncated = true;
+                        message += next.slice(0, available);
+                    }
+                    errors.push(message);
+                } catch { errorsTruncated = true; }
+            };
             const original = win.console.error;
-            const wrapped: typeof console.error = (...args: unknown[]) => { add(args.map(String).join(' ')); original.apply(win.console, args); };
-            const onError = (event: ErrorEvent) => { const error: unknown = event.error; add(error instanceof Error ? error.stack ?? error.message : event.message); };
-            const onRejection = (event: PromiseRejectionEvent) => add(event.reason instanceof Error ? event.reason.stack ?? event.reason.message : event.reason);
+            const wrapped: typeof console.error = function (this: Console, ...args: unknown[]) {
+                try { add(args); } finally { original.apply(this, args); }
+            };
+            const onError = (event: ErrorEvent) => { try { add([event.error instanceof Error ? event.error.stack ?? event.error.message : event.message]); } catch { /* Ignore hostile events. */ } };
+            const onRejection = (event: PromiseRejectionEvent) => { try { add([event.reason instanceof Error ? event.reason.stack ?? event.reason.message : event.reason]); } catch { /* Ignore hostile events. */ } };
             return await new Promise((resolve, reject) => {
                 let quiet: number | undefined;
                 let deadline: number | undefined;
                 let done = false;
                 const cleanup = () => {
+                    active = false; errors = [];
                     observer.disconnect(); win.clearTimeout(quiet); win.clearTimeout(deadline);
                     win.removeEventListener('error', onError); win.removeEventListener('unhandledrejection', onRejection);
                     if (win.console.error === wrapped) win.console.error = original;
@@ -53,12 +81,12 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                 const finish = (stabilized: boolean) => {
                     if (done) return; done = true;
                     try {
-                        if (!valid()) throw new Error('View changed');
+                        if (!valid() || !sameView()) throw new Error('View changed');
                         const blocks = Array.from(content.querySelectorAll<HTMLElement>('[class*="block-language-"]')).map(el => ({
                             language: Array.from(el.classList).find(name => name.startsWith('block-language-'))?.slice(15) ?? 'unknown',
                             text: el.textContent ?? '', error: el.querySelector('.dataview-error')?.textContent ?? null,
                         }));
-                        resolve({ blocks, errors, errorsTruncated, stabilized, elapsedMs: Date.now() - start, mode });
+                        resolve({ blocks, errors: [...errors], errorsTruncated, stabilized, elapsedMs: Date.now() - start, mode, verify: () => valid() && sameView() });
                     } catch (error) { reject(error instanceof Error ? error : new Error('View unavailable')); } finally { cleanup(); }
                 };
                 const cancel = () => { if (done) return; done = true; cleanup(); reject(new Error('Cancelled')); };
@@ -155,6 +183,7 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
             if (path !== null && typeof path !== 'string') throw new Error('Invalid active file');
             return path;
         },
+        readSource: async path => { const file = vault.getAbstractFileByPath(path); if (!isFile(file)) throw new Error('File unavailable'); return vault.read(file); },
         fileExists: path => isFile(vault.getAbstractFileByPath(path)),
         openPath: async (path, { newTab }) => {
             const file: unknown = vault.getAbstractFileByPath(path);

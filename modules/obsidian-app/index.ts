@@ -16,6 +16,7 @@ export interface WorkspacePort {
     dispose?(): void;
     describeCaptureTarget?(): CaptureTarget;
     getActivePath(): string | null;
+    readSource?(path: string): Promise<string>;
     fileExists(path: string): boolean;
     openPath(path: string, options: { newTab: boolean }): Promise<void>;
 }
@@ -41,7 +42,7 @@ export function parseAction(input: unknown): AppAction | null {
     if ('new_tab' in input && typeof input.new_tab !== 'boolean') return null;
     return { action: 'open', path: input.path, newTab: 'new_tab' in input && input.new_tab === true };
 }
-export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean; adminAccess?: boolean; agentKnown?: boolean }
+export interface AppContext { authorizeFileRead?: (path: string) => { allowed: boolean }; abortSignal?: AbortSignal; shouldAbort?: () => boolean; canDiscloseDetails?: () => boolean; agentKnown?: boolean }
 const fail = (code: AppErrorCode): AppResult => ({ ok: false, success: false, error: { code, message: code } });
 const FILELESS_VIEWS = new Set(['graph', 'search', 'file-explorer', 'bookmarks', 'tag', 'empty', 'all-properties', CHAT_VIEW_TYPE, 'pkm-agent-sidebar', 'pkm-release-notes-view']);
 function authorizedPath(path: string | null, authorize?: AppContext['authorizeFileRead']): path is string {
@@ -116,14 +117,23 @@ export function createAppExecutor(port: WorkspacePort, timeoutMs = OBSIDIAN_APP_
                 if (action.action === 'render_check') {
                     if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
                     if (port.getActivePath() !== action.path || !port.observeRender) return fail('unavailable');
+                    if (!port.readSource) return fail('unavailable');
+                    const source = await port.readSource(action.path);
+                    if (!authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
                     const observation = await port.observeRender(action.path, action.waitMs, controller.signal);
                     if (expired() || aborted()) return fail(aborted() ? 'aborted' : 'timeout');
                     if (port.getActivePath() !== action.path || !authorizedPath(action.path, context?.authorizeFileRead)) return fail('access_denied');
-                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, context?.adminAccess === true) };
+                    if (observation.verify && !observation.verify()) return fail('unavailable');
+                    let detail = false;
+                    try { detail = context?.canDiscloseDetails?.() === true; } catch { /* Fail closed. */ }
+                    return { ok: true, success: true, verified: true, effect: before === action.path ? 'unchanged' : 'changed', data: buildRenderResult(observation, detail, source) };
                 }
                 const verified = port.getActivePath() === action.path;
                 return { ok: true, success: true, verified, effect: verified ? (before === action.path ? 'unchanged' : 'changed') : 'unknown', data: { path: action.path } };
-            } catch { return fail(action.action === 'screenshot' ? 'capture_unavailable' : 'unavailable'); }
+            } catch {
+                if (action.action === 'render_check') return { ok: false, success: false, error: { code: 'unavailable', message: 'Reading view unavailable or changed' } };
+                return fail(action.action === 'screenshot' ? 'capture_unavailable' : 'unavailable');
+            }
         };
         const scheduled = queue.then(async () => {
             if (aborted()) return fail('aborted');
