@@ -1,13 +1,13 @@
 import { parse } from 'acorn';
-import { isAlias, isMap, isScalar, isSeq, LineCounter, parseAllDocuments } from 'yaml';
+import { LineCounter, parseAllDocuments } from 'yaml';
 
 export type SyntaxKind = 'js' | 'json' | 'yaml' | 'markdown';
-export type SyntaxProblem = { line: number; column: number; message: string; type: 'syntax' | 'duplicate_key' | 'limit'; path?: string; firstLine?: number };
-export type SyntaxResult = { ok: boolean; kind: SyntaxKind; problems: SyntaxProblem[]; truncated: boolean; mode?: string };
+export type SyntaxProblem = { line: number; column: number; message: string; type: 'syntax' | 'duplicate_key' | 'limit'; path?: string; path_truncated?: boolean; message_truncated?: boolean; firstLine?: number };
+export type SyntaxResult = { ok: boolean; kind: SyntaxKind; problems: SyntaxProblem[]; truncated: boolean; mode?: string; checked_blocks?: number; skipped_blocks?: number; note?: string };
 
 export const MAX_SYNTAX_BYTES = 2 * 1024 * 1024;
 
-export type MarkdownFence = { language: string; line: number; column: number; body: string; columns: number[]; unclosed: boolean };
+export type MarkdownFence = { language: string; line: number; column: number; body: string; columns: number[]; unclosed: boolean; skipped?: boolean };
 
 /** Shared Markdown fence scan, preserving source positions for syntax diagnostics. */
 export function scanMarkdownFences(text: string): MarkdownFence[] {
@@ -18,32 +18,60 @@ export function scanMarkdownFences(text: string): MarkdownFence[] {
         if (end >= 0) start = end + 1;
     }
     const blocks: MarkdownFence[] = [];
+    let listIndent = 0, inComment = false;
     for (let i = start; i < lines.length; i++) {
-        // Strip quote containers and list indentation while retaining each original column.
-        const opening = /^( {0,3}(?:> ?)*(?: {0,3}(?:[-+*]|\d+[.)]) +| *)(?:> ?)* *)(`{3,}|~{3,})(.*)$/.exec(lines[i]);
-        if (!opening) continue;
-        const prefix = opening[1], fence = opening[2];
-        const quoteCount = (prefix.match(/>/g) ?? []).length;
-        const indent = prefix.length;
-        const strip = (line: string): number => {
-            let n = 0;
-            for (let q = 0; q < quoteCount; q++) {
-                const part = /^ {0,3}> ?/.exec(line.slice(n));
-                if (!part) return n;
-                n += part[0].length;
+        const line = lines[i];
+        if (inComment) { if (line.includes('-->')) inComment = false; continue; }
+        const comment = line.indexOf('<!--');
+        if (comment >= 0) { if (!line.slice(comment + 4).includes('-->')) inComment = true; continue; }
+        const list = /^( *)(?:(?:> ?)+)?(?:[-+*]|\d+[.)]) +/.exec(line);
+        if (list) listIndent = list[0].length;
+        else if (/^\S/.test(line) && !line.startsWith('>')) listIndent = 0;
+        const fenceMatch = /^( *)(?:(> ?)+)?((?:[-+*]|\d+[.)]) +)?( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+        if (!fenceMatch) {
+            // A container shape outside the confidently supported grammar is still
+            // a source block, but must never be reported as checked.
+            const uncertain = /^([ \t>]+)(`{3,}|~{3,})(.*)$/.exec(line);
+            if (uncertain && (uncertain[1].includes('>') || (listIndent > 0 && uncertain[1].length >= listIndent))) {
+                const marker = uncertain[2];
+                let end = i + 1;
+                const close = new RegExp(`^[ \t>]*${marker[0]}{${marker.length},}\\s*$`);
+                while (end < lines.length && !close.test(lines[end])) end++;
+                blocks.push({ language: uncertain[3].trim().toLowerCase(), line: i + 1, column: uncertain[1].length + 1, body: '', columns: [], unclosed: end === lines.length, skipped: true });
+                i = end;
             }
-            while (n < line.length && line[n] === ' ' && n < indent) n++;
-            return n;
-        };
-        let end = i + 1;
+            continue;
+        }
+        const leading = fenceMatch[1].length;
+        if (leading >= 4 && (!listIndent || leading < listIndent)) continue;
+        const fence = fenceMatch[5];
+        const prefix = line.slice(0, line.indexOf(fence));
+        const quoteCount = (prefix.match(/>/g) ?? []).length;
+        const indent = leading;
+        const markerWidth = fenceMatch[3]?.length ?? 0;
+        let end = i + 1, skipped = /\t/.test(prefix);
         const body: string[] = [], columns: number[] = [];
         while (end < lines.length) {
-            const cut = strip(lines[end]);
-            const rest = lines[end].slice(cut);
+            const current = lines[end];
+            let cut = 0;
+            if (current.trim()) {
+                while (cut < indent && current[cut] === ' ') cut++;
+                if (cut < indent || current.includes('\t')) skipped = true;
+                for (let q = 0; q < quoteCount; q++) {
+                    const part = /^ {0,3}> ?/.exec(current.slice(cut));
+                    if (!part) { skipped = true; break; }
+                    cut += part[0].length;
+                }
+            }
+            if (markerWidth && current.trim()) {
+                let n = 0; while (n < markerWidth && current[cut] === ' ') { cut++; n++; }
+                if (n < markerWidth) skipped = true;
+            }
+            const rest = current.slice(cut);
             if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(rest)) break;
             body.push(rest); columns.push(cut); end++;
         }
-        blocks.push({ language: opening[3].trim().toLowerCase(), line: i + 1, column: indent + 1, body: body.join('\n'), columns, unclosed: end === lines.length });
+        blocks.push({ language: fenceMatch[6].trim().toLowerCase(), line: i + 1, column: prefix.length + 1, body: body.join('\n'), columns, unclosed: end === lines.length, skipped });
         i = end;
     }
     return blocks;
@@ -51,73 +79,60 @@ export function scanMarkdownFences(text: string): MarkdownFence[] {
 
 export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
     const problems: SyntaxProblem[] = [];
-    if (new TextEncoder().encode(text).length > MAX_SYNTAX_BYTES) return { ok: false, kind, problems: [{ line: 1, column: 1, message: 'Input exceeds 2 MB limit', type: 'limit' }], truncated: false };
-    let count = 0;
+    if (new TextEncoder().encode(text).length > MAX_SYNTAX_BYTES) return { ok: false, kind, problems: [{ line: 1, column: 1, message: 'Input exceeds 2 MB limit', type: 'limit' }], truncated: false, ...(kind === 'markdown' ? { checked_blocks: 0, skipped_blocks: 0 } : {}) };
+    let count = 0, checkedBlocks = 0, skippedBlocks = 0;
     let mode: string | undefined;
-    const add = (problem: SyntaxProblem) => { count++; if (problems.length < 20) problems.push(problem); };
+    const add = (problem: SyntaxProblem) => {
+        count++;
+        if (problem.path && problem.path.length > 120) { problem.path = problem.path.slice(0, 120); problem.path_truncated = true; }
+        if (problem.message.length > 120) { problem.message = problem.message.slice(0, 120); problem.message_truncated = true; }
+        if (problems.length < 20) problems.push(problem);
+    };
     const js = (source: string, offset: number, functionOnly: boolean, columns: number[] = []) => {
         const modes = functionOnly ? ['async_function'] : ['script', 'module', 'async_function'];
         let best: { pos?: number; loc?: { line: number; column: number }; message?: string } = {};
+        const failures: typeof best[] = [];
         // Acorn only accepts a hashbang at offset zero; replace a leading BOM without shifting offsets.
         const normalized = source.replace(/^(\ufeff?)#![^\r\n]*/, match => ' '.repeat(match.length));
         for (const candidate of modes) {
+            const prefix = candidate === 'async_function' ? 'async function __syntax_check__() {\n' : '';
+            const wrapped = prefix + normalized + (prefix ? '\n}' : '');
             try {
-                parse(normalized, { ecmaVersion: 'latest', sourceType: candidate === 'module' ? 'module' : 'script',
-                    allowReturnOutsideFunction: candidate === 'async_function', allowAwaitOutsideFunction: candidate === 'async_function', allowHashBang: true });
+                const program = parse(wrapped, { ecmaVersion: 'latest', sourceType: candidate === 'module' ? 'module' : 'script', allowHashBang: true });
+                if (prefix && (program.body.length !== 1 || program.body[0].type !== 'FunctionDeclaration' || program.body[0].end !== wrapped.length)) {
+                    throw Object.assign(new Error('Unexpected end of function body'), { pos: prefix.length + normalized.length, loc: { line: source.split('\n').length + 1, column: 0 } });
+                }
                 if (!functionOnly) mode = candidate;
                 return;
             } catch (error) {
                 const failure = error as typeof best;
-                if ((failure.pos ?? 0) > (best.pos ?? -1)) best = failure;
+                const adjusted = prefix ? { ...failure, pos: Math.max(0, (failure.pos ?? 0) - prefix.length), loc: { line: Math.max(1, (failure.loc?.line ?? 1) - 1), column: failure.loc?.column ?? 0 }, message: failure.message } : failure;
+                failures.push(adjusted);
+                if ((adjusted.pos ?? 0) > (best.pos ?? -1)) best = adjusted;
             }
         }
-        add({ line: offset + (best.loc?.line ?? 1), column: (best.loc?.column ?? 0) + 1 + (columns[(best.loc?.line ?? 1) - 1] ?? 0), message: (best.message ?? 'Syntax error').replace(/ \(\d+:\d+\)$/, '').slice(0, 120), type: 'syntax' });
+        if (!functionOnly && failures.length === 3 && failures.slice(0, 2).every(failure => /(?:'return' outside of function|(?:keyword )?'await' outside (?:of |an async )?function)/.test(failure.message ?? ''))) best = failures[2];
+        add({ line: offset + (best.loc?.line ?? 1), column: (best.loc?.column ?? 0) + 1 + (columns[(best.loc?.line ?? 1) - 1] ?? 0), message: (best.message ?? 'Syntax error').replace(/ \(\d+:\d+\)$/, ''), type: 'syntax' });
     };
     const yaml = (source: string, offset: number) => {
         const counter = new LineCounter();
-        const docs = parseAllDocuments(source, { lineCounter: counter, uniqueKeys: false, strict: true });
-        for (const doc of docs) {
+        const docs = parseAllDocuments(source, { lineCounter: counter, strict: true, merge: true, logLevel: 'silent' });
+        for (const [index, doc] of docs.entries()) {
             for (const error of doc.errors) {
-                const pos = counter.linePos(error.pos[0]);
-                add({ line: offset + pos.line, column: pos.col, message: error.message.split('\n')[0].slice(0, 120), type: 'syntax' });
+                const pos = error.linePos?.[0] ?? counter.linePos(error.pos[0]);
+                add({ line: offset + pos.line, column: pos.col, message: error.message.split('\n')[0].replace(/ at line \d+, column \d+:$/, ''), type: error.code === 'DUPLICATE_KEY' ? 'duplicate_key' : 'syntax' });
             }
-            try { doc.toJS({ maxAliasCount: 100 }); } catch (error) {
-                if (!/Unresolved alias/.test(String(error))) add({ line: offset + counter.linePos(doc.range?.[0] ?? 0).line, column: 1, message: 'YAML alias expansion limit exceeded', type: 'syntax' });
-            }
-            const fingerprint = (node: unknown, ancestors = new Set<object>()): string => {
-                if (isAlias(node)) {
-                    const resolved = node.resolve(doc);
-                    return resolved ? fingerprint(resolved, ancestors) : 'unresolved-alias';
+            try { doc.toJS({ maxAliasCount: 100, mapAsMap: true }); } catch (error) {
+                const message = error instanceof Error ? error.message : 'YAML conversion failed';
+                // Merge-aware duplicate detection accepts repeated << keys. If a
+                // scalar << is ordinary YAML, retry conversion with the default schema.
+                if (/Merge sources must be maps/.test(message)) {
+                    try { parseAllDocuments(source, { logLevel: 'silent' })[index].toJS({ maxAliasCount: 100, mapAsMap: true }); continue; } catch { /* Report the original conversion failure. */ }
                 }
-                if (isScalar(node)) return JSON.stringify([typeof node.value, typeof node.value === 'number' ? String(node.value) : node.value]);
-                if (!isMap(node) && !isSeq(node)) return 'null';
-                if (ancestors.has(node)) return 'recursive';
-                const next = new Set(ancestors); next.add(node);
-                if (isSeq(node)) return JSON.stringify(['sequence', node.tag ?? '', node.items.map(item => fingerprint(item, next))]);
-                return JSON.stringify(['map', node.tag ?? '', node.items.map(pair => [fingerprint(pair.key, next), fingerprint(pair.value, next)]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
-            };
-            const walk = (node: unknown, path: string) => {
-                if (isAlias(node)) {
-                    if (!node.resolve(doc)) { const pos = counter.linePos(node.range?.[0] ?? 0); add({ line: offset + pos.line, column: pos.col, message: 'Unresolved alias', type: 'syntax' }); }
-                } else if (isMap(node)) {
-                    const seen = new Map<string, number>();
-                    for (const pair of node.items) {
-                        const key = pair.key;
-                        if (!isScalar(key) && !isMap(key) && !isSeq(key) && !isAlias(key)) continue;
-                        const name = isScalar(key) ? String(key.value) : '[complex key]';
-                        if (isScalar(key) && key.value === '<<') { walk(pair.value, path); continue; }
-                        if (isAlias(key)) walk(key, path);
-                        const identity = fingerprint(key);
-                        const keyPath = path ? `${path}.${name}` : name;
-                        const pos = counter.linePos(key.range?.[0] ?? 0);
-                        const firstLine = seen.get(identity);
-                        if (firstLine !== undefined) add({ line: offset + pos.line, column: pos.col, message: 'Duplicate key', type: 'duplicate_key', path: keyPath, firstLine });
-                        else seen.set(identity, offset + pos.line);
-                        walk(pair.value, keyPath);
-                    }
-                } else if (isSeq(node)) node.items.forEach((item, index) => walk(item, `${path}[${index}]`));
-            };
-            walk(doc.contents, '');
+                const limit = /alias count|resource exhaustion/i.test(message);
+                const pos = counter.linePos(doc.range?.[0] ?? 0);
+                add({ line: offset + pos.line, column: pos.col, message: limit ? 'YAML alias expansion limit exceeded' : 'YAML alias resolution failed', type: limit ? 'limit' : 'syntax' });
+            }
         }
     };
     if (kind === 'js') js(text, 0, false);
@@ -195,9 +210,15 @@ export function checkSyntax(text: string, kind: SyntaxKind): SyntaxResult {
             else { yaml(lines.slice(1, end).join('\n'), 1); }
         }
         for (const block of scanMarkdownFences(text)) {
-            if (/^(dataviewjs|js|javascript)$/i.test(block.language)) js(block.body, block.line, true, block.columns);
+            if (block.language !== 'dataviewjs') continue;
+            if (block.skipped) { skippedBlocks++; continue; }
+            checkedBlocks++;
+            js(block.body, block.line, true, block.columns);
             if (block.unclosed) add({ line: block.line, column: block.column, message: 'Unclosed code block', type: 'syntax' });
         }
     }
-    return { ok: count === 0, kind, problems, truncated: count > problems.length, ...(mode ? { mode } : {}) };
+    const result: SyntaxResult = { ok: count === 0 && skippedBlocks === 0, kind, problems, truncated: count > problems.length, ...(mode ? { mode } : {}), ...(kind === 'markdown' ? { checked_blocks: checkedBlocks, skipped_blocks: skippedBlocks } : {}), ...(skippedBlocks ? { note: `${skippedBlocks} blocks not checked due to ambiguous nesting` } : {}) };
+    // Reserve space for the tool's success envelope as well as JSON escaping.
+    while (JSON.stringify(result).length > 15980 && problems.length) { problems.pop(); result.truncated = true; }
+    return result;
 }

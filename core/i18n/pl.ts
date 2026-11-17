@@ -2741,7 +2741,7 @@ export const pl: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary skonsolidowane w jeden prymityw ze scope)
-  'mcp.check_syntax.desc': 'Sprawdź składnię pliku JS, JSON, YAML lub frontmatteru i bloków JS w Markdown bez wykonywania kodu.',
+  'mcp.check_syntax.desc': 'Sprawdź składnię pliku JS, JSON, YAML lub frontmatteru i bloków dataviewjs w Markdown bez wykonywania kodu.',
   'mcp.check_syntax.path': 'Ścieżka pliku w vaulcie.',
   'mcp.check_syntax.kind': 'Opcjonalny rodzaj pliku.',
   'mcp.check_syntax.unsupported': 'Obsługiwane rozszerzenia: .js, .mjs, .cjs, .json, .yaml, .yml, .md.',
