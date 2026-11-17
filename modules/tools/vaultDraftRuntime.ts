@@ -67,12 +67,22 @@ export async function initializeVaultDrafts(input: {
         });
     };
     const review = new DraftReview(store, persistence, input.vault);
-    if (present) collect();
-    await pending;
-    input.lifetime?.check();
-    registry.attachDraftStore(store);
-    registry.events.emit('draft:changed');
-    const off = ['thread:closed', 'task:finished', 'task:plan', 'draft:changed'].map(event => registry.events.on(event, collect));
+    let announcingStore = false;
+    let detachStore: (() => void) | undefined;
+    const off = ['thread:closed', 'task:finished', 'task:plan', 'draft:changed'].map(event =>
+        registry.events.on(event, () => { if (event !== 'draft:changed' || !announcingStore) collect(); }));
+    const dispose = () => { disposed = true; for (const unsubscribe of off) unsubscribe(); detachStore?.(); };
+    void input.lifetime?.stopped.then(dispose);
+    try {
+        if (present) collect();
+        await pending;
+        input.lifetime?.check();
+        detachStore = registry.attachDraftStore(store);
+        // This notification refreshes RAM projections, not storage. Real events
+        // during the first GC already requested a subsequent pass above.
+        announcingStore = true;
+        try { registry.events.emit('draft:changed'); } finally { announcingStore = false; }
+    } catch (error) { dispose(); throw error; }
     return { store, persistence, drafts, review, tool: createSubagentChangesTool(review), issues: recovered.issues, present: observedPresence,
         flush: async () => {
             let observed: Promise<void>;
@@ -81,7 +91,7 @@ export async function initializeVaultDrafts(input: {
                 observed = pending;
                 await (input.lifetime ? Promise.race([observed, input.lifetime.stopped]) : observed);
             } while (observed !== pending);
-        }, dispose: () => { disposed = true; for (const unsubscribe of off) unsubscribe(); } };
+        }, dispose };
 }
 
 /** Mobile capability boundary; never reads desktop capabilities or falls back to live writes. */

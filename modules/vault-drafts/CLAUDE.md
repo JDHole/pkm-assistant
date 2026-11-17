@@ -513,7 +513,11 @@ oraz 5/81 operacji portu; zmieniło się ich położenie względem gotowości pl
 
 Store trafia do rejestru dopiero po początkowym GC. Zdarzenie draft:changed
 odświeża synchroniczne projekcje czatu; modele i decyzje review czekają na bramkę,
-a zwykła rozmowa i narzędzia live nie czekają. Diagnostyka pobiera stan końcowy.
+a zwykła rozmowa i narzędzia live nie czekają. F2o podpina subskrypcje rejestru
+po restore, przed pierwszym collect: zamknięcie wątku podczas GC żąda kolejnego
+przebiegu. Emisja po attach nie uruchamia dodatkowego GC. Diagnostyka czeka na
+rozpoczęty skan najwyżej 5 s, po czym pobiera aktualną migawkę etapu; przed startem
+zadania nie czeka. Niegotowy etap nadal liczy się jako błąd F2f.
 Lista wszystkich konsumentów i granice oczekiwania: `../tools/CLAUDE.md`, F2n.
 
 Zamknięcie runtime odcina I/O portu, także kolejne kroki mobilnego cleanupTemporary.
@@ -521,4 +525,12 @@ Trwający odczyt może fizycznie skończyć się później, ale nie uruchomi dal
 napraw ani GC. Zamykanie nie czeka na zawieszony adapter; rozpoczętego rename
 nadal nie można cofnąć (ograniczenie F2a). Testy F2n przez src/main sprawdzają
 unload przy otwartej kopii wymagającej naprawy, starym pokwitowaniu oraz reload.
+F2o przy zastąpieniu zadania zamyka poprzednika i odpina jego runtime, a następca
+czeka z sondą i skanem na faktyczny koniec poprzedniej pracy oraz I/O (także GC
+po gotowości). Łańcuch kolejnych zastąpień nie omija pierwszej zaległej operacji.
+Zwalnianie ready/flush podczas unload nie oznacza końca fizycznego I/O.
+Zawieszony adapter blokuje następnego pisarza, ale diagnostyka pokaże etap.
+Gwarancja dotyczy łańcucha właścicieli jednej instancji; blokad między procesami
+nadal nie ma. Testy F2o w src/main.mobile.test.ts sprawdzają te wyścigi na obu
+portach i readback payloadCollected oraz blobów po zdarzeniu w pierwszym GC.
 Testy nie zastępują próby Android/iOS z ubijaniem aplikacji i dużym magazynem.

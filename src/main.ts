@@ -121,6 +121,7 @@ import {
   // Kanoniczny typ widoku czatu (zamiast trzech kopii literału).
   CHAT_VIEW_TYPE,
   setYamlEngine,
+  hostWindow,
 } from "../core/index.js";
 import type {
   AppLike,
@@ -150,6 +151,8 @@ import {
 } from "../modules/embedding/index.js";
 import type { EmbeddingProvider, EmbeddingProviderId, VaultLike, IndexerNotice } from "../modules/embedding/index.js";
 import { EmbeddingHelper } from "../modules/memory/index.js";
+
+const DRAFT_DIAGNOSTIC_WAIT_MS = 5000;
 
 /** Kształt jednorazowej migracji `pkm.modelLibrary` (patrz `_migrateToModelLibrary`). */
 interface ModelLibraryEntry {
@@ -970,10 +973,23 @@ export default class PkmAssistantPlugin extends PluginBase {
     if (this.diagnosticController) { new Notice(t('diagnostics.running')); return; }
     const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
     let consentModal: DiagnosticsConsentModal | undefined;
-    const run = { cancelled: false, abort: () => { run.cancelled = true; controller?.abort(); consentModal?.close(); } };
+    let cancelWait: (() => void) | undefined;
+    const run = { cancelled: false, abort: () => { run.cancelled = true; cancelWait?.(); controller?.abort(); consentModal?.close(); } };
     this.diagnosticController = run;
     try {
-      await this.draftStartupTask?.ready;
+      const task = this.draftStartupTask;
+      if (task?.hasStarted) {
+        let timer: ReturnType<Window['setTimeout']> | undefined;
+        try {
+          await Promise.race([task.ready, new Promise<void>(resolve => {
+            cancelWait = resolve;
+            timer = hostWindow.setTimeout(resolve, DRAFT_DIAGNOSTIC_WAIT_MS);
+          })]);
+        } finally {
+          if (timer !== undefined) hostWindow.clearTimeout(timer);
+          cancelWait = undefined;
+        }
+      }
       if (run.cancelled) return;
       const settings = this.env?.settings ?? {};
       const pkm = settings.pkmAssistant;
@@ -1106,8 +1122,8 @@ export default class PkmAssistantPlugin extends PluginBase {
     this.draftStartupError = undefined;
     const mobile = Platform.isMobile;
     let scan: (() => Promise<void>) | undefined;
-    const task = new DraftStartupTask(async () => { await scan?.(); });
-    this.draftStartupTask = task;
+    const previous = this.draftStartupTask;
+    const task = new DraftStartupTask(async () => { await scan?.(); }, previous);
     const failed = (error: unknown) => {
       if (task.closed) return;
       this.draftStartupError = error;
@@ -1121,8 +1137,15 @@ export default class PkmAssistantPlugin extends PluginBase {
       const registry = this.subTaskRegistry;
       this.draftStartup = { stage: 'ports' };
       const ports: ReturnType<typeof mobileDraftPorts> = mobile ? mobileDraftPorts(this.app, task) : desktopDraftPorts(this.app);
+      // Commit ownership only after capability validation. A failed preparation
+      // keeps the working runtime (F2f); a replacement closes every old writer.
+      previous?.dispose();
+      this.vaultDraftRuntime?.dispose();
+      this.vaultDraftRuntime = undefined;
+      this.draftStartupTask = task;
       this.draftStartup = { stage: 'presence' };
-      const present = ports.storagePresent ? await ports.storagePresent() : undefined;
+      // On replacement even the probe waits for the previous namespace owner.
+      const present = !previous && ports.storagePresent ? await task.io(ports.storagePresent) : undefined;
       task.check();
       prepared = true;
       scan = async () => {
@@ -1145,6 +1168,12 @@ export default class PkmAssistantPlugin extends PluginBase {
       };
     } catch (error) { failed(error); }
     if (task.closed) return;
+    // A capability failure did not acquire ownership. Keep the old runtime/gate.
+    if (this.draftStartupTask !== task) {
+      if (previous) task.dispose();
+      else this.draftStartupTask = task;
+    }
+    const gate = this.draftStartupTask!;
     // Definitions are available at boot; their executors share the same admission gate.
     const review = () => {
       if (!this.vaultDraftRuntime) throw new Error('Draft runtime unavailable');
@@ -1158,19 +1187,19 @@ export default class PkmAssistantPlugin extends PluginBase {
     try {
       if (prepared || this.vaultDraftRuntime) toolRegistry.registerTool(createSubagentChangesTool({
         list: async (...args) => {
-          await task.ready;
-          return task.closed ? { kind: 'denied' } : review().list(...args);
+          await gate.ready;
+          return gate.closed ? { kind: 'denied' } : review().list(...args);
         },
         decide: async (...args) => {
-          await task.ready;
-          return task.closed ? { kind: 'denied' } : review().decide(...args);
+          await gate.ready;
+          return gate.closed ? { kind: 'denied' } : review().decide(...args);
         },
       }));
       for (const tool of [createDelegateTool(this.app, delegationDeps), createSubAgentTool(this.app, delegationDeps)]) {
         const execute: import('../modules/tools/index.js').ToolDefinition['execute'] = tool.execute.bind(tool);
         toolRegistry.registerTool({ ...tool, execute: async (...args: Parameters<typeof execute>) => {
-          await task.ready;
-          if (task.closed) return { success: false, error: t('mcp.delegate.share.cancelled') };
+          await gate.ready;
+          if (gate.closed) return { success: false, error: t('mcp.delegate.share.cancelled') };
           return execute(...args);
         } });
       }
@@ -1179,9 +1208,10 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.draftStartup = { stage: 'register' };
       this.draftStartupError = error;
       throw error;
+    } finally {
+      // No scan for failed capability/probe. A ready instance also starts replacements.
+      if (!prepared || this._ready) task.start();
     }
-    // No scan for failed capability/probe. Ready is resolved with the existing fallback.
-    if (!prepared) task.start();
   }
 
   async _unlockSecureStorageAtStartup() {

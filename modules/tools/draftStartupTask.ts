@@ -8,8 +8,21 @@ export class DraftStartupTask {
     private stop!: () => void;
     private settle!: () => void;
     private started = false;
+    get hasStarted(): boolean { return this.started; }
+    private readonly workFinished: Promise<void>;
+    private finish!: () => void;
+    private activeIO = 0;
+    private idle: Promise<void> = Promise.resolve();
+    private becameIdle?: () => void;
+    /** Unlike ready/stopped, waits for the host operation to actually return. */
+    async drained(): Promise<void> {
+        await this.previous?.drained();
+        await this.workFinished;
+        await this.idle;
+    }
     closed = false;
-    constructor(private readonly work: () => Promise<void>) {
+    constructor(private readonly work: () => Promise<void>, private readonly previous?: DraftStartupTask) {
+        this.workFinished = new Promise(resolve => { this.finish = resolve; });
         this.stopped = new Promise(resolve => { this.stop = resolve; });
         this.ready = new Promise(resolve => { this.settle = resolve; });
     }
@@ -17,15 +30,23 @@ export class DraftStartupTask {
         if (this.started || this.closed) return;
         this.started = true;
         // The composition root handles/report errors; still observe every rejection.
-        void this.work().then(this.settle, this.settle);
+        void (async () => {
+            await this.previous?.drained();
+            if (!this.closed) await this.work();
+        })().then(() => { this.finish(); this.settle(); }, () => { this.finish(); this.settle(); });
     }
-    dispose(): void { this.closed = true; this.stop(); this.settle(); }
+    dispose(): void { this.closed = true; this.stop(); this.settle(); if (!this.started) this.finish(); }
     check(): void { if (this.closed) throw new Error('Draft runtime closed'); }
     async io<T>(operation: () => Promise<T>): Promise<T> {
         this.check();
-        const value = await operation();
-        this.check();
-        return value;
+        if (this.activeIO++ === 0) this.idle = new Promise(resolve => { this.becameIdle = resolve; });
+        try {
+            const value = await operation();
+            this.check();
+            return value;
+        } finally {
+            if (--this.activeIO === 0) this.becameIdle?.();
+        }
     }
 }
 

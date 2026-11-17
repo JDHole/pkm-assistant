@@ -320,6 +320,26 @@ nieudanej próbie. Test liczników wykonuje zapis i showDiagnosticReport:
 ready = 18 OK / 0 errors, presence = 17 OK / 1 errors, także w treści Notice.
 Dotychczasowe literalne ślady I/O pozostają bez zmian.
 
+## Mobile M4 F2n - oczekiwanie na magazyn kopii (korekta F2o)
+
+Komenda w src/main nie czeka na niewystartowany DraftStartupTask, także gdy start
+pluginu zatrzymał się przed _ready. Dla rozpoczętego zadania czeka na ready najwyżej
+DRAFT_DIAGNOSTIC_WAIT_MS = 5000 ms, przez hostWindow.setTimeout. Po sukcesie pobiera
+stan końcowy, po limicie aktualną migawkę presence/restore/cleanup. Nie ma nowych
+pól, statusów ani I/O na ścieżce startu; niegotowy etap zwiększa błędy według F2f.
+Limit dotyczy bramki kopii, nie czasu własnych prób adaptera wykonywanych w raporcie.
+
+Finally usuwa timer po sukcesie, limicie i anulowaniu; diagnosticController.abort
+oraz unload od razu zwalniają oczekiwanie, również bez AbortController. Anulowana
+komenda nie zapisuje raportu, a kontroler jest zwalniany dla kolejnego wywołania.
+Delegate/sub_agent/subagent_changes celowo nadal czekają bez limitu na odzyskanie
+magazynu; przy zawieszonym starcie diagnostyka pozwala zobaczyć jego etap.
+
+Testy F2o w src/main.mobile.test.ts wywołują produkcyjną komendę na desktopie i
+mobile, sterują wyłącznie timerem 5 s, odczytują raport z adaptera i sprawdzają
+kolejny zapis, usunięcie timera oraz brak raportu po abort/unload. Nie mierzą
+fizycznego WebView ani systemowego wstrzymywania timerów w tle.
+
 ## Mobile M4 S1a - podetapy fazy agentów
 
 Composition root przekazuje migawkę `AgentManager.startupTimings` na obu platformach

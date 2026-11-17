@@ -289,6 +289,9 @@ Kontrakt i testy opisują `modules/sub-agents/CLAUDE.md` oraz `modules/tools/CLA
 
 Na obu platformach start wykonuje tylko istniejącą sondę obecności (mobile: 1 stat,
 desktop: 0 I/O). Restore i pierwsze GC ruszają po `_ready`; wspólna bramka chroni
-delegację, review i diagnostykę, bez blokowania zwykłej rozmowy. Unload zwalnia
-oczekujących i odcina dalsze I/O. Mapa konsumentów, pomiary i ograniczenia prób
+delegację i review, bez blokowania zwykłej rozmowy. Diagnostyka od F2o czeka najwyżej
+5 s na rozpoczęty skan, bez oczekiwania przed jego startem, i zapisuje migawkę etapu.
+Unload zwalnia oczekujących i odcina dalsze I/O; następca czeka na faktyczny koniec
+I/O poprzednika. Subskrypcje przed pierwszym GC zachowują jego zdarzenia.
+Mapa konsumentów, pomiary i ograniczenia prób
 na urządzeniu są w `modules/tools/CLAUDE.md` i `modules/vault-drafts/CLAUDE.md`.

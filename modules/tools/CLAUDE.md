@@ -1304,21 +1304,27 @@ odmowy zgadniętej nazwy bez skutków oraz tekst po zapisie i przegląd prowadz�
 
 ## Mobile M4 F2n - skan kopii poza startem pluginu
 
-Obie platformy mają jedną ścieżkę. `src/main.initializeVaultDraftRuntime` sprawdza
-porty i wykonuje istniejącą mobilną sondę obecności (1 stat, zero zapisów), po czym
+Obie platformy mają jedną ścieżkę. Przy pierwszym uruchomieniu
+`src/main.initializeVaultDraftRuntime` sprawdza porty i wykonuje istniejącą
+mobilną sondę obecności (1 stat, zero zapisów), po czym
 rejestruje definicje. Desktop nie ma sondy i wykonuje tu 0 operacji portu.
 Koszt do powrotu z tej metody jest identyczny dla 0/1/20 pokwitowań. Po ustawieniu
 `_ready` composition root wywołuje idempotentne `DraftStartupTask.start()`.
-Nie używamy timera ani uruchamiania na żądanie pierwszego konsumenta.
+Sam skan nie używa timera ani uruchamiania na żądanie pierwszego konsumenta.
 `initializeVaultDrafts` pozostaje pełnym asynchronicznym inicjalizatorem; jego
 bezpośredni, zaufani użytkownicy muszą awaitować wynik jak wcześniej.
-W produkcji otrzymuje zapamiętany wynik sondy, więc nie powtarza I/O obecności.
+Przy pierwszym uruchomieniu otrzymuje zapamiętany wynik sondy, więc nie powtarza
+I/O obecności. Przy zastąpieniu zadania sonda czeka na poprzednika, jak opisano niżej.
 
 Jedna obietnica `DraftStartupTask.ready` obejmuje restore, pierwsze GC i obsługę
 wyniku w composition root. Magazyn, persistence, drafts i review nie są publikowane
 przed końcem tego przebiegu. Restore przekazuje skan pierwszemu GC tak jak F2k;
 issues nadal blokują GC przez cały runtime. Rejestr dostaje store po GC i emituje
 `draft:changed`, by odświeżyć także kopie bez powiązanego zadania w RAM.
+F2o podpina subskrypcje thread:closed/task:finished/task:plan/draft:changed po restore,
+ale przed pierwszym collect. Zdarzenie podczas GC ustawia requested i powoduje
+kolejny przebieg przed otwarciem bramki. Własna emisja draft:changed po attach
+odświeża projekcje, lecz nie zleca GC; liczniki F2k pozostają bez zmian.
 Dalsze zdarzenia nadal mają jeden aktywny przebieg GC i jedną flagę oczekiwania.
 
 Mapa konsumentów:
@@ -1329,11 +1335,11 @@ Mapa konsumentów:
 | `SubRunDrafts.open/recordLive/prune`, RunDraft, hosty i widoki runnera | Dostępne wyłącznie przez gotowy runtime, z delegacji dopuszczonej po bramce. |
 | `subagent_changes` list/accept/reject | Fasada list/decide czeka na ready; nie publikuje częściowej ani pustej listy po błędzie. |
 | `DraftReview`, persistence, bloby i store | Surowe obiekty pozostają lokalne do zakończenia inicjalizatora; późniejsi konsumenci dziedziczą tę granicę. |
-| `registry.attachDraftStore`, GC zdarzeń | Podpięcie i subskrypcje dopiero po restore i pierwszym GC; wcześniejsze zdarzenia nie dotykają magazynu. Ochrona czyta aktualny rejestr. |
+| `registry.attachDraftStore`, GC zdarzeń | Subskrypcje po restore, przed pierwszym GC; podpięcie store po GC. Ochrona czyta aktualny rejestr, zdarzenia w czasie GC żądają kolejnego przebiegu. |
 | Pasek czatu, `draftPresentation`, SubAgentBlock i szczegóły | Niezależne synchroniczne projekcje RAM/historii. Nie wykonują decyzji ani I/O. Podpięcie po GC i `draft:changed` dostarczają końcowy stan, bez await w renderowaniu zwykłej rozmowy. |
 | ApprovalModal i DiffModal | Powstają dopiero w review po przejściu fasady list/decide. |
 | Zwykłe MCP read/list/write i tura prowadzącego | Niezależne: używają live vaulta, nie runtime kopii. Ścieżka odczytu podsumowań przy renderowaniu czatu też nie czeka. |
-| Diagnostyka | Czeka na ready przed pobraniem faktów. Słownik i znaczenie końcowych wartości pozostają bez zmian. |
+| Diagnostyka | Niewystartowane zadanie: migawka od razu. Rozpoczęte: ready lub limit 5 s, następnie aktualna migawka. Abort/unload przerywa czekanie i usuwa timer. Słownik i statusy F2f bez zmian. |
 | Unload i flush | Unload zamyka task przed zatrzymywaniem delegacji; zwalnia ready i sygnał stopped. Flush gotowego runtime czeka na kolejne GC, ale zamknięcie przerywa oczekiwanie. |
 
 Awaria skanu loguje dotychczasowy błąd i zachowuje notice desktopu oraz odmowę
@@ -1341,7 +1347,7 @@ writera obu platform. Mobilna rozmowa i odczyt pozostają dostępne. Nieudane re
 już oczekujące na bramce dostaje istniejący read_error; po awarii definicja review
 jest usunięta jak przy dawnym nieudanym starcie. Issues zachowują recovery_error.
 Błąd rejestracji nadal propaguje i pozostaje etapem register również po skanie.
-Nie tworzymy drugiej rejestracji narzędzi po `_ready`.
+Sam skan nie rejestruje ponownie narzędzi po `_ready`.
 
 `draftStartupTask.ts` sprawdza zamknięcie przed i po każdej operacji storage,
 a na mobile także wewnątrz wieloetapowych operacji portu, przez wąski adapter.
@@ -1349,6 +1355,33 @@ Wznowiony po unload odczyt nie uruchomi publikacji naprawy, sprzątania stagingu
 ani GC; nie podpina rejestru i nie wyświetla notice. Obietnice pracy mają odbiorcę
 odrzucenia. Nie da się cofnąć operacji adaptera już rozpoczętej przed unload;
 pozostaje ograniczenie rename z F2a. Nowy plugin dostaje nową bramkę i port.
+
+F2o rozdziela ready/stopped (natychmiastowe zwolnienie konsumentów) od drained()
+(faktyczny koniec pracy startowej i wszystkich rozpoczętych operacji storage).
+Przy ponowieniu na tej samej instancji najpierw walidowane są porty następcy.
+Nieudana walidacja zachowuje gotowy runtime i jego bramkę, zgodnie z F2f.
+Po walidacji poprzedni task dostaje dispose, runtime odpina subskrypcje GC i store
+od rejestru, a pole runtime jest czyszczone. Nowe fasady używają nowej bramki;
+wcześniej pobrane fasady odmawiają przez closed. Jeśli _ready jest ustawione,
+następca startuje od razu (także przy błędzie rejestracji, zachowując etap register).
+Jego sonda obecności i skan czekają na drained poprzednika. Łańcuch obejmuje także
+zastąpionych następców, którzy jeszcze czekali, oraz GC gotowego starego runtime.
+Nie ma okna równoległego I/O magazynu w tym łańcuchu; rozpoczętego I/O adaptera
+nie odwołujemy. Nie jest to blokada między niezależnymi instancjami/procesami.
+
+W kodzie produkcyjnym jedynym wywołującym initializeVaultDraftRuntime jest blok
+rejestracji narzędzi w src/main.initialize, uruchamiany po layoutReady. Reload
+ustawień w PluginRuntime przeładowuje runtime core, nie wywołuje tej metody.
+Bezpośrednie powtórzenia występują w testach; jawne ponowienie initialize też
+przechodzi przez powyższy blok. Samodzielnej ścieżki ponownego startu narzędzi brak.
+
+Ograniczenie: delegate/sub_agent/subagent_changes nadal czekają bez limitu, gdy
+skan nie wystartował albo host nie zwrócił I/O. To ochrona przed dopuszczeniem
+pisarzy bez restore. Diagnostyka pokaże presence/restore/cleanup po najwyżej 5 s
+oczekiwania na bramkę (przed startem bez oczekiwania); sam raport ma własne próby
+adaptera. Timer DRAFT_DIAGNOSTIC_WAIT_MS używa hostWindow i jest usuwany w finally
+po ready, limicie, abort i unload, także bez AbortController. Kolejna komenda
+może zapisać nową migawkę. Nie dodano faktów ani I/O na starcie.
 
 Testy F2n w `src/main.mobile.test.ts` uruchamiają produkcyjny composition root:
 0/1/20 pokwitowań, pełny onload z zatrzymanym skanem, list/accept/reject,
@@ -1362,3 +1395,17 @@ Kontrola mutacyjna: przywrócenie `task.start(); await task.ready` przed powrote
 ze startu magazynu daje 5 czerwonych z 6 testów kosztu (desktop 0/1/20,
 mobile 1/20). Pusty mobile nadal wymaga tylko jednego stat. Mutację usunięto.
 AVA mierzy operacje i kolejność, nie czas ani trwałość na fizycznym telefonie.
+
+F2o w src/main.mobile.test.ts dodaje 22 przypadki na obu platformach: migawkę
+przed startem i po limicie, sukces przed limitem, abort/unload oraz abort bez
+AbortController, ponowny raport, blokadę review, działające narzędzia po ponowieniu,
+odpięcie starego runtime, łańcuch trzech właścicieli z unload i bez niego,
+przekazanie namespace podczas późniejszego GC oraz zamknięcie wątku A podczas
+sprzątania B (payloadCollected i pusty katalog blobów). Zegar czekania jest
+sterowany; operacje magazynu i zapis raportu są rzeczywiste na syntetycznych danych.
+
+Kontrole mutacyjne F2o (uruchomione, potem wycofane): przywrócenie bezwarunkowego
+await diagnostyki daje 2 timeouty przed startem; usunięcie startu następcy przy
+_ready daje 2 timeouty narzędzi; usunięcie dispose poprzednika oblewa 2 próby
+zastąpienia z unload; przesunięcie subskrypcji za pierwsze GC oblewa 2 próby
+payloadCollected dla A. Każda para obejmuje desktop i mobile.

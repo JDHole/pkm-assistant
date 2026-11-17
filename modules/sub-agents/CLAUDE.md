@@ -1050,6 +1050,11 @@ projekcję decyzji niezależną od outcome; odczytowy bieg bez zmian jej nie dos
 i wiąże runId z opcjonalnym draft/draftSummary. `draftSummaries(owner, scope)`
 nie zależy od retencji RAM. Import historii rekonstruuje projekcję z magazynu,
 nie wznawia modeli, pytań ani dostarczania wyników. Dispose odpina listener.
+F2o: attachDraftStore zwraca też idempotentne odpięcie konkretnego store. Runtime
+kopii używa go przy zastąpieniu i unload; późne odpięcie starego store nie usuwa
+następcy. Zwalnia referencję store i listener, zachowując historyczne projekcje
+zadań. Testy ponowienia w src/main.mobile.test.ts sprawdzają projekcję następcy
+i brak uruchomienia starego GC przez nowe zdarzenia.
 SubTaskHistory zapisuje opcjonalny DraftRef, bez blobów/diffów/zgód; schemat
 rozpoznaje też RunEffect.location. Zapis pierwszej mutacji nie czeka na unload.
 Pasek otrzymuje opcjonalne draftSummary w StripRun; znaczenie StripState nie zmienia się.

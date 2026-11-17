@@ -424,7 +424,7 @@ export class SubTaskRegistry {
 
     private draftStore?: DraftStore;
     private draftUnsubscribe?: () => void;
-    attachDraftStore(store: DraftStore): void {
+    attachDraftStore(store: DraftStore): () => void {
         this.draftUnsubscribe?.();
         this.draftStore = store;
         this.draftUnsubscribe = store.events.on('draft:changed', value => {
@@ -432,6 +432,12 @@ export class SubTaskRegistry {
             this.events.emit('draft:changed');
         });
         for (const manifest of store.list()) this.projectDraft(manifest);
+        return () => {
+            if (this.draftStore !== store) return;
+            this.draftUnsubscribe?.();
+            this.draftUnsubscribe = undefined;
+            this.draftStore = undefined;
+        };
     }
     private projectDraft(manifest: DraftManifest): void {
         const task = this.getTask(manifest.runId);

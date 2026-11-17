@@ -543,7 +543,7 @@ async function draftDiagnosticFixture(t: ExecutionContext, mobile: boolean) {
         vaultDraftRuntime: undefined as Awaited<ReturnType<typeof import('../modules/tools/index.js').initializeVaultDrafts>> | undefined,
     };
     t.teardown(async () => {
-        await host.vaultDraftRuntime?.flush(); host.vaultDraftRuntime?.dispose(); host.subTaskRegistry.dispose();
+        await host.vaultDraftRuntime?.flush(); host.vaultDraftRuntime?.dispose(); host.subTaskRegistry?.dispose();
         if (descriptor) Object.defineProperty(window, 'require', descriptor); else Reflect.deleteProperty(window, 'require');
         fs.rmSync(root, { recursive: true, force: true });
     });
@@ -1201,4 +1201,238 @@ for (const mobile of [false, true]) test.serial(`F2n unload releases flush durin
     release.resolve(); await new Promise<void>(resolve => setImmediate(resolve));
     t.deepEqual([removals, notices], [0, []]);
     t.deepEqual(await portsFor(plugin.app, mobile).storage.list(`${DRAFT_ROOT}/previous/manifests`), ['000001.json', '000002.json', '000003.json']);
+});
+
+// F2o: only the diagnostic admission timer is controlled; file probes stay real.
+function diagnosticWaitClock() {
+    const scheduled: number[] = [], cleared: number[] = [];
+    const callbacks = new Map<number, () => void>();
+    const set = window.setTimeout.bind(window), clear = window.clearTimeout.bind(window);
+    let id = 1000000;
+    mock.method(window, 'setTimeout', (callback: () => void, ms: number, ...args: unknown[]) => {
+        if (ms !== 5000) return set(callback, ms, ...args);
+        scheduled.push(ms); callbacks.set(++id, callback); return id;
+    });
+    mock.method(window, 'clearTimeout', (timer: number) => {
+        if (timer > 1000000 && timer <= id) { cleared.push(timer); callbacks.delete(timer); }
+        else clear(timer);
+    });
+    return { scheduled, cleared, callbacks, expire: () => { for (const callback of [...callbacks.values()]) callback(); } };
+}
+async function savedDiagnosticReports(app: Obsidian.App) {
+    if (!await app.vault.adapter.exists('.pkm-assistant/diagnostics')) return [];
+    const files = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
+    return Promise.all(files.map(path => app.vault.adapter.read(path)));
+}
+
+for (const mobile of [false, true]) for (const outcome of ['unstarted', 'timeout', 'success', 'abort', 'unload', 'abort-no-controller'] as const) {
+    test.serial(`F2o diagnostics bounded wait: mobile=${mobile}, ${outcome}`, async t => {
+        t.timeout(5000);
+        const f = await draftDiagnosticFixture(t, mobile);
+        await seedPending(f.host.app, mobile);
+        const held = holdScan(f.host.app, mobile);
+        t.teardown(held.release);
+        await f.prepare();
+        if (outcome !== 'unstarted') { draftTask(f.host)!.start(); await held.entered; }
+        if (outcome === 'abort-no-controller') {
+            const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'AbortController')!;
+            Object.defineProperty(globalThis, 'AbortController', { configurable: true, value: undefined });
+            t.teardown(() => Object.defineProperty(globalThis, 'AbortController', descriptor));
+        }
+        let reviewed = false;
+        const reviewing = f.host.toolRegistry.getTool('subagent_changes')!.execute({ action: 'list' }, undefined, undefined, reviewContext())
+            .then(value => { reviewed = true; return value; });
+        const clock = diagnosticWaitClock();
+        const reporting = Plugin.prototype.runDeviceDiagnostics.call(f.host as never);
+        if (outcome === 'unstarted') {
+            await reporting;
+            t.deepEqual(clock.scheduled, []);
+        } else {
+            t.deepEqual(clock.scheduled, [5000]);
+            if (outcome === 'timeout') clock.expire();
+            if (outcome === 'success') held.release();
+            if (outcome === 'abort' || outcome === 'abort-no-controller') Reflect.get(f.host, 'diagnosticController').abort();
+            if (outcome === 'unload') Plugin.prototype.onunload.call(f.host as never);
+            await reporting;
+            t.is(clock.callbacks.size, 0);
+            t.is(clock.cleared.length, 1);
+        }
+        const reports = await savedDiagnosticReports(f.host.app);
+        if (outcome === 'abort' || outcome === 'abort-no-controller' || outcome === 'unload') {
+            clock.expire();
+            t.deepEqual(reports, []);
+            t.is(Reflect.get(f.host, 'diagnosticController'), null);
+        } else {
+            t.is(reports.length, 1);
+            t.regex(reports[0], outcome === 'success' ? /\| drafts.stage \| OK \| \d+ \| ready \|/
+                : outcome === 'unstarted' ? /\| drafts.stage \| ERROR \| \d+ \| presence \|/
+                : /\| drafts.stage \| ERROR \| \d+ \| restore \|/);
+            t.regex(reports[0], outcome === 'success' ? /\| drafts.available \| OK \| \d+ \| true \|/
+                : /\| drafts.available \| OK \| \d+ \| false \|/);
+        }
+        if (outcome === 'unstarted' || outcome === 'timeout') t.is(reviewed, false);
+        held.release();
+        if (outcome !== 'unload') {
+            await finishDraftStartup(f.host);
+            t.like(await reviewing, { kind: 'listed', changes: [{ draft_id: 'previous', path: 'Previous.md' }] });
+            await Plugin.prototype.runDeviceDiagnostics.call(f.host as never);
+            const next = await savedDiagnosticReports(f.host.app);
+            t.is(next.length, reports.length + 1);
+            t.is(next.filter(report => /\| drafts.stage \| OK \| \d+ \| ready \|/.test(report)).length,
+                outcome === 'success' ? 2 : 1);
+            t.is(clock.callbacks.size, 0);
+        } else {
+            await draftTask(f.host)!.drained();
+            t.like(await reviewing, { kind: 'denied', isError: true });
+            t.deepEqual(await savedDiagnosticReports(f.host.app), []);
+        }
+    });
+}
+
+for (const mobile of [false, true]) test.serial(`F2o ready reinitialization replaces runtime and admits tools: mobile=${mobile}`, async t => {
+    t.timeout(5000);
+    const f = await draftDiagnosticFixture(t, mobile);
+    await seedPending(f.host.app, mobile);
+    await f.start();
+    const old = f.host.vaultDraftRuntime!, oldTask = draftTask(f.host)!;
+    Object.assign(f.host, { _ready: true });
+    await f.prepare();
+    t.is(oldTask.closed, true);
+    await draftTask(f.host)!.ready;
+    const { client } = writerHost(f.host);
+    let calls = 0;
+    modelTest.setChatModelFactory(() => ({ providerId: 'openai', modelId: 'model', stopStream() {},
+        stream(_payload: unknown, handlers: { done(value: unknown): void }) {
+            calls++; handlers.done({ choices: [{ message: { role: 'assistant', content: 'Completed' } }] });
+        },
+    }) as never);
+    t.teardown(async () => { stopAllDelegations('test'); await delegationTest._settleBackground(true); modelTest.reset(); });
+    t.like(await client.executeToolCall({ name: 'delegate', arguments: { task: 'Prepare', aspect: 'child', background: false } },
+        'Tester', { origin: draftOwner, autonomy: 'yolo' }), { success: true, started: true });
+    await delegationTest._settleBackground(true);
+    t.deepEqual(f.host.subTaskRegistry.list().map(task => [task.status, task.result?.text]), [['done', 'Completed']]);
+    t.is(calls, 1);
+    t.like(await client.executeToolCall({ name: 'sub_agent', arguments: { action: 'list' } },
+        'Tester', { origin: draftOwner, autonomy: 'yolo' }), { success: true });
+    t.like(await client.executeToolCall({ name: 'subagent_changes', arguments: { action: 'list' } },
+        'Tester', { origin: draftOwner, autonomy: 'yolo' }), { kind: 'listed', changes: [{ draft_id: 'previous', path: 'Previous.md' }] });
+    // A late disposal must not detach the new projection.
+    old.dispose();
+    t.deepEqual(f.host.subTaskRegistry.draftSummaries(draftOwner).map(summary => summary.pending), [1]);
+    t.regex(await f.report(), /\| drafts.stage \| OK \| \d+ \| ready \|/);
+    let oldCollections = 0;
+    mock.method(old.store, 'collectResolved', async () => { oldCollections++; });
+    t.deepEqual(await f.host.toolRegistry.getTool('subagent_changes')!.execute(
+        { action: 'reject', draft_id: 'previous', change_id: 'change-1', revision: 1 }, undefined, undefined, reviewContext()), { kind: 'rejected' });
+    await f.host.vaultDraftRuntime!.flush();
+    t.is(oldCollections, 0);
+    t.deepEqual(f.host.subTaskRegistry.draftSummaries(draftOwner).map(summary => summary.pending), [0]);
+});
+
+for (const mobile of [false, true]) for (const unload of [false, true]) {
+    test.serial(`F2o replacement serializes namespace and closes old scan: mobile=${mobile}, unload=${unload}`, async t => {
+        t.timeout(5000);
+        const f = await draftDiagnosticFixture(t, mobile);
+        await seedPending(f.host.app, mobile, true);
+        const held = holdScan(f.host.app, mobile);
+        t.teardown(held.release);
+        Object.assign(f.host, { _ready: true });
+        await f.prepare(); await held.entered;
+        const old = draftTask(f.host)!;
+        await f.prepare();
+        // A third owner must not bypass the still-running first owner.
+        const middle = draftTask(f.host)!;
+        let calls = 0, writes = 0;
+        const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+        for (const name of ['list', 'read', 'writeBlob', 'publish', 'remove'] as const) {
+            const original = prototype[name];
+            mock.method(prototype, name, function(this: unknown, ...args: unknown[]) {
+                calls++; if (name === 'publish' || name === 'writeBlob' || name === 'remove') writes++;
+                return Reflect.apply(original, this, args);
+            });
+        }
+        await f.prepare();
+        await new Promise<void>(resolve => setImmediate(resolve));
+        t.deepEqual([old.closed, middle.closed, calls], [true, true, 0]);
+        const stage = Reflect.get(f.host, 'draftStartup');
+        const tools = f.host.toolRegistry;
+        let registryChanges = 0;
+        for (const name of ['registerTool', 'unregisterTool'] as const) {
+            const original = tools[name];
+            mock.method(tools, name, function(this: unknown, ...args: unknown[]) {
+                registryChanges++; return Reflect.apply(original, this, args);
+            });
+        }
+        notices.length = 0;
+        if (unload) Plugin.prototype.onunload.call(f.host as never);
+        held.release(); await old.drained(); await middle.drained();
+        await draftTask(f.host)!.ready;
+        await draftTask(f.host)!.drained();
+        if (unload) {
+            t.deepEqual({ calls, writes, notices, registryChanges, runtime: f.host.vaultDraftRuntime, stage: Reflect.get(f.host, 'draftStartup') },
+                { calls: 0, writes: 0, notices: [], registryChanges: 0, runtime: undefined, stage });
+        } else {
+            t.is(writes, 1, 'only the final owner publishes the restart repair');
+            t.deepEqual(f.host.vaultDraftRuntime!.store.list().map(draft => [draft.draftId, draft.phase]),
+                [['previous', { kind: 'sealed', reason: 'restart' }]]);
+            t.regex(await f.report(), /\| drafts.stage \| OK \| \d+ \| ready \|/);
+        }
+    });
+}
+
+for (const mobile of [false, true]) test.serial(`F2o thread closure during initial GC collects earlier protected payload: mobile=${mobile}`, async t => {
+    const f = await draftDiagnosticFixture(t, mobile);
+    const ports = portsFor(f.host.app, mobile);
+    const seed = new DraftStore(new DraftPersistence(ports.storage, ports.hasher), ports.vault, { now: () => Date.now() });
+    for (const id of ['a', 'b']) {
+        const draft = await seed.create({ draftId: id, runId: id, threadId: id, owner: draftOwner });
+        const changed = await seed.mutate(draft.draftId, { path: parseVaultPath('Notatki/Przyklad.md'),
+            source: { tool: 'write', callId: id }, value: { kind: 'text', text: 'Proposal' } });
+        await seed.seal(draft.draftId, 'finished');
+        await seed.setReview(draft.draftId, changed.changes[0].id, changed.changes[0].revision, { kind: 'rejected' });
+    }
+    const registry = f.host.subTaskRegistry;
+    registry.createThread({ threadId: 'a', name: 'child', owner: draftOwner, origin: draftOwner, config: {} });
+    registry.endRun('a', { successful: true, answer: 'Completed' });
+    const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+    const remove = prototype.remove;
+    let closed = false;
+    mock.method(prototype, 'remove', function(this: unknown, path: string) {
+        if (!closed && path.startsWith(`${DRAFT_ROOT}/b/blobs/`)) {
+            closed = true; registry.closeThread('a');
+        }
+        return Reflect.apply(remove, this, [path]);
+    });
+    await f.start(); await f.host.vaultDraftRuntime!.flush();
+    t.is(registry.getThread('a')?.phase, 'closed');
+    t.deepEqual(f.host.vaultDraftRuntime!.store.list().map(draft => [draft.draftId, draft.payloadCollected]), [['a', true], ['b', true]]);
+    t.deepEqual(await ports.storage.list(`${DRAFT_ROOT}/a/blobs`), []);
+});
+
+for (const mobile of [false, true]) test.serial(`F2o replacement waits for old runtime event GC I/O: mobile=${mobile}`, async t => {
+    t.timeout(5000);
+    const f = await draftDiagnosticFixture(t, mobile);
+    await seedPending(f.host.app, mobile); await f.start();
+    Object.assign(f.host, { _ready: true });
+    const old = f.host.vaultDraftRuntime!;
+    const entered = deferred(), release = deferred();
+    t.teardown(release.resolve);
+    const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+    const list = prototype.list;
+    let scans = 0;
+    mock.method(prototype, 'list', async function(this: unknown, path: string) {
+        if (path === DRAFT_ROOT && ++scans === 1) { entered.resolve(); await release.promise; }
+        return Reflect.apply(list, this, [path]);
+    });
+    t.deepEqual(await f.host.toolRegistry.getTool('subagent_changes')!.execute(
+        { action: 'reject', draft_id: 'previous', change_id: 'change-1', revision: 1 }, undefined, undefined, reviewContext()), { kind: 'rejected' });
+    await entered.promise;
+    await f.prepare();
+    await old.flush(); // Waiters are released, but ownership still waits for physical I/O.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    t.is(scans, 1);
+    release.resolve(); await draftTask(f.host)!.ready;
+    t.deepEqual(f.host.vaultDraftRuntime!.store.list().map(draft => [draft.draftId, draft.payloadCollected]), [['previous', true]]);
+    t.deepEqual(await portsFor(f.host.app, mobile).storage.list(`${DRAFT_ROOT}/previous/blobs`), []);
+    t.regex(await f.report(), /\| drafts.stage \| OK \| \d+ \| ready \|/);
 });
