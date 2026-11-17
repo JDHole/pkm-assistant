@@ -2738,7 +2738,7 @@ export const en: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary consolidated into one scoped primitive)
-  'mcp.check_syntax.desc': 'Check JS and JSON syntax without executing code.',
+  'mcp.check_syntax.desc': 'Check a JS or JSON file after editing without executing it. Returns ok, kind, problems with positions and JS mode (the first accepting mode). Limits: 512 KiB JS, 2 MiB JSON. YAML and Markdown notes are not supported. ok:true means valid syntax, not correct behavior.',
   'mcp.check_syntax.path': 'File path in the vault.',
   'mcp.check_syntax.kind': 'Optional file kind.',
   'mcp.check_syntax.unsupported': 'Unsupported file kind. Supported extensions: .js, .mjs, .cjs, .json.',

@@ -41,7 +41,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/embedding/` | Vectorization (Orama): `EmbeddingModel` + `EmbeddingRegistry` + `providers/` (OpenAI/Ollama/Gemini/LM Studio and others) + `VaultIndexer` |
 | `modules/prompts/` | `PromptBuilder` + Decision Tree - agent behavior instructions, grouped and toggleable |
 | `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegation) + system roles loaded via `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + per-task timeout |
-| `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP); `check_syntax` supports JS/JSON and is disabled by default |
+| `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP); `check_syntax` supports JS/JSON and is enabled |
 | `modules/skills/` | Skill engine (recipes for agents) |
 | `modules/chat/` | `ChatView` + mixins + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline `/` trigger; `@` = MentionAutocomplete) |
 | `modules/models/` | `ChatModel` + providers in `providers/` (many platforms: DeepSeek, Anthropic, OpenAI, Google, Groq, OpenRouter, Ollama, LM Studio, xAI...) + `registry.ts`; DI from `config/runtimeConfig.ts` |

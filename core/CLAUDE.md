@@ -563,4 +563,4 @@ kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
 
 `core/messageTime.ts` renderuje całą zlokalizowaną linię czasu przy utworzeniu wiadomości, nie przy serializacji; nie jest to metadana pochodzenia bezpieczeństwa. PL/EN opisują także klucz wyszukiwania Jina, status wspólnych kluczy mediów i skrót do Kluczy API.
 
-`check_syntax` jest domyślnie wyłączone; po rejestracji używa akcji `vault.read` z ryzykiem GREEN, kanonizacją i No-Go jak przy odczycie. Opis `obsidian_app` domyślnie obejmuje `state` i `open`; opis `render_check`, w tym znaczenie `counts_match` i ograniczenia maskowania, jest dołączany po jawnym włączeniu.
+`check_syntax` jest włączone i używa akcji `vault.read` z ryzykiem GREEN, kanonizacją i No-Go jak przy odczycie. Opis `obsidian_app` domyślnie obejmuje `state` i `open`; opis `render_check`, w tym znaczenie `counts_match` i ograniczenia maskowania, jest dołączany po jawnym włączeniu.

@@ -3,11 +3,10 @@ import { t } from '../../core/i18n/index.js';
 import { createReadTool } from './ReadTool.js';
 import type { ReadToolApp, ReadToolPlugin } from './ReadTool.js';
 import type { ToolRegistry, BuiltinToolExecutionContext } from './ToolRegistry.js';
-import { checkSyntax, MAX_SYNTAX_BYTES } from './syntaxValidator.js';
+import { checkSyntax, syntaxByteLimit, syntaxLimitMessage } from './syntaxValidator.js';
 import type { SyntaxKind } from './syntaxValidator.js';
 
-// Czeka na decyzję właściciela i końcowy odbiór.
-export const CHECK_SYNTAX_ENABLED = false;
+export const CHECK_SYNTAX_ENABLED = true;
 
 export function createCheckSyntaxTool() {
     return {
@@ -24,6 +23,8 @@ export function createCheckSyntaxTool() {
             if (['md', 'yaml', 'yml'].includes(extension)) return { success: false, error: t('mcp.check_syntax.unsupported') };
             const kind = args.kind === undefined ? kinds.get(extension) : typeof args.kind === 'string' && ['js', 'json'].includes(args.kind) ? args.kind as SyntaxKind : undefined;
             if (!kind) return { success: false, error: t('mcp.check_syntax.unsupported') };
+            const limit = syntaxByteLimit(kind);
+            const limitError = { success: false, error: syntaxLimitMessage(kind) };
             const read = createReadTool();
             const readArgs = { path: args.path, _invocationAgentName: args._invocationAgentName, scope: 'vault' };
             const aborted = () => context?.abortSignal?.aborted || context?.shouldAbort?.();
@@ -53,7 +54,7 @@ export function createCheckSyntaxTool() {
                     const adapter = app.vault.adapter as typeof app.vault.adapter & { stat?: (path: string) => Promise<{ size: number } | null> };
                     const stat = await cancellable(Promise.resolve(adapter.stat?.(validation.safePath)));
                     if (stat && 'success' in stat) return cancelled;
-                    if (stat && stat.size > MAX_SYNTAX_BYTES) return { success: false, error: 'Input exceeds 2 MB limit' };
+                    if (stat && stat.size > limit) return limitError;
                 } catch { /* Metadata is optional; retain the read-time limit. */ }
             }
             if (aborted()) return cancelled;
@@ -63,9 +64,9 @@ export function createCheckSyntaxTool() {
             if (!first || typeof first !== 'object' || !('success' in first) || first.success !== true || !('content' in first) || typeof first.content !== 'string') return failure(first);
             let result: Record<string, unknown> = first;
             let content = first.content;
-            if ('source_length' in first && typeof first.source_length === 'number' && first.source_length > MAX_SYNTAX_BYTES) return { success: false, error: 'Input exceeds 2 MB limit' };
+            if ('source_length' in first && typeof first.source_length === 'number' && first.source_length > limit) return limitError;
             let bytes = new TextEncoder().encode(content).length;
-            if (bytes > MAX_SYNTAX_BYTES) return { success: false, error: 'Input exceeds 2 MB limit' };
+            if (bytes > limit) return limitError;
             let previousOffset = 0;
             while ('next_offset' in result && typeof result.next_offset === 'number' && 'source_version' in result && typeof result.source_version === 'string') {
                 if (aborted()) return { success: false, error: 'Operation cancelled' };
@@ -74,12 +75,13 @@ export function createCheckSyntaxTool() {
                 const next = await readPage({ ...readArgs, offset: result.next_offset, source_version: result.source_version });
                 if (!next || typeof next !== 'object' || !('success' in next) || next.success !== true || !('content' in next) || typeof next.content !== 'string') return failure(next);
                 bytes += new TextEncoder().encode(next.content).length;
-                if (bytes > MAX_SYNTAX_BYTES) return { success: false, error: 'Input exceeds 2 MB limit' };
+                if (bytes > limit) return limitError;
                 content += next.content;
                 result = next;
             }
             if (aborted()) return { success: false, error: 'Operation cancelled' };
-            return { success: true, ...checkSyntax(content, kind) };
+            try { return { success: true, ...checkSyntax(content, kind, { shouldAbort: () => !!aborted() }) }; }
+            catch (error) { if (aborted()) return cancelled; throw error; }
         },
     };
 }

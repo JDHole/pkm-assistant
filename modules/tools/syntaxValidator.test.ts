@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { parse } from 'acorn';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ import { checkSyntax } from './syntaxValidator.js';
 import { createCheckSyntaxTool, registerCheckSyntaxTool } from './CheckSyntaxTool.js';
 
 test('JavaScript: script, module and async function body', t => {
-    t.like(checkSyntax('const x = 1;', 'js'), { ok: true, mode: 'script' });
+    t.like(checkSyntax('const x = 1;', 'js'), { ok: true, mode: 'async_function' });
     t.like(checkSyntax('export const x = 1;', 'js'), { ok: true, mode: 'module' });
     t.like(checkSyntax('await work(); return 1;', 'js'), { ok: true, mode: 'async_function' });
     t.like(checkSyntax('const x = 1;\nconst y = ;', 'js'), { ok: false, problems: [{ line: 2, column: 11, type: 'syntax' }] });
@@ -26,7 +27,7 @@ test('JSON reports nested duplicates and syntax errors', t => {
 test('tool reads without executing code and rejects unsupported files', async t => {
     const app = { vault: { getAbstractFileByPath: () => null, cachedRead: async () => '', adapter: { read: async () => 'globalThis.__syntaxSideEffect = 1;' } } };
     const result = await createCheckSyntaxTool().execute({ path: 'x.js' }, app, {});
-    t.like(result, { ok: true, kind: 'js', mode: 'script' });
+    t.like(result, { ok: true, kind: 'js', mode: 'async_function' });
     t.false(Object.hasOwn(globalThis, '__syntaxSideEffect'));
     t.like(await createCheckSyntaxTool().execute({ path: 'x.txt' }, app, {}), { success: false, error: 'Unsupported file kind. Supported extensions: .js, .mjs, .cjs, .json.' });
 });
@@ -52,7 +53,7 @@ test('JSON diagnostics, depth, decoded duplicate names and CRLF positions', t =>
     t.like(checkSyntax('"\\q"', 'json'), { problems: [{ line: 1, column: 3, message: 'Invalid escape' }] });
     t.like(checkSyntax('[1,]', 'json'), { problems: [{ message: 'Trailing comma' }] });
     t.like(checkSyntax('['.repeat(257) + '0' + ']'.repeat(257), 'json'), { problems: [{ message: 'JSON nesting depth limit exceeded', type: 'limit' }] });
-    t.like(checkSyntax(' '.repeat(2097153), 'json'), { problems: [{ message: 'Input exceeds 2 MB limit', type: 'limit' }] });
+    t.like(checkSyntax(' '.repeat(2097153), 'json'), { problems: [{ message: 'Input exceeds 2 MiB JSON limit', type: 'limit' }] });
 });
 
 test('large JSON remains responsive', t => {
@@ -85,7 +86,7 @@ test('tool stops between pages and refuses an oversized source after one read', 
     t.is(reads, 1);
     reads = 0; source = ' '.repeat(2097153);
     const noAbort = { ...context, shouldAbort: () => false };
-    t.like(await createCheckSyntaxTool().execute({ path: 'a.json' }, app, {}, noAbort), { success: false, error: 'Input exceeds 2 MB limit' });
+    t.like(await createCheckSyntaxTool().execute({ path: 'a.json' }, app, {}, noAbort), { success: false, error: 'Input exceeds 2 MiB JSON limit' });
     t.is(reads, 1);
 });
 
@@ -104,7 +105,7 @@ test('tool checks metadata before reading and Stop interrupts a pending read', a
     const app = { vault: { getAbstractFileByPath: () => null, cachedRead: async () => '', adapter: {
         stat: async () => ({ size: 10 * 1024 * 1024 }), read: async () => { reads++; return '{}'; },
     } } };
-    t.like(await createCheckSyntaxTool().execute({ path: 'large.json' }, app, {}), { success: false, error: 'Input exceeds 2 MB limit' });
+    t.like(await createCheckSyntaxTool().execute({ path: 'large.json' }, app, {}), { success: false, error: 'Input exceeds 2 MiB JSON limit' });
     t.is(reads, 0);
     const controller = new AbortController();
     let rejectRead: (reason: Error) => void = () => {};
@@ -161,18 +162,45 @@ test('browser bundle works without Node globals', async t => {
     } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('default registration hides the tool from agent and name lookup; explicit opt-in registers it', async t => {
+test('default registration exposes the tool to the agent and executes it', async t => {
     const registry = new ToolRegistry();
     registry.registerTool({ name: 'read', description: 'Read', inputSchema: {}, execute: async () => ({ success: true }) });
     registerCheckSyntaxTool(registry);
-    t.deepEqual(registry.filterByAgent({ mcp_servers: ['*'] }).map(tool => tool.name), ['read']);
-    t.is(registry.getTool('check_syntax'), null);
+    t.deepEqual(registry.filterByAgent({ mcp_servers: ['*'] }).map(tool => tool.name), ['read', 'check_syntax']);
     const app = { vault: { getAbstractFileByPath: () => null, cachedRead: async () => '', adapter: { read: async () => '{}' } } };
     const agent = { name: 'Tester', mcp_servers: ['*'], permissions: { guidance_mode: true } };
     const client = new MCPClient(app as never, { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(app.vault as never, {}) } as never, registry);
     const response = await client.executeToolCall({ name: 'check_syntax', arguments: { path: 'x.json' } }, 'Tester', { autonomy: 'yolo' });
-    t.like(response, { isError: true });
-    t.true(JSON.stringify(response).includes('Tool not found: check_syntax'));
-    registerCheckSyntaxTool(registry, true);
-    t.is(registry.getTool('check_syntax')?.name, 'check_syntax');
+    t.true(JSON.stringify(response).includes('"ok":true'));
+});
+
+test('near limit JS parses once and cancellation prevents parsing', t => {
+    let calls = 0;
+    const counted: typeof parse = (...args) => { calls++; return parse(...args); };
+    const input = '0;'.repeat(262139) + 'return;';
+    const start = performance.now();
+    t.like(checkSyntax(input, 'js', { parse: counted }), { ok: true, mode: 'async_function' });
+    t.is(calls, 1);
+    t.true(performance.now() - start < 3000);
+    calls = 0;
+    t.throws(() => checkSyntax(input, 'js', { parse: counted, shouldAbort: () => true }), { message: 'Operation cancelled' });
+    t.is(calls, 0);
+});
+
+test('Stop between JS modes prevents another parser call', t => {
+    let calls = 0;
+    const counted: typeof parse = (...args) => { calls++; return parse(...args); };
+    t.throws(() => checkSyntax('export const x = 1;', 'js', { parse: counted, shouldAbort: () => calls === 1 }), { message: 'Operation cancelled' });
+    t.is(calls, 1);
+});
+
+test('JS metadata limit rejects before reading while JSON permits the same size', async t => {
+    let reads = 0;
+    const app = { vault: { getAbstractFileByPath: () => null, cachedRead: async () => '', adapter: {
+        stat: async () => ({ size: 512 * 1024 + 1 }), read: async () => { reads++; return '{}'; },
+    } } };
+    t.like(await createCheckSyntaxTool().execute({ path: 'large.js' }, app, {}), { success: false, error: 'Input exceeds 512 KiB JS limit' });
+    t.is(reads, 0);
+    t.like(await createCheckSyntaxTool().execute({ path: 'large.json' }, app, {}), { success: true, ok: true });
+    t.is(reads, 1);
 });
