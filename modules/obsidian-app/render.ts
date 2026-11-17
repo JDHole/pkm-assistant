@@ -1,6 +1,6 @@
 import { maskSensitiveData } from '../../core/index.js';
 
-export type RenderBlock = { language: string; text: string; error: string | null; textClipped?: boolean; errorClipped?: boolean };
+export type RenderBlock = { language: string; text: string; error: string | null; nonempty?: boolean; textClipped?: boolean; errorClipped?: boolean };
 export type RenderObservation = { blocks: RenderBlock[]; errors: { text: string; truncated: boolean }[]; errorsTruncated: boolean; stabilized: boolean; elapsedMs: number; mode: string; verify?: () => boolean };
 
 export type SourceBlocks = { dataview: number[]; dataviewjs: number[] };
@@ -12,7 +12,7 @@ export function buildRenderResult(observation: RenderObservation, detail: boolea
     const coverage = lines.dataview.length === observed.dataview && lines.dataviewjs.length === observed.dataviewjs ? 'counts_match' : 'partial';
     let remaining = 12000;
     const blocks = observation.blocks.map((block, index) => {
-        const status = block.error !== null ? 'error' : !observation.stabilized ? 'timeout' : block.text.trim() ? 'rendered' : 'empty';
+        const status = block.error !== null ? 'error' : !observation.stabilized ? 'timeout' : (block.nonempty ?? !!block.text.trim()) ? 'rendered' : 'empty';
         const base = { number: index + 1, language: block.language === 'dataview' || block.language === 'dataviewjs' ? block.language : 'other', status };
         if (!detail) return base;
         const text = maskSensitiveData(block.text.replace(/\s+/g, ' ').trim());

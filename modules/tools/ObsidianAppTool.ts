@@ -34,7 +34,8 @@ function stripSourceComments(source: string): string {
 
 export function createObsidianAppTool(port: WorkspacePort, capture: CapturePort | null = null, options: AppExecutorOptions & { isMobile?: boolean } = {}) {
     const screenshotEnabled = options.screenshot === 'enabled';
-    const execute = createAppExecutor(port, undefined, capture, { screenshot: screenshotEnabled ? 'enabled' : 'disabled', countSourceBlocks: source => {
+    const renderCheckEnabled = options.renderCheck === 'enabled';
+    const execute = createAppExecutor(port, undefined, capture, { screenshot: screenshotEnabled ? 'enabled' : 'disabled', renderCheck: options.renderCheck, countSourceBlocks: source => {
         const result: { dataview: number[]; dataviewjs: number[] } = { dataview: [], dataviewjs: [] };
         const uncommented = stripSourceComments(source);
         for (const block of scanMarkdownFences(uncommented)) if (block.language === 'dataview' || block.language === 'dataviewjs') result[block.language].push(block.line);
@@ -42,10 +43,11 @@ export function createObsidianAppTool(port: WorkspacePort, capture: CapturePort 
     } });
     return {
         name: 'obsidian_app', source: 'built-in', serverName: 'app',
-        description: t('mcp.obsidian_app.desc') + (screenshotEnabled ? ' ' + t('mcp.obsidian_app.screenshot_desc') : ''),
+        description: t('mcp.obsidian_app.desc') + (screenshotEnabled ? ' ' + t('mcp.obsidian_app.screenshot_desc') : '') + (renderCheckEnabled ? ' ' + t('mcp.obsidian_app.render_check_desc') : ''),
         screenshotEnabled: screenshotEnabled,
+        renderCheckEnabled,
         isMobile: options.isMobile === true,
-        inputSchema: { type: 'object', properties: { action: { type: 'string', description: t('mcp.obsidian_app.action_desc'), enum: screenshotEnabled ? ['state', 'open', 'render_check', 'screenshot'] : ['state', 'open', 'render_check'] }, path: { type: 'string', description: t('mcp.obsidian_app.path_desc') }, new_tab: { type: 'boolean' }, wait_ms: { type: 'integer', description: t('mcp.obsidian_app.wait_desc'), minimum: 1, maximum: 15000, default: 4000 } }, required: ['action'] },
+        inputSchema: { type: 'object', properties: { action: { type: 'string', description: t('mcp.obsidian_app.action_desc') + (renderCheckEnabled ? ' ' + t('mcp.obsidian_app.render_check_desc') : ''), enum: ['state', 'open', ...(renderCheckEnabled ? ['render_check'] : []), ...(screenshotEnabled ? ['screenshot'] : [])] }, path: { type: 'string', description: t('mcp.obsidian_app.path_desc') }, new_tab: { type: 'boolean' }, ...(renderCheckEnabled ? { wait_ms: { type: 'integer', description: t('mcp.obsidian_app.wait_desc'), minimum: 1, maximum: 15000, default: 4000 } } : {}) }, required: ['action'] },
         contextExtractor: (args: Record<string, unknown>) => ({ targetPath: args.action === 'screenshot' ? 'app:screenshot' : (args.action === 'open' || args.action === 'render_check') && typeof args.path === 'string' ? args.path : '' }),
         execute: (args: Record<string, unknown>, _app?: unknown, _plugin?: unknown, context?: BuiltinToolExecutionContext) => {
             const result = execute(args, context);

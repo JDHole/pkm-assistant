@@ -48,3 +48,13 @@ F4b: `render_check` receives source-block counts through an injected port; the m
 Wywołanie wymaga jawnej tożsamości tury; po otwarciu i przed odczytami oraz wynikiem ponownie sprawdzany jest dostęp. Dispose przerywa obserwację i blokuje dalszy odczyt. Port nasłuchuje zmian pliku, aktywnego liścia i układu oraz sprawdza tożsamość przy mutacjach, synchronicznych odczytach DOM i co 50 ms przez cały czas oczekiwania, w tym referencję pliku widoku, gdy jest dostępna. Mutacje wewnątrz osadzeń są ignorowane, a ich bloki i tekst wyłączone z wyników. `counts_match` oznacza wyłącznie zgodność liczby bloków, nie ich tożsamość. Bufor tekstu błędów jest łącznie ograniczony do 20 tys. znaków w 20 własnych napisach, a maskowanie poprzedza ograniczenie wyniku. Błędy innych wtyczek mogą zawierać dane, których maska po kształcie nie rozpozna; szczegóły trafiają wyłącznie do agenta z pełnym dostępem. Zamiana i powrót trwające krócej niż odstęp kontroli, bez mutacji DOM i zdarzeń, pozostają niewykrywalne. Treść dostaje wyłącznie agent z pełnym dostępem, więc skutkiem takiej zamiany byłby błędny wynik, a nie ujawnienie danych.
 
 Wyjątek sprawdzenia uprawnienia do szczegółów daje status; wyjątek autoryzacji odczytu notatki oznacza odmowę całej akcji.
+
+## render_check: wyłączony w produkcji
+
+Po trzech odrzuconych niezależnych recenzjach akcja jest wyłączona, ukryta przed
+modelem i odmawiana przed zgodą oraz dostępem do portów. Port obserwacji powstaje
+wyłącznie po jawnym włączeniu w testach. Recenzje wykazywały klasy wad dotyczące
+ujawniania przez pola DOM, tożsamości wywołującego i widoku, sprzątania zasobów
+oraz pokrycia renderowania. Włączenie wymaga osobnej karty, niezależnego odbioru
+oraz próby na fizycznym telefonie z prawdziwym Dataview. Status niepustości jest
+liczony niezależnie od budżetu tekstu; dodatnia głębokość delegacji odmawia dostępu.

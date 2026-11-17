@@ -31,7 +31,7 @@ test('executor denies before open and aborts render wait', async t => {
     const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
         openPath: async path => { opens++; active = path; }, readSource: async () => '',
         observeRender: async (_path, _wait, signal) => { started(); await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })); return observation; },
-    });
+    }, undefined, null, { renderCheck: 'enabled' });
     const denied = await execute({ action: 'render_check', path: 'A.md' }, { agentKnown: true, authorizeFileRead: () => ({ allowed: false }) });
     t.deepEqual(denied, { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' } }); t.is(opens, 0);
     const sub = await execute({ action: 'render_check', path: 'A.md', _invocationToolNames: [] });
@@ -45,7 +45,7 @@ test('executor denies before open and aborts render wait', async t => {
 test('executor discloses details only with trusted admin flag', async t => {
     let active = '';
     const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
-        openPath: async path => { active = path; }, readSource: async () => '', observeRender: async () => observation });
+        openPath: async path => { active = path; }, readSource: async () => '', observeRender: async () => observation }, undefined, null, { renderCheck: 'enabled' });
     const context = { agentKnown: true, authorizeFileRead: () => ({ allowed: true }) };
     const status = await execute({ action: 'render_check', path: 'A.md', adminAccess: true }, context);
     t.true(status.ok); t.false(JSON.stringify(status).includes('private widget content')); t.false(JSON.stringify(status).includes('private error message'));
@@ -57,7 +57,7 @@ test('executor discloses details only with trusted admin flag', async t => {
 
 test('detail permission exception falls back to status', async t => {
     const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => 'A.md', fileExists: () => true,
-        openPath: async () => {}, readSource: async () => '', observeRender: async () => observation });
+        openPath: async () => {}, readSource: async () => '', observeRender: async () => observation }, undefined, null, { renderCheck: 'enabled' });
     const result = await execute({ action: 'render_check', path: 'A.md' }, { agentKnown: true, authorizeFileRead: () => ({ allowed: true }), canDiscloseDetails: () => { throw new Error('detail'); } });
     t.true(result.ok); t.true(JSON.stringify(result).includes('"status":"rendered"')); t.false(JSON.stringify(result).includes('private widget content'));
 });
@@ -65,7 +65,7 @@ test('detail permission exception falls back to status', async t => {
 test('read authorization exception denies the action', async t => {
     let opens = 0;
     const execute = createAppExecutor({ listLeaves: () => [], getActivePath: () => 'A.md', fileExists: () => true,
-        openPath: async () => { opens++; } });
+        openPath: async () => { opens++; } }, undefined, null, { renderCheck: 'enabled' });
     const result = await execute({ action: 'render_check', path: 'A.md' }, { agentKnown: true, authorizeFileRead: () => { throw new Error('read'); } });
     t.deepEqual(result, { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' } }); t.is(opens, 0);
 });

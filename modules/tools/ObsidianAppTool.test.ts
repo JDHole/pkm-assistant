@@ -24,7 +24,7 @@ function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restric
         fileExists: (path: string) => ['Notes/A.md', 'Notes/B.md', 'Secret/S.md'].includes(path),
         openPath: async (path: string) => { calls.push(`start:${path}`); await Promise.resolve(); active = path; calls.push(`end:${path}`); },
     };
-    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(customPort ?? port));
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(customPort ?? port, null, { renderCheck: 'enabled' }));
     const agent = { name: 'Tola', admin_access: admin, disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: !restricted, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
@@ -374,8 +374,10 @@ test('default screenshot is hidden and rejected through MCP without approval or 
     let portCalls = 0; let approvals = 0;
     const port = { listLeaves: () => { portCalls++; return []; }, describeCaptureTarget: () => { portCalls++; return { kind: 'none' as const }; }, getActivePath: () => { portCalls++; return null; }, fileExists: () => false, openPath: async () => {} };
     const tool = createObsidianAppTool(port, { capture: async () => { portCalls++; return null; } });
-    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open', 'render_check']);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
     t.false(tool.description.includes('screenshot'));
+    t.false(JSON.stringify(tool.inputSchema).includes('render_check'));
+    t.false(tool.description.includes('render_check'));
     const registry = new ToolRegistry(); registry.registerTool(tool);
     const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => { approvals++; return { result: 'approve' }; } } };
@@ -383,6 +385,9 @@ test('default screenshot is hidden and rejected through MCP without approval or 
     const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message: 'screenshot_disabled' } };
     t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola', { autonomy: 'edge' }), expected);
     t.deepEqual(await createAppExecutor(port)({ action: 'screenshot' }), expected);
+    const renderDisabled = { ok: false, success: false, error: { code: 'render_check_disabled', message: 'render_check_disabled' } };
+    t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'render_check', path: 'Notes/A.md' } }, 'Tola', { autonomy: 'edge' }), renderDisabled);
+    t.deepEqual(await tool.execute({ action: 'render_check' }), renderDisabled);
     t.is(portCalls, 0); t.is(approvals, 0);
 });
 
@@ -401,7 +406,7 @@ for (const [locale, message] of [
     const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message } };
     t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola'), expected);
     t.deepEqual(await tool.execute({ action: 'screenshot' }), expected);
-    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open', 'render_check']);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
     t.deepEqual([portCalls, approvals], [0, 0]);
 });
 
@@ -451,7 +456,7 @@ test.serial('render_check observes only the bound reading view and rechecks admi
             getViewState: () => ({ state }), setViewState: async (next: { state: typeof state }) => { state = next.state; }, openFile: async () => { opens++; } };
         const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => file, getLeaf: () => leaf, iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf) },
             vault: { getAbstractFileByPath: () => file, read: async () => source } };
-        const port = createWorkspacePort(app as never, (value): value is never => value === file);
+        const port = createWorkspacePort(app as never, (value): value is never => value === file, { renderCheck: 'enabled' });
         const client = chain(port, true, true);
         const refused = await client.call({ action: 'render_check', path: 'Notes/A.md' }, { callerToolNames: ['obsidian_app'] });
         t.is(toolResultStatus(refused), 'error'); t.is(opens, 0);
@@ -498,8 +503,8 @@ test.serial('render_check production port refuses missing identity, revoked acce
     let onOpen = () => {};
     const leaf = { openFile: async () => { opens++; onOpen(); } };
     const app = { workspace: { getLeaf: () => leaf, getActiveFile: () => file }, vault: { getAbstractFileByPath: () => file, read: async () => { reads++; return 'private'; } } };
-    const port = createWorkspacePort(app as never, (value): value is never => value === file);
-    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port));
+    const port = createWorkspacePort(app as never, (value): value is never => value === file, { renderCheck: 'enabled' });
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port, null, { renderCheck: 'enabled' }));
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient(app as never, plugin as never, registry);
     const call = (name: string | null) => client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'render_check', path: file.path, wait_ms: 10 } }, name);
@@ -539,7 +544,7 @@ test.serial('render_check filters embedded and commented blocks, masks errors an
         const app = { workspace: { getMostRecentLeaf: () => leaf, getActiveFile: () => active, getLeaf: () => leaf,
             iterateAllLeaves: (fn: (x: unknown) => void) => fn(leaf), on: (name: string, cb: () => void) => { events.set(name, cb); return name; }, offref: (name: string) => events.delete(name) },
             vault: { getAbstractFileByPath: () => file, read: async () => '<!--\n```dataview\nx\n```\n-->\n%%\n```dataviewjs\nx\n```\n%%\n```dataviewjs\nx\n```' } };
-        const port = createWorkspacePort(app as never, (value): value is never => value === file);
+        const port = createWorkspacePort(app as never, (value): value is never => value === file, { renderCheck: 'enabled' });
         const client = chain(port, true, true);
         const first = await client.call({ action: 'render_check', path: file.path, wait_ms: 10 });
         const json = JSON.stringify(first);
@@ -557,4 +562,27 @@ test.serial('render_check filters embedded and commented blocks, masks errors an
         active = file; view.file = file; state.file = file.path;
         t.is(toolResultStatus(await changed), 'error'); t.is(events.size, 0);
     } finally { Object.defineProperty(globalThis, 'HTMLElement', { value: previous, configurable: true }); }
+});
+
+
+test('default tool retains state and open through MCP without a render observer', async t => {
+    let active: string | null = null;
+    const port = { listLeaves: () => [], getActivePath: () => active, fileExists: (path: string) => path === 'Notes/A.md', openPath: async (path: string) => { active = path; } };
+    const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(port));
+    const agent = { name: 'Tola', disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: false, read_notes: true } };
+    const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}) };
+    const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
+    const opened = await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'open', path: 'Notes/A.md' } }, 'Tola');
+    t.true(JSON.stringify(opened).includes('"success":true'));
+    const state = await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'state' } }, 'Tola');
+    t.true(JSON.stringify(state).includes('"active_file":"Notes/A.md"'));
+});
+
+test('default production workspace port does not attach render observation', t => {
+    const app = { workspace: {}, vault: {} };
+    const port = createWorkspacePort(app as never, (_value): _value is never => false);
+    t.is(port.observeRender, undefined);
+    t.is(port.isDisposed?.(), false);
+    port.dispose?.();
+    t.is(port.isDisposed?.(), true);
 });

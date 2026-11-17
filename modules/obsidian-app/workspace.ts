@@ -8,14 +8,14 @@ const OVERLAY_SELECTORS = ['.modal-container', '.hover-popover', '.popover', '.m
 const EMBED_SELECTORS = '.internal-embed, .markdown-embed, .file-embed, .image-embed, .pdf-embed, .media-embed, .cm-embed-block';
 
 /** Obsidian API boundary. File identity is supplied by the composition root. */
-export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile): WorkspacePort {
+export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile, options: { renderCheck?: 'enabled' } = {}): WorkspacePort {
     const { workspace, vault } = app;
     const pending = new Set<() => void>();
     let disposed = false;
     const port: WorkspacePort = {
         dispose: () => { disposed = true; for (const cancel of pending) cancel(); },
         isDisposed: () => disposed,
-        observeRender: async (path, waitMs, signal, authorize = () => true) => {
+        ...(options.renderCheck === 'enabled' ? { observeRender: async (path: string, waitMs: number, signal: AbortSignal, authorize = () => true) => {
             if (disposed || !authorize()) throw new Error('Unavailable');
             const leaf = workspace.getMostRecentLeaf();
             const valid = () => {
@@ -118,13 +118,14 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                         };
                         const collectText = (el: HTMLElement) => {
                             check();
-                            if (!el.childNodes) return collect(el.textContent ?? '');
-                            let value = ''; let clipped = false;
+                            if (!el.childNodes) { const text = el.textContent ?? ''; return { ...collect(text), nonempty: !!text.trim() }; }
+                            let value = ''; let clipped = false; let nonempty = false;
                             const walk = (node: Node) => {
                                 check();
                                 if (node.nodeType === 1 && insideEmbed(node as HTMLElement)) return;
                                 if (node.nodeType === 3) {
                                     const part = node.nodeValue ?? '';
+                                    if (part.trim()) nonempty = true;
                                     const available = remainingText - value.length;
                                     if (part.length > available) clipped = true;
                                     value += Array.from(part.slice(0, available)).join('');
@@ -133,7 +134,7 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                             walk(el);
                             if (clipped) value = value.replace(/\S+$/, '');
                             remainingText -= value.length;
-                            return { value, clipped };
+                            return { value, clipped, nonempty };
                         };
                         const blocks = elements.filter(el => { check(); return !insideEmbed(el); }).map(el => {
                             check();
@@ -145,7 +146,7 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                             check();
                             const error = errorEl && !insideEmbed(errorEl) ? collectText(errorEl) : null;
                             check();
-                            return { language, text: text.value, textClipped: text.clipped, error: error?.value ?? null, errorClipped: error?.clipped === true };
+                            return { language, text: text.value, nonempty: text.nonempty, textClipped: text.clipped, error: error?.value ?? null, errorClipped: error?.clipped === true };
                         });
                         check();
                         resolve({ blocks, errors: [...errors], errorsTruncated, stabilized, elapsedMs: Date.now() - start, mode, verify: () => !changed && valid() && sameView() });
@@ -155,27 +156,35 @@ export function createWorkspacePort(app: App, isFile: (value: unknown) => value 
                 const reset = (records?: MutationRecord[]) => {
                     if (!active) return;
                     if (records?.length && records.every(record => insideEmbed(record.target.nodeType === 1 ? record.target as HTMLElement : record.target.parentElement))) return;
-                    try { check(); } catch { cancel(); return; } win.clearTimeout(quiet); quiet = win.setTimeout(() => finish(true), 500);
+                    try { check(); } catch { cancel(); return; } win.clearTimeout(quiet); if (active) quiet = win.setTimeout(() => finish(true), 500);
                 };
                 const pollIdentity = () => {
                     if (!active) return;
                     try { check(); } catch { cancel(); return; }
-                    identityTimer = win.setTimeout(pollIdentity, 50);
+                    if (active) identityTimer = win.setTimeout(pollIdentity, 50);
                 };
                 const observer = new win.MutationObserver(reset);
                 try {
                     if (typeof workspace.on === 'function') {
-                        refs.push(workspace.on('file-open', onWorkspace), workspace.on('active-leaf-change', onWorkspace), workspace.on('layout-change', onWorkspace));
+                        for (const subscribe of [() => workspace.on('file-open', onWorkspace), () => workspace.on('active-leaf-change', onWorkspace), () => workspace.on('layout-change', onWorkspace)]) {
+                            if (!active) break;
+                            const ref = subscribe();
+                            if (active) refs.push(ref); else workspace.offref(ref);
+                        }
                     }
-                    pending.add(cancel); signal.addEventListener('abort', cancel, { once: true });
-                    win.addEventListener('error', onError); win.addEventListener('unhandledrejection', onRejection);
-                    win.console.error = wrapped;
-                    observer.observe(content, { subtree: true, childList: true, characterData: true, attributes: true });
-                    deadline = win.setTimeout(() => finish(false), waitMs); reset(); identityTimer = win.setTimeout(pollIdentity, 50);
+                    if (active) pending.add(cancel);
+                    if (active) signal.addEventListener('abort', cancel, { once: true });
+                    if (active) win.addEventListener('error', onError);
+                    if (active) win.addEventListener('unhandledrejection', onRejection);
+                    if (active) win.console.error = wrapped;
+                    if (active) observer.observe(content, { subtree: true, childList: true, characterData: true, attributes: true });
+                    if (active) deadline = win.setTimeout(() => finish(false), waitMs);
+                    if (active) reset();
+                    if (active) identityTimer = win.setTimeout(pollIdentity, 50);
                 } catch (error) { cleanup(); reject(error instanceof Error ? error : new Error('Observer unavailable')); return; }
                 if (signal.aborted) cancel();
             });
-        },
+        } } : {}),
         listLeaves: () => {
             const leaves: LeafInfo[] = [];
             workspace.iterateAllLeaves(leaf => {

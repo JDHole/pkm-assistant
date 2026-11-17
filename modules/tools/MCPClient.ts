@@ -872,6 +872,8 @@ export class MCPClient {
             // deklarują właściciela tury (`chat_streaming.ts` podaje `turn.agentName`,
             // `SubAgentRunner.ts` strażuje `agentName` przed samym wywołaniem), ale gałąź musi
             // istnieć dla każdego wywołania, które tego nie robi.
+            if (toolCall.name === 'obsidian_app' && args?.action === 'render_check' && this.toolRegistry.getTool(toolCall.name)?.renderCheckEnabled === false)
+                return { ok: false, success: false, error: { code: 'render_check_disabled', message: 'render_check_disabled' } };
             if (toolCall.name === 'obsidian_app' && args?.action === 'render_check' && !agentName)
                 return { ok: false, success: false, error: { code: 'access_denied', message: 'access_denied' }, isError: true };
             const invocationAgentName = agentName || (toolCall.name === 'obsidian_app' && args?.action === 'render_check' ? null : this.plugin.agentManager?.getActiveAgent?.()?.name) || null;
@@ -889,7 +891,9 @@ export class MCPClient {
             // nie od modelu. Poza delegacją pole jest USUWANE (model mógłby podać ujemną
             // wartość i wyzerować licznik głębi u dziecka), w delegacji zawsze nadpisywane.
             if (opts.subRunContext || delegationDepth > 0) {
-                argsWithContext._invocationDelegationDepth = opts.subRunContext?.level ?? delegationDepth;
+                argsWithContext._invocationDelegationDepth = toolCall.name === 'obsidian_app'
+                    ? Math.max(delegationDepth, opts.subRunContext?.level ?? 0)
+                    : opts.subRunContext?.level ?? delegationDepth;
             } else {
                 delete argsWithContext._invocationDelegationDepth;
             }

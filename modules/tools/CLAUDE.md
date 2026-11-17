@@ -1426,3 +1426,7 @@ F3: `check_syntax` stosuje limit 2 MiB tekstu i limit 256 poziomów JSON; skaner
 F4b: `ObsidianAppTool` injects source counts from the shared `syntaxValidator` Markdown fence scanner. Keep the scanner shared with syntax validation so nested containers and unclosed fences have identical boundaries.
 
 F4c: `ObsidianAppTool` maskuje komentarze HTML i Obsidiana przed wspólnym skanerem ogrodzeń, zachowując numery wierszy i treść ogrodzeń; `syntaxValidator.ts` nie jest zmieniany. MCP dla `render_check` wymaga jawnej tożsamości wywołującego, bez fallbacku do aktywnego agenta. Pokrycie `counts_match` porównuje tylko liczby, a globalne błędy innych wtyczek mogą zawierać dane nierozpoznane przez maskę.
+
+F4e: `render_check` jest domyślnie wyłączony i niewidoczny w schemacie oraz
+opisie modelu; MCP odmawia przed zgodą i dostępem do portów. Testy włączają go
+jawnie. Warunki ponownego włączenia: `modules/obsidian-app/CLAUDE.md`.
