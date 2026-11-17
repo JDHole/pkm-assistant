@@ -1108,9 +1108,11 @@ export default class PkmAssistantPlugin extends PluginBase {
   registerObsidianAppTool(toolRegistry: ToolRegistry): boolean {
     const obsidianAppEnabled = isObsidianAppEnabled(this.settings);
     if (obsidianAppEnabled) {
-      toolRegistry.registerTool(createObsidianAppTool(createWorkspacePort(
+      const workspacePort = createWorkspacePort(
         this.app, (value): value is Obsidian.TFile => value instanceof Obsidian.TFile,
-      ), Platform.isMobile ? null : createCapturePort(() => {
+      );
+      this.register(() => workspacePort.dispose?.());
+      toolRegistry.registerTool(createObsidianAppTool(workspacePort, Platform.isMobile ? null : createCapturePort(() => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only capture port, result validated as unknown in modules/obsidian-app (plan 11.2 pkt 3)
         return require('electron');
       }), { isMobile: Platform.isMobile }));

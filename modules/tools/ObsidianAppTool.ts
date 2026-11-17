@@ -11,8 +11,8 @@ export function createObsidianAppTool(port: WorkspacePort, capture: CapturePort 
         description: t('mcp.obsidian_app.desc') + (screenshotEnabled ? ' ' + t('mcp.obsidian_app.screenshot_desc') : ''),
         screenshotEnabled: screenshotEnabled,
         isMobile: options.isMobile === true,
-        inputSchema: { type: 'object', properties: { action: { type: 'string', enum: screenshotEnabled ? ['state', 'open', 'screenshot'] : ['state', 'open'] }, path: { type: 'string' }, new_tab: { type: 'boolean' } }, required: ['action'] },
-        contextExtractor: (args: Record<string, unknown>) => ({ targetPath: args.action === 'screenshot' ? 'app:screenshot' : args.action === 'open' && typeof args.path === 'string' ? args.path : '' }),
+        inputSchema: { type: 'object', properties: { action: { type: 'string', description: t('mcp.obsidian_app.action_desc'), enum: screenshotEnabled ? ['state', 'open', 'render_check', 'screenshot'] : ['state', 'open', 'render_check'] }, path: { type: 'string', description: t('mcp.obsidian_app.path_desc') }, new_tab: { type: 'boolean' }, wait_ms: { type: 'integer', description: t('mcp.obsidian_app.wait_desc'), minimum: 1, maximum: 15000, default: 4000 } }, required: ['action'] },
+        contextExtractor: (args: Record<string, unknown>) => ({ targetPath: args.action === 'screenshot' ? 'app:screenshot' : (args.action === 'open' || args.action === 'render_check') && typeof args.path === 'string' ? args.path : '' }),
         execute: (args: Record<string, unknown>, _app?: unknown, _plugin?: unknown, context?: BuiltinToolExecutionContext) => {
             const result = execute(args, context);
             return options.isMobile ? result.then(value => !value.ok && value.error.code === 'screenshot_disabled'

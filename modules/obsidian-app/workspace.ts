@@ -10,7 +10,70 @@ const EMBED_SELECTORS = '.internal-embed, .markdown-embed, .file-embed, .image-e
 /** Obsidian API boundary. File identity is supplied by the composition root. */
 export function createWorkspacePort(app: App, isFile: (value: unknown) => value is TFile): WorkspacePort {
     const { workspace, vault } = app;
+    const pending = new Set<() => void>();
+    let disposed = false;
     const port: WorkspacePort = {
+        dispose: () => { disposed = true; for (const cancel of pending) cancel(); },
+        observeRender: async (path, waitMs, signal) => {
+            const leaf = workspace.getMostRecentLeaf();
+            const valid = () => {
+                const info = port.listLeaves().find(item => item.active);
+                return leaf === workspace.getMostRecentLeaf() && info?.identity.kind === 'file'
+                    && info.identity.path === path && 'viewType' in info && info.viewType === 'markdown'
+                    && workspace.getActiveFile()?.path === path;
+            };
+            if (disposed || !leaf || !valid()) throw new Error('View unavailable');
+            const state = leaf.getViewState();
+            try { await leaf.setViewState({ ...state, state: { ...state.state, mode: 'preview' } }); } catch { /* Inspect the current mode. */ }
+            if (disposed || signal.aborted || !valid()) throw new Error('View unavailable');
+            const content: unknown = 'contentEl' in leaf.view ? leaf.view.contentEl : null;
+            if (!(content instanceof HTMLElement)) throw new Error('View unavailable');
+            const win = content.ownerDocument.defaultView;
+            if (!win || !win.MutationObserver) throw new Error('Observer unavailable');
+            const viewState = leaf.getViewState().state;
+            const mode = viewState && typeof viewState === 'object' && 'mode' in viewState && viewState.mode === 'preview' ? 'preview' : 'other';
+            const start = Date.now();
+            const errors: string[] = [];
+            let errorsTruncated = false;
+            const add = (value: unknown) => { if (errors.length < 20) errors.push(String(value)); else errorsTruncated = true; };
+            const original = win.console.error;
+            const wrapped: typeof console.error = (...args: unknown[]) => { add(args.map(String).join(' ')); original.apply(win.console, args); };
+            const onError = (event: ErrorEvent) => { const error: unknown = event.error; add(error instanceof Error ? error.stack ?? error.message : event.message); };
+            const onRejection = (event: PromiseRejectionEvent) => add(event.reason instanceof Error ? event.reason.stack ?? event.reason.message : event.reason);
+            return await new Promise((resolve, reject) => {
+                let quiet: number | undefined;
+                let deadline: number | undefined;
+                let done = false;
+                const cleanup = () => {
+                    observer.disconnect(); win.clearTimeout(quiet); win.clearTimeout(deadline);
+                    win.removeEventListener('error', onError); win.removeEventListener('unhandledrejection', onRejection);
+                    if (win.console.error === wrapped) win.console.error = original;
+                    signal.removeEventListener('abort', cancel); pending.delete(cancel);
+                };
+                const finish = (stabilized: boolean) => {
+                    if (done) return; done = true;
+                    try {
+                        if (!valid()) throw new Error('View changed');
+                        const blocks = Array.from(content.querySelectorAll<HTMLElement>('[class*="block-language-"]')).map(el => ({
+                            language: Array.from(el.classList).find(name => name.startsWith('block-language-'))?.slice(15) ?? 'unknown',
+                            text: el.textContent ?? '', error: el.querySelector('.dataview-error')?.textContent ?? null,
+                        }));
+                        resolve({ blocks, errors, errorsTruncated, stabilized, elapsedMs: Date.now() - start, mode });
+                    } catch (error) { reject(error instanceof Error ? error : new Error('View unavailable')); } finally { cleanup(); }
+                };
+                const cancel = () => { if (done) return; done = true; cleanup(); reject(new Error('Cancelled')); };
+                const reset = () => { win.clearTimeout(quiet); quiet = win.setTimeout(() => finish(true), 500); };
+                const observer = new win.MutationObserver(reset);
+                try {
+                    pending.add(cancel); signal.addEventListener('abort', cancel, { once: true });
+                    win.addEventListener('error', onError); win.addEventListener('unhandledrejection', onRejection);
+                    win.console.error = wrapped;
+                    observer.observe(content, { subtree: true, childList: true, characterData: true, attributes: true });
+                    deadline = win.setTimeout(() => finish(false), waitMs); reset();
+                } catch (error) { cleanup(); reject(error instanceof Error ? error : new Error('Observer unavailable')); return; }
+                if (signal.aborted) cancel();
+            });
+        },
         listLeaves: () => {
             const leaves: LeafInfo[] = [];
             workspace.iterateAllLeaves(leaf => {

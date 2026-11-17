@@ -1413,3 +1413,5 @@ payloadCollected dla A. Każda para obejmuje desktop i mobile.
 ## check_syntax
 
 `check_syntax` waliduje JS, JSON, YAML i Markdown bez wykonania kodu; czysty parser jest w `syntaxValidator.ts`. Odczyt przechodzi przez `read` (w tym autoryzację, stronicowanie i host kopii); `subToolExecution` musi rozpoznawać nowe narzędzie jako vaultowe. Parser YAML jest lokalny i nie zmienia wstrzykiwanego silnika pluginu.
+
+`obsidian_app render_check` uses `app.open` read permission and canonical note target; MCP passes trusted agent identity and explicit admin status outside model arguments. Only admin receives masked render text/errors; other main agents receive statuses. It opens the note on screen and uses heuristic DOM stabilization. Sub-agents remain denied. Details and device limitations: `modules/obsidian-app/CLAUDE.md`.

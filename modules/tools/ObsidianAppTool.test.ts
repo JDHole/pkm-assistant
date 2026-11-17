@@ -11,7 +11,7 @@ import { defaultDisabledTools } from '../agents/toolAxis.js';
 import { createAppExecutor, createWorkspacePort, discloseLeaf, isObsidianAppEnabled } from '../obsidian-app/index.js';
 import { resolveBuiltinManifests } from './built-in-servers/index.js';
 
-function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restricted = false) {
+function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restricted = false, admin = false) {
     let active = 'Notes/B.md';
     const calls: string[] = [];
     const port = {
@@ -25,7 +25,7 @@ function chain(customPort?: Parameters<typeof createObsidianAppTool>[0], restric
         openPath: async (path: string) => { calls.push(`start:${path}`); await Promise.resolve(); active = path; calls.push(`end:${path}`); },
     };
     const registry = new ToolRegistry(); registry.registerTool(createObsidianAppTool(customPort ?? port));
-    const agent = { name: 'Tola', disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: !restricted, read_notes: true } };
+    const agent = { name: 'Tola', admin_access: admin, disabled_tools: [], focusFolders: ['Notes'], permissions: { guidance_mode: !restricted, read_notes: true } };
     const plugin = { agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem: new PermissionSystem(null, {}), approvalManager: { requestApproval: async () => ({ result: 'approve' }) } };
     const client = new MCPClient({ vault: {} } as never, plugin as never, registry);
     const call = (args: Record<string, unknown>, opts: Parameters<typeof client.executeToolCall>[2] = {}) => client.executeToolCall({ name: 'obsidian_app', arguments: args }, 'Tola', opts);
@@ -374,7 +374,7 @@ test('default screenshot is hidden and rejected through MCP without approval or 
     let portCalls = 0; let approvals = 0;
     const port = { listLeaves: () => { portCalls++; return []; }, describeCaptureTarget: () => { portCalls++; return { kind: 'none' as const }; }, getActivePath: () => { portCalls++; return null; }, fileExists: () => false, openPath: async () => {} };
     const tool = createObsidianAppTool(port, { capture: async () => { portCalls++; return null; } });
-    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open', 'render_check']);
     t.false(tool.description.includes('screenshot'));
     const registry = new ToolRegistry(); registry.registerTool(tool);
     const agent = { name: 'Tola', disabled_tools: [], permissions: { guidance_mode: true, read_notes: true } };
@@ -401,6 +401,26 @@ for (const [locale, message] of [
     const expected = { ok: false, success: false, error: { code: 'screenshot_disabled', message } };
     t.deepEqual(await client.executeToolCall({ name: 'obsidian_app', arguments: { action: 'screenshot' } }, 'Tola'), expected);
     t.deepEqual(await tool.execute({ action: 'screenshot' }), expected);
-    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open']);
+    t.deepEqual(tool.inputSchema.properties.action.enum, ['state', 'open', 'render_check']);
     t.deepEqual([portCalls, approvals], [0, 0]);
+});
+
+
+test('render_check through MCP uses read access and trusted admin identity', async t => {
+    let active = 'Notes/B.md'; let opens = 0;
+    const port = { listLeaves: () => [], getActivePath: () => active, fileExists: () => true,
+        openPath: async (path: string) => { opens++; active = path; },
+        observeRender: async () => ({ blocks: [{ language: 'dataviewjs', text: 'PRIVATE_WIDGET', error: 'PRIVATE_ERROR' }], errors: [], errorsTruncated: false, stabilized: true, elapsedMs: 500, mode: 'preview' }) };
+    const regular = chain(port, true);
+    const result = await regular.call({ action: 'render_check', path: 'Notes/A.md', adminAccess: true });
+    t.true(JSON.stringify(result).includes('"status":"error"'));
+    t.false(JSON.stringify(result).includes('PRIVATE_WIDGET')); t.false(JSON.stringify(result).includes('PRIVATE_ERROR'));
+    const admin = chain(port, true, true);
+    const detailed = await admin.call({ action: 'render_check', path: 'Notes/A.md' });
+    t.true(JSON.stringify(detailed).includes('PRIVATE_WIDGET')); t.true(JSON.stringify(detailed).includes('PRIVATE_ERROR'));
+    const before = opens;
+    const denied = await regular.call({ action: 'render_check', path: 'Secret/S.md' });
+    t.is(toolResultStatus(denied), 'error'); t.is(opens, before);
+    const sub = await regular.call({ action: 'render_check', path: 'Notes/A.md' }, { callerToolNames: ['obsidian_app'] });
+    t.is(toolResultStatus(sub), 'error'); t.is(opens, before);
 });
