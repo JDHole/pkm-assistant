@@ -34,6 +34,25 @@ test('local midnight and a negative offset with minutes, weekdays in both langua
     const date = new Date(2026, 10, 16, 0, 0);
     date.getFullYear = () => 2026; date.getMonth = () => 10; date.getDate = () => 16;
     date.getHours = () => 0; date.getMinutes = () => 0; date.getTimezoneOffset = () => 210;
-    t.is(messageTime(() => date, 'pl'), '2026-11-16 00:00, poniedziałek, UTC-03:30');
-    t.is(messageTime(() => date, 'en'), '2026-11-16 00:00, Monday, UTC-03:30');
+    t.is(messageTime(() => date, 'pl'), '[czas wiadomości: 2026-11-16 00:00, poniedziałek, UTC-03:30]');
+    t.is(messageTime(() => date, 'en'), '[message time: 2026-11-16 00:00, Monday, UTC-03:30]');
+});
+
+test.serial('window counts the actual timestamp line and invalidates cached statistics', async t => {
+    const rw = new RollingWindow();
+    await rw.addMessage('user', 'Hi', { messageTime: '[message time: 2026-11-16 00:00, Monday, UTC+00:00]' });
+    t.is(rw.getCurrentTokenCount(), 17);
+    t.deepEqual(rw.getMessagesForAPI(), [{ role: 'user', content: '[message time: 2026-11-16 00:00, Monday, UTC+00:00]\nHi' }]);
+    rw.messages[0].messageTime = '[czas wiadomości: 2026-11-16 00:00, poniedziałek, UTC+00:00]';
+    t.is(rw.getCurrentTokenCount(), 20);
+});
+
+test.serial('language changes do not alter already rendered timestamps', async t => {
+    const { setLocale } = await import('../../../core/i18n/index.js');
+    setLocale('pl');
+    const rw = new RollingWindow();
+    await rw.addMessage('user', 'Cześć', { messageTime: messageTime(() => new Date(2026, 10, 16, 0, 0)) });
+    setLocale('en');
+    const content = rw.getMessagesForAPI()[0].content;
+    t.regex(String(content), /^\[czas wiadomości: 2026-11-16 00:00, poniedziałek, UTC[+-]\d\d:\d\d\]\nCześć$/);
 });

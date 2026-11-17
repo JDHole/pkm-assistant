@@ -218,3 +218,9 @@ przełączanie i override agenta/globalny; brak kontekstu nie zmienia promptu de
 Stan możliwości pochodzi z composition root, a nie z importu Platform w module.
 
 Sekcja kontekstu `message_time` jest stałą instrukcją PL/EN dla obu platform; bieżąca godzina pochodzi wyłącznie z wiadomości, nie z promptu systemowego.
+
+Stabilność prefiksu znaczników dotyczy żywego okna rozmowy. Format sesji pozostaje bez zmian; wcześniejsze wiadomości po wznowieniu nie mają znacznika. Sekcja urządzenia nie opisuje liczby połączonych serwerów MCP.
+
+`renderMobileEnvironment` is the shared device description used by the prompt builder and sub-agent runner; keep the wording in this renderer so both receive the same snapshot content.
+
+Desktop omits the conditional mobile section, including in the editors, like other sections whose runtime conditions do not hold.

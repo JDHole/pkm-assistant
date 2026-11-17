@@ -121,7 +121,7 @@ for (const stage of ['structure', 'filename', 'header', 'state', 'question', 'se
         t.deepEqual((await f.memory.loadActiveSession(f.tabs[1].sessionPath)).messages.map(m => m.content), ['Pytanie B', 'Odpowiedź B']);
         t.is(f.view.input_area.value, 'Szkic B');
         t.is(f.memory.activeSessionPath, f.memory.paths.sessionsActive + '/B.md');
-        t.deepEqual(f.modelInputs, [[{ role: 'system', content: 'system A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[0].messageTime}]\nPierwsze pytanie A` }]]);
+        t.deepEqual(f.modelInputs, [[{ role: 'system', content: 'system A' }, { role: 'user', content: `${f.windows[0].messages[0].messageTime}\nPierwsze pytanie A` }]]);
     });
 }
 
@@ -192,7 +192,7 @@ async function fixture(newSession = false, tabNames = ['A', 'B'], deviceId: Devi
     }
     stop.addClass('hidden');
     events(input); events(button); events(stop); events(document as unknown as HTMLElement);
-    const modelInputs: unknown[] = [];
+    const modelInputs: Array<Array<{ role: string; content: string }>> = [];
     let send: Promise<void> = Promise.resolve();
     let switching: Promise<void> = Promise.resolve();
     const view = {
@@ -214,7 +214,7 @@ async function fixture(newSession = false, tabNames = ['A', 'B'], deviceId: Devi
         resetInputArea() { this.input_area.value = ''; }, handleInputResize() {}, _handleTriggerKeyDown() {}, _handleTriggerInput() {}, _closeTriggerPopup() {},
         _resolveMentions,
         _renderUserText(el: HTMLElement, text: string) { el.textContent = text; }, addMessageActions() {}, scrollToBottom() {}, scrollToFinalMessage() {}, _scheduleConnectorRedraw() {},
-        get_chat_model: () => ({ providerId: 'openai', stream(payload: { messages: unknown }, cb: { done(value: unknown): void }) {
+        get_chat_model: () => ({ providerId: 'openai', stream(payload: { messages: Array<{ role: string; content: string }> }, cb: { done(value: unknown): void }) {
             modelInputs.push(payload.messages);
             cb.done({ choices: [{ message: { role: 'assistant', content: 'Odpowiedź na poprawkę A' } }] });
         } }),
@@ -358,7 +358,7 @@ for (const editing of [true, false]) for (const stage of stages) {
         t.is(f.view.attachmentManager.buildMessageContent('Szkic B').content, '📎 Załącznik: B.txt\n```\nMateriał B\n```\n\nSzkic B');
         t.deepEqual(f.modelInputs, [[{ role: 'system', content: 'system A' },
             ...(!editing ? [{ role: 'user', content: 'Pytanie A' }, { role: 'assistant', content: 'Odpowiedź A' }] : []),
-            { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[editing ? 0 : 2].messageTime}]\n${apiQuestion}` }]]);
+            { role: 'user', content: `${f.windows[0].messages[editing ? 0 : 2].messageTime}\n${apiQuestion}` }]]);
         t.is(f.view.is_generating, false, 'B pozostaje bezczynna');
         t.is(f.view._agentStates.get('A')?.isGenerating, false, 'A kończy generowanie');
         t.deepEqual([...f.view.messages_container.children].map(el => el.textContent), [], 'wysyłka A nie maluje dymka w B');
@@ -765,8 +765,8 @@ for (const timing of ['podczas przygotowania', 'przed mikrozadaniem doręczenia'
     t.deepEqual(f.windows[0].messages.map(m => m.content), ['Poprawka A', 'Odpowiedź na poprawkę A', result, 'Odpowiedź na poprawkę A']);
     t.deepEqual((await f.memory.loadActiveSession(f.tabs[0].sessionPath)).messages.map(m => m.content), ['Poprawka A', 'Odpowiedź na poprawkę A', result, 'Odpowiedź na poprawkę A']);
     t.deepEqual(f.modelInputs, [
-        [{ role: 'system', content: 'system A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[0].messageTime}]\nPoprawka A` }],
-        [{ role: 'system', content: 'system A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[0].messageTime}]\nPoprawka A` }, { role: 'assistant', content: 'Odpowiedź na poprawkę A' }, { role: 'user', content: `[czas wiadomości: ${f.windows[0].messages[2].messageTime}]\n${result}` }],
+        [{ role: 'system', content: 'system A' }, { role: 'user', content: `${f.windows[0].messages[0].messageTime}\nPoprawka A` }],
+        [{ role: 'system', content: 'system A' }, { role: 'user', content: `${f.windows[0].messages[0].messageTime}\nPoprawka A` }, { role: 'assistant', content: 'Odpowiedź na poprawkę A' }, { role: 'user', content: `${f.windows[0].messages[2].messageTime}\n${result}` }],
     ]);
 });
 
@@ -1998,4 +1998,55 @@ for (const repairedFirst of [false, true]) test.serial(`D7b production edit: ${l
         t.is(f.modelInputs.length, 1);
     }
     t.deepEqual([...f.files].filter(([p]) => p.includes('/backups/')).map(([, bytes]) => bytes), [raw]);
+});
+
+test.serial('send preserves an existing timestamp', async t => {
+    const f = await fixture();
+    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    f.view.input_area.value = 'W kolejce';
+    await streaming.send_message.call(f.view as never, { meta: { origin: 'human', messageTime: '[czas wiadomości: 2026-11-16 10:00, poniedziałek, UTC+00:00]' } });
+    t.is(f.modelInputs[0].at(-1)?.content, '[czas wiadomości: 2026-11-16 10:00, poniedziałek, UTC+00:00]\nW kolejce');
+});
+
+for (const path of ['loop', 'drain'] as const) test.serial(`queue retains its creation time through ${path}`, async t => {
+    const f = await fixture();
+    t.teardown(() => { f.view.attachmentManager.destroy(); f.view.mentionAutocomplete.destroy(); });
+    Object.assign(f.view, { _showQueuedIndicator() {}, _hideQueuedIndicator() {} });
+    let minute = 0;
+    const clock = () => { const d = new Date(2026, 10, 16, 10, minute); d.getTimezoneOffset = () => 0; return d; };
+    const queued = async () => {
+        f.view.input_area.value = 'Za pięć minut';
+        await streaming.send_message.call(f.view as never, { clock });
+        minute = 7;
+    };
+    if (path === 'drain') {
+        f.view.is_generating = true;
+        await queued();
+        const sent = deferred();
+        const original = f.view.send_message;
+        f.view.send_message = opts => { const result = original({ ...opts, clock }); void result.then(sent.resolve); return result; };
+        streaming.set_generating.call(f.view as never, false);
+        await sent.promise;
+    } else {
+        let calls = 0;
+        Object.assign(f.view, {
+            get_chat_model: () => ({ providerId: 'openai', stream(payload: { messages: Array<{ role: string; content: string }> }, cb: { done(value: unknown): void }) {
+                f.modelInputs.push(structuredClone(payload.messages));
+                calls++;
+                cb.done({ choices: [{ message: calls === 1 ? { role: 'assistant', content: '', tool_calls: [{ id: 'one', type: 'function', function: { name: 'list', arguments: '{}' } }] } : { role: 'assistant', content: 'Gotowe' } }] });
+            } }),
+            _chatResolveTools: () => [{ type: 'function', function: { name: 'list', parameters: {} } }],
+            _chatExecuteToolCall: async () => ({ success: true }),
+            _chatOnToolCallsParsed() {},
+            async _chatBeforeContinue(turn: Parameters<typeof streaming._chatBeforeContinue>[0], i: number) {
+                await queued();
+                await streaming._chatBeforeContinue.call(f.view as never, turn, i);
+            },
+        });
+        f.view.input_area.value = 'Początek';
+        await f.clickSend();
+    }
+    const seen = f.modelInputs.flat().filter(message => message.content.includes('Za pięć minut'));
+    t.is(seen.length, 1);
+    t.is(seen[0].content, '[czas wiadomości: 2026-11-16 10:00, poniedziałek, UTC+00:00]\nZa pięć minut');
 });

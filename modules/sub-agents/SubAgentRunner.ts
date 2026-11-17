@@ -1,3 +1,5 @@
+import { renderMobileEnvironment } from '../prompts/index.js';
+import type { MobileEnvironment } from '../prompts/index.js';
 import { SubRunDrafts } from './SubRunDrafts.js';
 import type { RunDraft } from './SubRunDrafts.js';
 import type { DraftRef } from '../vault-drafts/index.js';
@@ -14,7 +16,7 @@ import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapsho
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits, sanitizeLimit, DEFAULT_LIMITS } from '../../config/limits.js';
-import { messageTime, messageTimeLine, AccessGuard, countTokens } from '../../core/index.js';
+import { messageTime, AccessGuard, countTokens } from '../../core/index.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus, configuredChatSecrets } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
@@ -296,7 +298,7 @@ function taskMessagesForAPI(messages: LoopMessage[]): LoopMessage[] {
     return messages.map(message => {
         if (message.role !== 'user' || typeof message.messageTime !== 'string' || typeof message.content !== 'string') return message;
         const { messageTime: stamp, ...rest } = message;
-        return { ...rest, content: `${messageTimeLine(stamp)}\n${message.content}` };
+        return { ...rest, content: `${stamp}\n${message.content}` };
     });
 }
 
@@ -312,6 +314,7 @@ export class SubAgentRunner {
     declare effectTargetIo: EffectTargetIo;
     private readonly drafts?: SubRunDrafts | { kind: 'unavailable' };
     private readonly isMobile: boolean;
+    private readonly mobileEnvironment: () => MobileEnvironment | undefined;
     private readonly clock: () => Date;
     /**
      * @param {Object} options
@@ -325,10 +328,11 @@ export class SubAgentRunner {
     // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
     // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
     // realne obiekty `ToolRegistry`/`App`/plugin.
-    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts, isMobile = false, clock = () => new Date() }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' }; isMobile?: boolean; clock?: () => Date }) {
+    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts, isMobile = false, mobileEnvironment = () => undefined, clock = () => new Date() }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts | { kind: 'unavailable' }; isMobile?: boolean; mobileEnvironment?: () => MobileEnvironment | undefined; clock?: () => Date }) {
         this.clock = clock;
         this.drafts = drafts;
         this.isMobile = isMobile;
+        this.mobileEnvironment = mobileEnvironment;
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
         this.app = app as AppLike;
         this.plugin = plugin as RunnerPlugin;
@@ -376,6 +380,7 @@ export class SubAgentRunner {
      */
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
         const taskTime = messageTime(this.clock);
+        const mobileEnvironment = this.mobileEnvironment();
         const startTime = Date.now();
         let parentConversation: ParentConversationPreparation | undefined;
         const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
@@ -678,7 +683,8 @@ export class SubAgentRunner {
             }
             const allowedToolNames = new Set<string>(tools.map((td) => td.function.name));
 
-            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits, !!options.parentId || !!subTask?.plan);
+            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits, !!options.parentId || !!subTask?.plan)
+                + (mobileEnvironment ? `\n\n${renderMobileEnvironment(mobileEnvironment)}` : '');
 
             const nextTask = options.threadId ? t('subagent.thread_next_task', { task: taskPrompt }) : taskPrompt;
             if (options.threadId && thread) {

@@ -128,8 +128,8 @@ test.serial('R2 c: two tabs sending concurrently share one confirmed migration a
     t.teardown(a.close); t.teardown(b.close);
     await Promise.all([a.send(), b.send()]);
     t.deepEqual(f.requests.sort(), ['c-a', 'c-b']);
-    t.deepEqual(f.payloads.get('c-a'), [{ role: 'system', content: 'system' }, { role: 'user', content: `[czas wiadomości: ${a.view.rollingWindow.messages[0].messageTime}]\nPytanie c-a` }]);
-    t.deepEqual(f.payloads.get('c-b'), [{ role: 'system', content: 'system' }, { role: 'user', content: `[czas wiadomości: ${b.view.rollingWindow.messages[0].messageTime}]\nPytanie c-b` }]);
+    t.deepEqual(f.payloads.get('c-a'), [{ role: 'system', content: 'system' }, { role: 'user', content: `${a.view.rollingWindow.messages[0].messageTime}\nPytanie c-a` }]);
+    t.deepEqual(f.payloads.get('c-b'), [{ role: 'system', content: 'system' }, { role: 'user', content: `${b.view.rollingWindow.messages[0].messageTime}\nPytanie c-b` }]);
     t.deepEqual([...f.answers].sort(), [['c-a', 'Odpowiedź c-a'], ['c-b', 'Odpowiedź c-b']]);
     t.deepEqual(f.errors, []);
     t.regex(a.tab.sessionEpoch!, /^[0-9a-f]{32}$/);

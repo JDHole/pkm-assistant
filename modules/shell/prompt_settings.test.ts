@@ -26,6 +26,7 @@
  * nasz shim, jak opisano wyżej.
  */
 import test from 'ava';
+import { Platform } from 'obsidian';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { renderPromptSection } from './prompt_settings.js';
@@ -180,4 +181,20 @@ test('renderPromptSection: drugi guzik "Wstaw fabryczny" (save_session_prompt) w
     t.truthy(stored, 'kliknięcie musi zapisać tekst do promptDefaults.save_session_prompt');
     t.true(stored!.includes('{{sec_current}}'), 'RAW placeholder musi zostać nietknięty - globalny override dzielą wszyscy agenci, podstawienie należy do miejsca użycia per-agent');
     t.false(stored!.includes('## Current'), 'stary bug: podstawiony tekst zamrażał nagłówek EN z chwili kliknięcia na stałe w globalnym override');
+});
+
+
+test.serial('mobile section editor appears only on mobile and inserts its device description', t => {
+    const oldMobile = Platform.isMobile, oldPhone = Platform.isPhone;
+    t.teardown(() => { Object.assign(Platform, { isMobile: oldMobile, isPhone: oldPhone }); });
+    const render = () => { const container = makeFakeEl(); const pkm: { promptDefaults?: Record<string, string> } = {};
+        renderPromptSection(container as unknown as HTMLElement, { pkm, save: async () => {} }); return { container, pkm }; };
+    Object.assign(Platform, { isMobile: false, isPhone: false });
+    const desktop = render();
+    t.false(collectByTag(desktop.container, 'strong').some(el => el.text === 'Mobile device'));
+    Object.assign(Platform, { isMobile: true, isPhone: true });
+    const mobile = render();
+    const block = mobile.container.children.find(el => collectByTag(el, 'strong').some(child => child.text === 'Mobile device'))!;
+    collectByTag(block, 'button').find(el => el.text === i18n('settings.prompt_insert_factory'))!.listeners.click[0]();
+    t.true(mobile.pkm.promptDefaults!.mobile_environment.includes('You are working in Obsidian on a phone.'));
 });

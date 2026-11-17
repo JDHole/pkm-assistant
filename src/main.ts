@@ -104,7 +104,7 @@ import type { AskUserChannels, ServerVisibilityAgent, DraftStartupProgress } fro
 import { ArtifactStore, registerArtifactBlocks, migrateJsonArtifactsToNotes, DEFAULT_ARTIFACTS_FOLDER, buildArtifactsBaseContent, buildArtifactsBasePath } from "../modules/artifacts/index.js";
 // Księga biegów sub-agentów. Stoi obok traceLog, bo trace.log jest jej pierwszym konsumentem
 // (patrz modules/sub-agents/CLAUDE.md).
-import { SubTaskRegistry, SubTaskNotifier } from "../modules/sub-agents/index.js";
+import { SubTaskRegistry, SubTaskNotifier, SubAgentRunner } from "../modules/sub-agents/index.js";
 import { log } from "../core/utils/Logger.js";
 import {
   TraceLog,
@@ -189,6 +189,14 @@ function indexerNoticeParams(n: IndexerNotice): Record<string, string> | undefin
 }
 
 export default class PkmAssistantPlugin extends PluginBase {
+  private readonly mobileEnvironment = () => {
+    if (!Platform.isMobile) return undefined;
+    return {
+      device: Platform.isPhone ? 'phone' as const : 'tablet' as const,
+      semanticUnavailable: this.vaultIndexer?.getStatus().status === 'disabled_mobile',
+      screenshotUnavailable: true,
+    };
+  };
   // Pola pluginu przypisywane w `onload()`/`initialize()`. `declare` (nie zwykłe pole klasy!) -
   // `useDefineForClassFields` wyemitowałby `pole;` w ciele klasy i nadpisał wartości z bazy PO
   // `super()`. Realne typy z barreli modułów-właścicieli (import type wyżej); żadna instancja
@@ -685,15 +693,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // node-safe `AppLike` z core - a `this.app` to prawdziwy `App` Obsidiana, którego
       // `vault.adapter` (`DataAdapter`) nie ma otwartego indeksu `VaultAdapterLike`.
       // Ta sama luka core co przy `PluginRuntime`/`PkmSettingsTab` wyżej.
-      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin, this._loadDeviceId(), undefined, () => {
-        if (!Platform.isMobile) return undefined;
-        return {
-          device: Platform.isPhone ? 'phone' : 'tablet',
-          semanticUnavailable: this.vaultIndexer?.getStatus().status === 'disabled_mobile',
-          connectedMcp: this.externalMcpManager?.listServersForUi().filter(server => server.connected).length ?? 0,
-          screenshotUnavailable: true,
-        };
-      });
+      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin, this._loadDeviceId(), undefined, this.mobileEnvironment);
       await this.agentManager.initialize();
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';
@@ -1192,7 +1192,8 @@ export default class PkmAssistantPlugin extends PluginBase {
       return this.vaultDraftRuntime.review;
     };
     const currentDrafts = () => this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' as const };
-    const delegationDeps = {
+    const delegationDeps: NonNullable<Parameters<typeof createDelegateTool>[1]> = {
+      makeRunner: plugin => new SubAgentRunner({ toolRegistry: plugin.toolRegistry, app: this.app, plugin, drafts: currentDrafts(), isMobile: mobile, mobileEnvironment: this.mobileEnvironment }) as unknown as ReturnType<NonNullable<NonNullable<Parameters<typeof createDelegateTool>[1]>['makeRunner']>>,
       get drafts() { return currentDrafts(); },
       isMobile: mobile,
     };

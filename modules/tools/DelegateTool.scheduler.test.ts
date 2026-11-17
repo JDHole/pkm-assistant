@@ -1,9 +1,8 @@
-import { withoutTaskTime } from './test-support/withoutTaskTime.js';
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { createDelegateTool, createSubAgentTool, __test__, stopAllDelegations } from './DelegateTool.js';
 import type { DelegatePlugin } from './DelegateTool.js';
-import { SubTaskRegistry } from '../sub-agents/index.js';
+import { SubTaskRegistry, SubAgentRunner } from '../sub-agents/index.js';
 import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.js';
 import { __test__ as modelsTest } from '../models/index.js';
 
@@ -16,7 +15,7 @@ class Mailbox<T> {
         return value ? Promise.resolve(value) : new Promise(resolve => this.readers.push(resolve));
     }
 }
-type Request = { task: string; complete(text: string): void };
+type Request = { task: string; messages: Array<{ role: string; content: string }>; complete(text: string): void };
 type Receipt = { success: boolean; task_id: string; sub_id: string; queued?: boolean; tasks: Receipt[] };
 const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1', tabKey: 'tab' };
 function fixture(t: ExecutionContext, local = false) {
@@ -29,9 +28,11 @@ function fixture(t: ExecutionContext, local = false) {
         modelId = 'worker-model'; providerId = 'ollama';
         _streamGateLimit() { return local ? 1 : 0; }
         stream(payload: { messages: Array<{ role: string; content: string }> }, handlers: { done(value: unknown): void }) {
-            const task = withoutTaskTime(payload.messages).filter(message => message.role === 'user').at(-1)!.content;
+            const content = payload.messages.filter(message => message.role === 'user').at(-1)!.content;
+            const candidates = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'other', 'accepted', 'continue', 'cancelled', 'model removed'];
+            const task = candidates.find(value => content === `[message time: 2026-11-16 00:00, Monday, UTC+00:00]\n${value}`) ?? content;
             starts.push(task);
-            requests.push({ task, complete: text => handlers.done({ choices: [{ message: { role: 'assistant', content: text } }] }) });
+            requests.push({ task, messages: structuredClone(payload.messages), complete: text => handlers.done({ choices: [{ message: { role: 'assistant', content: text } }] }) });
         }
         stopStream() {}
     }
@@ -46,14 +47,16 @@ function fixture(t: ExecutionContext, local = false) {
                 http: { send: async () => ({ status: 200, headers: {}, text: '', json: () => ({}) }) },
                 transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } },
             settings: { pkmAssistant: {
+                promptDefaults: { subagent_frame_prompt: 'FRAME' },
                 chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } },
                 modelLibrary: { minion: [{ platform: 'ollama', model: 'worker-model', isDefault: true }] },
                 limits: { max_parallel_delegations: 5, delegation_timeout_ms: 1000, subagent_stall_timeout_ms: 0 },
             } },
         },
     } as unknown as DelegatePlugin;
-    const delegate = createDelegateTool({});
-    const control = createSubAgentTool({});
+    const deps = { makeRunner: (runtime: unknown) => new SubAgentRunner({ app: {}, plugin: runtime as never, toolRegistry: plugin.toolRegistry, clock: () => { const date = new Date(2026, 10, 16, 0, 0); date.getTimezoneOffset = () => 0; return date; } }) as never };
+    const delegate = createDelegateTool({}, deps);
+    const control = createSubAgentTool({}, deps);
     const submit = (task: string, origin = owner) => delegate.execute({ task, _invocationOrigin: origin }, {}, plugin) as Promise<Receipt>;
     const batch = (tasks: string[]) => delegate.execute({ tasks: tasks.map(task => ({ task })), _invocationOrigin: owner }, {}, plugin) as Promise<Receipt>;
     t.teardown(async () => {
@@ -63,6 +66,19 @@ function fixture(t: ExecutionContext, local = false) {
     });
     return { clock, registry, requests, starts, plugin, delegate, control, submit, batch };
 }
+
+
+test.serial('scheduler sends the complete task and time instruction to the model', async t => {
+    const f = fixture(t);
+    await f.submit('accepted');
+    const request = await f.requests.next();
+    t.deepEqual(request.messages, [
+        { role: 'system', content: 'FRAME\n\nMessages begin with a system-added timestamp that is not user text; the last message time is the current time, and use that date and time when writing files.' },
+        { role: 'user', content: '[message time: 2026-11-16 00:00, Monday, UTC+00:00]\naccepted' },
+    ]);
+    request.complete('ok');
+    await __test__._settleBackground();
+});
 
 async function fill(f: ReturnType<typeof fixture>) {
     const receipt = await f.batch(['a', 'b', 'c', 'd', 'e']);

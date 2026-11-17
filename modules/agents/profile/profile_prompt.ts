@@ -2,7 +2,7 @@
  * Prompt tab - inspector and editor for system prompt composition.
  */
 import { Notice } from 'obsidian';
-import { FACTORY_DEFAULTS, DECISION_TREE_GROUPS, DECISION_TREE_DEFAULTS } from '../../prompts/index.js';
+import { FACTORY_DEFAULTS, renderMobileEnvironment, DECISION_TREE_GROUPS, DECISION_TREE_DEFAULTS } from '../../prompts/index.js';
 import { HiddenFileEditorModal } from './HiddenFileEditorModal.js';
 import { StartPromptGeneratorModal } from './StartPromptGeneratorModal.js';
 import { UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
@@ -327,6 +327,7 @@ function _renderPromptEditor(ctx: ProfileCtx, el: HTMLElement) {
     // w YAML-ach userów (bez migratora - nikt ich nie czyta).
     const overrideDefs = [
         { key: 'environment', label: t('profile.prompt.environment'), icon: UiIcons.globe(12) },
+        ...(ctx.agentManager.getMobileEnvironment() ? [{ key: 'mobile_environment', label: t('prompt.label.mobile_environment'), icon: UiIcons.globe(12) }] : []),
         { key: 'rules', label: t('profile.prompt.rules_section'), icon: UiIcons.clipboard(12) },
     ];
 
@@ -357,7 +358,8 @@ function _renderPromptEditor(ctx: ProfileCtx, el: HTMLElement) {
         const body = sectionEl.createDiv({ cls: 'cs-prompt-override__body cs-collapsed' });
         header.addEventListener('click', () => { body.classList.toggle('cs-collapsed'); });
 
-        const effectiveText = (globalDefaults[def.key] as string | undefined) || FACTORY_DEFAULTS[def.key as keyof typeof FACTORY_DEFAULTS] || '';
+        const mobile = ctx.agentManager.getMobileEnvironment();
+        const effectiveText = (globalDefaults[def.key] as string | undefined) || (def.key === 'mobile_environment' && mobile ? renderMobileEnvironment(mobile) : FACTORY_DEFAULTS[def.key as keyof typeof FACTORY_DEFAULTS]) || '';
         if (effectiveText) {
             const refBlock = body.createDiv({ cls: 'cs-prompt-ref' });
             const refLabel = refBlock.createDiv({ cls: 'cs-prompt-ref__label' });
