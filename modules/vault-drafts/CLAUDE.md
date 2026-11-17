@@ -1,7 +1,7 @@
 # modules/vault-drafts/
 
 P1–P5 wersji 2.4.7: trwały magazyn, warstwowy widok i przegląd kopii roboczych.
-Runtime odtwarza magazyn przed rejestracją delegacji. Nie importuje runtime Obsidiana, runnera, czatu ani MCPClient; port adaptera używa wyłącznie typu DataAdapter.
+Runtime odtwarza magazyn przed wykonaniem delegacji, od F2n już po gotowości pluginu. Nie importuje runtime Obsidiana, runnera, czatu ani MCPClient; port adaptera używa wyłącznie typu DataAdapter.
 Jedyny port zapisu do bazowego vaulta należy do jawnego DraftReview; magazyn i widok pozostają odizolowane.
 
 Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), a od P3 runner tworzy widok/host wyłącznie po jawnym wstrzyknięciu
@@ -193,8 +193,8 @@ recovery-required. Osobne testy sprawdzają rozbieżny wynik, restart, GC pokwit
 i cofnięcie uprawnień podczas trwałego checkpointu.
 
 Host review `createDraftReviewHost(app)` jest w tools (barrel). Nie uruchamia się
-samodzielnie. Runtime P5 współdzieli jeden store i wykonuje restore przed rejestracją
-narzędzia. GC zachowuje pokwitowania i bloby używane przez następników.
+samodzielnie. Runtime P5 współdzieli jeden store i wykonuje restore przed dopuszczeniem wykonania
+narzędzia (od F2n definicje są rejestrowane przed skanem). GC zachowuje pokwitowania i bloby używane przez następników.
 Testy: `modules/tools/SubagentChangesTool.test.ts` (publiczne MCP, rzeczywisty system
 uprawnień, host review, trwałe bajty i restart, kontrolowane bariery),
 `modules/ui-components/DiffModal.test.ts` (nowe warianty DOM obok starych asercji).
@@ -466,7 +466,7 @@ Usuwamy najpierw kopie bez wskazujących je następników; dopiero skuteczne usu
 zwalnia ich krawędzie. Stary rozstrzygnięty łańcuch może zniknąć w jednym przebiegu,
 ale pending, świeża kopia, nierozpoznany układ lub inna ochrona następników zachowuje
 cały wskazywany łańcuch. Cykl referencji pozostaje chroniony. Awaria przerywa przebieg
-przed usunięciem poprzedników pozostającego manifestu. Start nadal poprzedza admisję biegów.
+przed usunięciem poprzedników pozostającego manifestu. Restore i początkowe GC nadal poprzedzają admisję biegów, od F2n poza startem pluginu.
 Dokładnie 30 dni, czas z przyszłości i zegar wcześniejszy od createdAt/updatedAt
 nie kwalifikują kopii. Nie ma TTL nierozstrzygniętych zmian ani applying/recovery-required.
 Accepted po operacji destrukcyjnej zachowuje recoveryBlob: taki katalog nie wygasa
@@ -498,3 +498,27 @@ manifest z takim układem powoduje issue i blokuje GC. Nie osłabiamy walidacji 
 Liczniki F2k pozostają bez zmian: start 1/20 pokwitowań to 5/81 operacji portu
 oraz 12/145 adaptera mobile; delegacja 11/11 portu i 54/54 adaptera mobile.
 Testy offline nie dowodzą trwałości rmdir/rename ani czasu I/O na Androidzie/iOS.
+
+
+## Mobile M4 F2n - bramka odtworzenia
+
+Format, walidacja, retencja, naprawy i algorytm skanu pozostają bez zmian.
+Composition root wykonuje na ścieżce startu tylko istniejący mobilny stat
+obecności (desktop: 0 I/O), a restore + początkowe GC zaczynają się po `_ready`.
+Jedna obietnica w tools poprzedza dostęp do store/persistence/SubRunDrafts/review;
+wewnętrzne API tego modułu nadal wymaga od zaufanego inicjalizatora await restore.
+Nie dodajemy leniwego restore do pojedynczych metod ani drugiego skanu.
+Pełny koszt dla 1/20 pokwitowań pozostaje 12/145 operacji adaptera mobile
+oraz 5/81 operacji portu; zmieniło się ich położenie względem gotowości pluginu.
+
+Store trafia do rejestru dopiero po początkowym GC. Zdarzenie draft:changed
+odświeża synchroniczne projekcje czatu; modele i decyzje review czekają na bramkę,
+a zwykła rozmowa i narzędzia live nie czekają. Diagnostyka pobiera stan końcowy.
+Lista wszystkich konsumentów i granice oczekiwania: `../tools/CLAUDE.md`, F2n.
+
+Zamknięcie runtime odcina I/O portu, także kolejne kroki mobilnego cleanupTemporary.
+Trwający odczyt może fizycznie skończyć się później, ale nie uruchomi dalszych
+napraw ani GC. Zamykanie nie czeka na zawieszony adapter; rozpoczętego rename
+nadal nie można cofnąć (ograniczenie F2a). Testy F2n przez src/main sprawdzają
+unload przy otwartej kopii wymagającej naprawy, starym pokwitowaniu oraz reload.
+Testy nie zastępują próby Android/iOS z ubijaniem aplikacji i dużym magazynem.

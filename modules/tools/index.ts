@@ -159,3 +159,5 @@ export { createDraftReviewHost } from './draftReviewHost.js';
 export { initializeVaultDrafts, desktopDraftPorts, mobileDraftPorts } from './vaultDraftRuntime.js';
 
 export type { DraftStartupProgress } from './vaultDraftRuntime.js';
+
+export { DraftStartupTask } from './draftStartupTask.js';

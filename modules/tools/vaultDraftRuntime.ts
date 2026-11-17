@@ -1,3 +1,5 @@
+import { startupAdapter, startupStorage } from './draftStartupTask.js';
+import type { DraftStartupTask } from './draftStartupTask.js';
 import type { App } from 'obsidian';
 import { hostWindow } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
@@ -21,6 +23,7 @@ export async function initializeVaultDrafts(input: {
     registry: SubTaskRegistry; clock?: DraftClock;
     /** Mobile-only empty namespace probe. Errors must propagate, never mean empty. */
     storagePresent?: () => Promise<boolean>;
+    lifetime?: DraftStartupTask;
     onProgress?: (progress: DraftStartupProgress) => void;
 }) {
     const registry = input.registry;
@@ -28,7 +31,7 @@ export async function initializeVaultDrafts(input: {
         task.plan?.planId === planId && ['waiting', 'running'].includes(task.status));
     const keepRun = (id: string) => keepPlan(registry.getTask(id)?.plan?.planId);
     const keepThread = (id: string) => { const thread = registry.getThread(id); return !!thread && thread.phase !== 'closed'; };
-    const persistence = new DraftPersistence(input.storage, input.hasher);
+    const persistence = new DraftPersistence(startupStorage(input.storage, input.lifetime), input.hasher);
     const store = new DraftStore(persistence, input.vault, input.clock ?? { now: () => Date.now() }, manifest => {
         const task = registry.getTask(manifest.runId);
         return !!task && ['waiting', 'running'].includes(task.status)
@@ -39,47 +42,56 @@ export async function initializeVaultDrafts(input: {
     const observedPresence = input.storagePresent ? present : undefined;
     input.onProgress?.({ stage: 'restore', present: observedPresence });
     const recovered = present ? await store.restore() : { issues: [] };
+    input.lifetime?.check();
     input.onProgress?.({ stage: 'cleanup', present: observedPresence, recoveryIssues: recovered.issues.length });
     const drafts = new SubRunDrafts(store, persistence, input.vault, () => parseDraftId(crypto.randomUUID()));
     drafts.setRetention(keepRun, keepThread);
-    registry.attachDraftStore(store);
     let pending: Promise<void> = Promise.resolve();
     let running = false, requested = false;
+    let disposed = false;
     const collect = () => {
+        if (disposed || input.lifetime?.closed) return;
         drafts.prune();
         requested = true;
         if (running) return;
         running = true;
         pending = Promise.resolve().then(async () => {
             try {
-                while (requested) {
+                while (requested && !disposed && !input.lifetime?.closed) {
                     requested = false;
                     drafts.prune();
                     try { await store.collectResolved(); }
-                    catch (error) { log.warn('VaultDrafts', 'Payload cleanup failed', error); }
+                    catch (error) { if (!input.lifetime?.closed) log.warn('VaultDrafts', 'Payload cleanup failed', error); }
                 }
             } finally { running = false; }
         });
     };
-    const off = ['thread:closed', 'task:finished', 'task:plan', 'draft:changed'].map(event => registry.events.on(event, collect));
     const review = new DraftReview(store, persistence, input.vault);
     if (present) collect();
     await pending;
+    input.lifetime?.check();
+    registry.attachDraftStore(store);
+    registry.events.emit('draft:changed');
+    const off = ['thread:closed', 'task:finished', 'task:plan', 'draft:changed'].map(event => registry.events.on(event, collect));
     return { store, persistence, drafts, review, tool: createSubagentChangesTool(review), issues: recovered.issues, present: observedPresence,
         flush: async () => {
             let observed: Promise<void>;
-            do { observed = pending; await observed; } while (observed !== pending);
-        }, dispose: () => { for (const unsubscribe of off) unsubscribe(); } };
+            do {
+                if (input.lifetime?.closed) return;
+                observed = pending;
+                await (input.lifetime ? Promise.race([observed, input.lifetime.stopped]) : observed);
+            } while (observed !== pending);
+        }, dispose: () => { disposed = true; for (const unsubscribe of off) unsubscribe(); } };
 }
 
 /** Mobile capability boundary; never reads desktop capabilities or falls back to live writes. */
-export function mobileDraftPorts(app: App): Pick<Parameters<typeof initializeVaultDrafts>[0], 'storage' | 'vault' | 'hasher' | 'storagePresent'> {
+export function mobileDraftPorts(app: App, lifetime?: DraftStartupTask): Pick<Parameters<typeof initializeVaultDrafts>[0], 'storage' | 'vault' | 'hasher' | 'storagePresent'> {
     const adapter = app.vault.adapter;
     const methods = ['list', 'readBinary', 'writeBinary', 'rename', 'remove', 'stat', 'mkdir'] as const;
     if (!adapter || methods.some(name => typeof adapter[name] !== 'function'))
         throw new Error('Adapter draft storage unavailable');
     return {
-        storage: new AdapterDraftStorage(adapter),
+        storage: new AdapterDraftStorage(startupAdapter(adapter, lifetime)),
         storagePresent: async () => (await adapter.stat(DRAFT_ROOT)) !== null,
         vault: { ...createDraftReviewHost(app), index: createDraftFileIndex(app), list: path => adapter.list(path) },
         hasher: { sha256: async bytes => Array.from(new Uint8Array(await hostWindow.crypto.subtle.digest('SHA-256', bytes.slice().buffer)))

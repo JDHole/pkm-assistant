@@ -923,7 +923,8 @@ Testy P4: `SubagentChangesTool.test.ts`; dotychczasowe asercje pozostają bez zm
 podpina projekcję rejestru, tworzy SubRunDrafts/DraftReview i zwraca narzędzie
 `subagent_changes`, issues, flush i dispose. `desktopDraftPorts(app)` waliduje
 zdolności filesystemu i dostarcza prywatny DesktopDraftStorage oraz review/view I/O.
-Composition root czeka na restore przed rejestracją delegacji i przeglądu. Narzędzie
+Od F2n composition root rejestruje definicje od razu, a wykonanie delegacji i przeglądu
+czeka na wspólną bramkę restore + początkowego GC (po `_ready`). Narzędzie
 należy do manifestu delegation i tej samej grupy osi uprawnień agents.
 
 Wyniki z kopią dodają draftSummary, draft_id i instrukcję subagent_changes; zwrotki
@@ -1082,8 +1083,8 @@ Name/code czyta dopiero komenda diagnostyki, a raport waliduje je istniejącym
 słownikiem D2. Nowa obserwacja nie odczytuje żadnych pól błędu podczas startu;
 dotychczasowe przekazanie do loggera i wszystkie operacje I/O pozostają bez zmian.
 
-Cleanup oznacza podpięcie rejestru i pierwsze prune/collectResolved/oczekiwanie
-na pending. Dotychczasowy catch asynchronicznego collectResolved pozostaje:
+Cleanup oznacza pierwsze prune/collectResolved/oczekiwanie na pending, a od F2n
+podpięcie rejestru dopiero po ich zakończeniu. Dotychczasowy catch asynchronicznego collectResolved pozostaje:
 loguje awarię, ale nie odmawia startu. Taka awaria nadal kończy się ready;
 nie dodajemy nowego trybu awarii ani Notice. Sprzątanie stagingu należy do restore.
 Mobile nie pokazuje nowego Notice, desktopowy Notice pozostaje bez zmian.
@@ -1299,3 +1300,65 @@ writery treści; zapis live i edytowalna rama suba zachowują dotychczasowy kont
 Testy F2m w `runnerDrafts.test.ts` sprawdzają rzeczywiste żądania modelu przez
 publiczne delegate/sub_agent, dziedziczenie whitelisty, zamrożenie narzędzi wątku,
 odmowy zgadniętej nazwy bez skutków oraz tekst po zapisie i przegląd prowadzącego.
+
+
+## Mobile M4 F2n - skan kopii poza startem pluginu
+
+Obie platformy mają jedną ścieżkę. `src/main.initializeVaultDraftRuntime` sprawdza
+porty i wykonuje istniejącą mobilną sondę obecności (1 stat, zero zapisów), po czym
+rejestruje definicje. Desktop nie ma sondy i wykonuje tu 0 operacji portu.
+Koszt do powrotu z tej metody jest identyczny dla 0/1/20 pokwitowań. Po ustawieniu
+`_ready` composition root wywołuje idempotentne `DraftStartupTask.start()`.
+Nie używamy timera ani uruchamiania na żądanie pierwszego konsumenta.
+`initializeVaultDrafts` pozostaje pełnym asynchronicznym inicjalizatorem; jego
+bezpośredni, zaufani użytkownicy muszą awaitować wynik jak wcześniej.
+W produkcji otrzymuje zapamiętany wynik sondy, więc nie powtarza I/O obecności.
+
+Jedna obietnica `DraftStartupTask.ready` obejmuje restore, pierwsze GC i obsługę
+wyniku w composition root. Magazyn, persistence, drafts i review nie są publikowane
+przed końcem tego przebiegu. Restore przekazuje skan pierwszemu GC tak jak F2k;
+issues nadal blokują GC przez cały runtime. Rejestr dostaje store po GC i emituje
+`draft:changed`, by odświeżyć także kopie bez powiązanego zadania w RAM.
+Dalsze zdarzenia nadal mają jeden aktywny przebieg GC i jedną flagę oczekiwania.
+
+Mapa konsumentów:
+
+| Konsument | Granica gotowości |
+|---|---|
+| `delegate`, wszystkie akcje `sub_agent`, także kontynuacje i plany | Executor czeka na ready przed uruchomieniem istniejącej fabryki runnera; getter deps odczytuje końcowy SubRunDrafts albo dawny stan unavailable. |
+| `SubRunDrafts.open/recordLive/prune`, RunDraft, hosty i widoki runnera | Dostępne wyłącznie przez gotowy runtime, z delegacji dopuszczonej po bramce. |
+| `subagent_changes` list/accept/reject | Fasada list/decide czeka na ready; nie publikuje częściowej ani pustej listy po błędzie. |
+| `DraftReview`, persistence, bloby i store | Surowe obiekty pozostają lokalne do zakończenia inicjalizatora; późniejsi konsumenci dziedziczą tę granicę. |
+| `registry.attachDraftStore`, GC zdarzeń | Podpięcie i subskrypcje dopiero po restore i pierwszym GC; wcześniejsze zdarzenia nie dotykają magazynu. Ochrona czyta aktualny rejestr. |
+| Pasek czatu, `draftPresentation`, SubAgentBlock i szczegóły | Niezależne synchroniczne projekcje RAM/historii. Nie wykonują decyzji ani I/O. Podpięcie po GC i `draft:changed` dostarczają końcowy stan, bez await w renderowaniu zwykłej rozmowy. |
+| ApprovalModal i DiffModal | Powstają dopiero w review po przejściu fasady list/decide. |
+| Zwykłe MCP read/list/write i tura prowadzącego | Niezależne: używają live vaulta, nie runtime kopii. Ścieżka odczytu podsumowań przy renderowaniu czatu też nie czeka. |
+| Diagnostyka | Czeka na ready przed pobraniem faktów. Słownik i znaczenie końcowych wartości pozostają bez zmian. |
+| Unload i flush | Unload zamyka task przed zatrzymywaniem delegacji; zwalnia ready i sygnał stopped. Flush gotowego runtime czeka na kolejne GC, ale zamknięcie przerywa oczekiwanie. |
+
+Awaria skanu loguje dotychczasowy błąd i zachowuje notice desktopu oraz odmowę
+writera obu platform. Mobilna rozmowa i odczyt pozostają dostępne. Nieudane review
+już oczekujące na bramce dostaje istniejący read_error; po awarii definicja review
+jest usunięta jak przy dawnym nieudanym starcie. Issues zachowują recovery_error.
+Błąd rejestracji nadal propaguje i pozostaje etapem register również po skanie.
+Nie tworzymy drugiej rejestracji narzędzi po `_ready`.
+
+`draftStartupTask.ts` sprawdza zamknięcie przed i po każdej operacji storage,
+a na mobile także wewnątrz wieloetapowych operacji portu, przez wąski adapter.
+Wznowiony po unload odczyt nie uruchomi publikacji naprawy, sprzątania stagingu
+ani GC; nie podpina rejestru i nie wyświetla notice. Obietnice pracy mają odbiorcę
+odrzucenia. Nie da się cofnąć operacji adaptera już rozpoczętej przed unload;
+pozostaje ograniczenie rename z F2a. Nowy plugin dostaje nową bramkę i port.
+
+Testy F2n w `src/main.mobile.test.ts` uruchamiają produkcyjny composition root:
+0/1/20 pokwitowań, pełny onload z zatrzymanym skanem, list/accept/reject,
+publiczne MCP delegate/sub_agent z zapisem, live read, synchroniczną projekcję
+czatu, diagnostykę, awarię skanu, issues blokujące GC i unload/reload.
+Liczniki całego skanu nadal wynoszą 12/145 mobile i 5/81 portu dla 1/20 kopii.
+Stare testy końcowego stanu jawnie kończą nową fazę; ich asercje pozostają.
+Dodatkowe próby zatrzymują GC po zdarzeniu i potwierdzają zwolnienie flush przez
+unload oraz brak dalszych usunięć. Łącznie F2n ma 22 przypadki.
+Kontrola mutacyjna: przywrócenie `task.start(); await task.ready` przed powrotem
+ze startu magazynu daje 5 czerwonych z 6 testów kosztu (desktop 0/1/20,
+mobile 1/20). Pusty mobile nadal wymaga tylko jednego stat. Mutację usunięto.
+AVA mierzy operacje i kolejność, nie czas ani trwałość na fizycznym telefonie.

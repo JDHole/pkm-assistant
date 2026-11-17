@@ -53,6 +53,8 @@ import { MasterPasswordModal } from "../core/security/MasterPasswordModal.js";
 import {
   // Runtime + registry
   ToolRegistry,
+  DraftStartupTask,
+  createSubagentChangesTool,
   MCPClient,
   ServerManager,
   // Prawdziwy klient MCP - zewnętrzne serwery stdio/HTTP przez oficjalny SDK
@@ -216,6 +218,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     | { stage: 'not-started' | 'registry' | 'ports' | 'register' }
     | { stage: 'ready'; present: boolean | undefined; recoveryIssues: number } = { stage: 'not-started' };
   private draftStartupError: unknown;
+  private draftStartupTask?: DraftStartupTask;
   declare subTaskRegistry: SubTaskRegistry | null;
   declare _askUserChannels: AskUserChannels | null;
   declare subTaskNotifier: SubTaskNotifier | null;
@@ -471,6 +474,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   onunload() {
+    this.draftStartupTask?.dispose();
     this.diagnosticController?.abort();
     log.debug('Main', "Unloading PKM Assistant plugin");
     // Obsidian does not await onunload. Start every tab's pending writes while
@@ -943,6 +947,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     this.diagnosticStartupMs = Math.round(diagnosticFinishedAt - this.diagnosticStartedAt);
     this.diagnosticStartupPhases?.mark('finishMs', diagnosticFinishedAt);
     this._ready = true;
+    this.draftStartupTask?.start();
     for (const cb of this._readyCallbacks) {
       try { cb(); } catch (e) { log.error('Plugin', 'onReady callback error:', e); }
     }
@@ -968,6 +973,8 @@ export default class PkmAssistantPlugin extends PluginBase {
     const run = { cancelled: false, abort: () => { run.cancelled = true; controller?.abort(); consentModal?.close(); } };
     this.diagnosticController = run;
     try {
+      await this.draftStartupTask?.ready;
+      if (run.cancelled) return;
       const settings = this.env?.settings ?? {};
       const pkm = settings.pkmAssistant;
       const chat = pkm?.chat;
@@ -1093,44 +1100,88 @@ export default class PkmAssistantPlugin extends PluginBase {
     return obsidianAppEnabled;
   }
 
-  /** Restore the platform's private draft storage before admitting delegation. */
+  /** Probe only on the blocking path. The scan starts at _ready, before admission. */
   async initializeVaultDraftRuntime(toolRegistry: ToolRegistry) {
     this.draftStartup = { stage: 'registry' };
     this.draftStartupError = undefined;
-    try {
-      if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
-      this.draftStartup = { stage: 'ports' };
-      const ports = Platform.isMobile ? mobileDraftPorts(this.app) : desktopDraftPorts(this.app);
-      this.vaultDraftRuntime = await initializeVaultDrafts({ ...ports, registry: this.subTaskRegistry,
-        onProgress: progress => { this.draftStartup = progress; },
-      });
-      this.draftStartup = { stage: 'register' };
-    } catch (error) {
+    const mobile = Platform.isMobile;
+    let scan: (() => Promise<void>) | undefined;
+    const task = new DraftStartupTask(async () => { await scan?.(); });
+    this.draftStartupTask = task;
+    const failed = (error: unknown) => {
+      if (task.closed) return;
       this.draftStartupError = error;
       log.error('VaultDrafts', 'Draft runtime unavailable:', error);
-      if (!Platform.isMobile) new Notice(t('subagent.draft.unavailable'), 10000);
-    }
-    if (this.vaultDraftRuntime?.issues.length) {
-      log.warn('VaultDrafts', 'Recovery issues:', this.vaultDraftRuntime.issues);
-      new Notice(t('chat.subdraft.recovery_error', { count: this.vaultDraftRuntime.issues.length }), 10000);
-    }
+      if (!mobile) new Notice(t('subagent.draft.unavailable'), 10000);
+    };
+    let prepared = false;
+    let registrationFailed = false;
     try {
-      if (this.vaultDraftRuntime) toolRegistry.registerTool(this.vaultDraftRuntime.tool);
-      const delegationDeps = {
-        drafts: this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' as const },
-        isMobile: !!Platform?.isMobile,
+      if (!this.subTaskRegistry) throw new Error('Draft runtime requires the sub-task registry');
+      const registry = this.subTaskRegistry;
+      this.draftStartup = { stage: 'ports' };
+      const ports: ReturnType<typeof mobileDraftPorts> = mobile ? mobileDraftPorts(this.app, task) : desktopDraftPorts(this.app);
+      this.draftStartup = { stage: 'presence' };
+      const present = ports.storagePresent ? await ports.storagePresent() : undefined;
+      task.check();
+      prepared = true;
+      scan = async () => {
+        try {
+          const runtime = await initializeVaultDrafts({ ...ports, registry, lifetime: task,
+            ...(present !== undefined ? { storagePresent: async () => present } : {}),
+            onProgress: progress => { if (!task.closed && !registrationFailed) this.draftStartup = progress; },
+          });
+          if (task.closed) { runtime.dispose(); return; }
+          this.vaultDraftRuntime = runtime;
+          if (runtime.issues.length) {
+            log.warn('VaultDrafts', 'Recovery issues:', runtime.issues);
+            new Notice(t('chat.subdraft.recovery_error', { count: runtime.issues.length }), 10000);
+          }
+          if (!registrationFailed) this.draftStartup = { stage: 'ready', present: runtime.present, recoveryIssues: runtime.issues.length };
+        } catch (error) {
+          if (!registrationFailed) failed(error);
+          if (!task.closed && !this.vaultDraftRuntime) toolRegistry.unregisterTool('subagent_changes');
+        }
       };
-      toolRegistry.registerTool(createDelegateTool(this.app, delegationDeps));
-      toolRegistry.registerTool(createSubAgentTool(this.app, delegationDeps));
+    } catch (error) { failed(error); }
+    if (task.closed) return;
+    // Definitions are available at boot; their executors share the same admission gate.
+    const review = () => {
+      if (!this.vaultDraftRuntime) throw new Error('Draft runtime unavailable');
+      return this.vaultDraftRuntime.review;
+    };
+    const currentDrafts = () => this.vaultDraftRuntime?.drafts ?? { kind: 'unavailable' as const };
+    const delegationDeps = {
+      get drafts() { return currentDrafts(); },
+      isMobile: mobile,
+    };
+    try {
+      if (prepared || this.vaultDraftRuntime) toolRegistry.registerTool(createSubagentChangesTool({
+        list: async (...args) => {
+          await task.ready;
+          return task.closed ? { kind: 'denied' } : review().list(...args);
+        },
+        decide: async (...args) => {
+          await task.ready;
+          return task.closed ? { kind: 'denied' } : review().decide(...args);
+        },
+      }));
+      for (const tool of [createDelegateTool(this.app, delegationDeps), createSubAgentTool(this.app, delegationDeps)]) {
+        const execute: import('../modules/tools/index.js').ToolDefinition['execute'] = tool.execute.bind(tool);
+        toolRegistry.registerTool({ ...tool, execute: async (...args: Parameters<typeof execute>) => {
+          await task.ready;
+          if (task.closed) return { success: false, error: t('mcp.delegate.share.cancelled') };
+          return execute(...args);
+        } });
+      }
     } catch (error) {
+      registrationFailed = true;
       this.draftStartup = { stage: 'register' };
       this.draftStartupError = error;
       throw error;
     }
-    if (this.draftStartup.stage === 'register' && this.vaultDraftRuntime) {
-      this.draftStartup = { stage: 'ready', present: this.vaultDraftRuntime.present,
-        recoveryIssues: this.vaultDraftRuntime.issues.length };
-    }
+    // No scan for failed capability/probe. Ready is resolved with the existing fallback.
+    if (!prepared) task.start();
   }
 
   async _unlockSecureStorageAtStartup() {

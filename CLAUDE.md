@@ -283,3 +283,12 @@ Na obu platformach runner ukrywa `subagent_changes` przed każdym sub-agentem,
 a wynik zapisu w kopii wyjaśnia PL/EN, że propozycja czeka na decyzję zleceniodawcy.
 Ukrycie definicji porządkuje menu; egzekucyjna odmowa pozostaje granicą bezpieczeństwa.
 Kontrakt i testy opisują `modules/sub-agents/CLAUDE.md` oraz `modules/tools/CLAUDE.md`.
+
+
+## Mobile M4 F2n - skan kopii po gotowości pluginu
+
+Na obu platformach start wykonuje tylko istniejącą sondę obecności (mobile: 1 stat,
+desktop: 0 I/O). Restore i pierwsze GC ruszają po `_ready`; wspólna bramka chroni
+delegację, review i diagnostykę, bez blokowania zwykłej rozmowy. Unload zwalnia
+oczekujących i odcina dalsze I/O. Mapa konsumentów, pomiary i ograniczenia prób
+na urządzeniu są w `modules/tools/CLAUDE.md` i `modules/vault-drafts/CLAUDE.md`.

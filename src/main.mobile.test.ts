@@ -12,6 +12,15 @@ import { setLocale } from '../core/i18n/index.js';
 import { CHAT_PROVIDERS } from '../modules/models/index.js';
 import type { ExecutionContext } from 'ava';
 
+// Complete the deferred storage lifecycle where older tests assert the final state.
+function draftTask(host: object): import('../modules/tools/index.js').DraftStartupTask | undefined {
+    return Reflect.get(host, 'draftStartupTask');
+}
+async function finishDraftStartup(host: object) {
+    draftTask(host)?.start();
+    await draftTask(host)?.ready;
+}
+
 // Capture the named host Notice used by diagnostics, without changing the harness stub.
 const diagnosticNoticeModule = 'data:text/javascript,' + encodeURIComponent(`
 import { Notice as HostNotice } from 'obsidian';
@@ -60,7 +69,7 @@ function deferred() {
 }
 
 /** Full production registration, including the two optional built-in modules. */
-async function bootToolRegistry(t: ExecutionContext, mobile: boolean) {
+async function bootToolRegistry(t: ExecutionContext, mobile: boolean, setup?: (plugin: InstanceType<typeof Plugin>) => Promise<void>) {
     Platform.isMobile = mobile;
     const supportDir = process.env.PKM_TEST_SUPPORT_DIR;
     if (!supportDir) throw new Error('AVA harness preload is required');
@@ -93,6 +102,7 @@ async function bootToolRegistry(t: ExecutionContext, mobile: boolean) {
         else Reflect.deleteProperty(window, 'require');
         fs.rmSync(root, { recursive: true, force: true });
     });
+    await setup?.(plugin);
     await plugin.onload();
     await Promise.all(layouts.map(callback => callback()));
     t.is(plugin._ready, true);
@@ -327,6 +337,7 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         now = 1100;
         await Promise.all(layouts.map(callback => callback()));
         t.true(plugin._ready);
+        await draftTask(plugin)?.ready;
         if (failure !== 'mcp') {
             t.deepEqual(draftOperations, failure === 'restore' ? [
                 ['stat', '.pkm-assistant/subagent-drafts/v1'],
@@ -485,6 +496,7 @@ for (const failure of ['none', 'stat', 'missing-stat', 'restore', 'list', 'readB
             if (oldRequire) Object.defineProperty(window, 'require', oldRequire); else Reflect.deleteProperty(window, 'require');
         });
         await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
+        await finishDraftStartup(host);
         if (failure === 'none') {
             t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['subagent_changes', 'delegate', 'sub_agent']);
             t.deepEqual(adapter.calls, [{ operation: 'stat', path: '.pkm-assistant/subagent-drafts/v1' }]);
@@ -537,7 +549,11 @@ async function draftDiagnosticFixture(t: ExecutionContext, mobile: boolean) {
     });
     return {
         host,
-        start: () => Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry),
+        prepare: () => Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry),
+        start: async () => {
+            try { await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry); }
+            finally { await finishDraftStartup(host); }
+        },
         report: async () => {
             await Plugin.prototype.runDeviceDiagnostics.call(host as never);
             const paths = (await app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
@@ -644,6 +660,7 @@ test.serial('desktop draft startup restores real storage and registers review al
         fs.rmSync(root, { recursive: true, force: true });
     });
     await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
+    await finishDraftStartup(host);
     t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['subagent_changes', 'delegate', 'sub_agent']);
     t.deepEqual(notices, []);
 });
@@ -662,6 +679,7 @@ test.serial('F2b desktop without Node never falls back to the mobile adapter', a
         if (oldRequire) Object.defineProperty(window, 'require', oldRequire); else Reflect.deleteProperty(window, 'require');
     });
     await Plugin.prototype.initializeVaultDraftRuntime.call(host as never, host.toolRegistry);
+    await finishDraftStartup(host);
     t.deepEqual(host.toolRegistry.getAllTools().map(tool => tool.name), ['delegate', 'sub_agent']);
     t.deepEqual(notices, ['Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.']);
     t.is(errors.length, 1);
@@ -877,4 +895,310 @@ test.serial('D2 composition root: absent or failed host storage falls back to nu
         { loadLocalStorage() { throw new Error('read failed'); }, saveLocalStorage() {} },
         { loadLocalStorage: () => null, saveLocalStorage() { throw new Error('write failed'); } },
     ]) t.is(Plugin.prototype._loadDeviceId.call({ app } as never), null);
+});
+
+// F2n: synthetic receipts and proposals through the production composition root.
+const { mobileDraftPorts, desktopDraftPorts, MCPClient, createReadTool } = await import('../modules/tools/index.js');
+const { AdapterDraftStorage, DesktopDraftStorage, DraftStore, DraftPersistence, DRAFT_ROOT, parseVaultPath } = await import('../modules/vault-drafts/index.js');
+const { seedReceipts } = await import('../modules/tools/test-support/draftGCFixture.js');
+const { __test__: delegationTest, stopAllDelegations } = await import('../modules/tools/DelegateTool.js');
+const { __test__: modelTest } = await import('../modules/models/index.js');
+const draftOwner = { agentName: 'Tester', sessionPath: 'session.md', sessionEpoch: 'a'.repeat(32) };
+const portsFor = (app: Obsidian.App, mobile: boolean) => mobile ? mobileDraftPorts(app) : desktopDraftPorts(app);
+
+async function seedPending(app: Obsidian.App, mobile: boolean, open = false) {
+    const ports = portsFor(app, mobile);
+    const store = new DraftStore(new DraftPersistence(ports.storage, ports.hasher), ports.vault, { now: () => Date.now() });
+    const draft = await store.create({ draftId: 'previous', runId: 'previous', threadId: 'previous', owner: draftOwner });
+    await store.mutate(draft.draftId, { path: parseVaultPath('Previous.md'), source: { tool: 'write', callId: 'sample' }, value: { kind: 'text', text: 'Previous proposal' } });
+    if (!open) await store.seal(draft.draftId, 'finished');
+}
+function holdScan(app: Obsidian.App, mobile: boolean) {
+    const entered = deferred(), release = deferred(), returned = deferred();
+    if (mobile) {
+        const stat = app.vault.adapter.stat.bind(app.vault.adapter);
+        mock.method(app.vault.adapter, 'stat', async (path: string) => {
+            if (path === `${DRAFT_ROOT}/.staging`) { entered.resolve(); await release.promise; returned.resolve(); }
+            return stat(path);
+        });
+    } else {
+        const list = DesktopDraftStorage.prototype.list;
+        mock.method(DesktopDraftStorage.prototype, 'list', async function(this: InstanceType<typeof DesktopDraftStorage>, path: string) {
+            if (path === DRAFT_ROOT) { entered.resolve(); await release.promise; returned.resolve(); }
+            return list.call(this, path);
+        });
+    }
+    return { entered: entered.promise, release: release.resolve, returned: returned.promise };
+}
+function reviewContext() {
+    return { draftReview: { kind: 'main' as const, owner: draftOwner, authorize: () => true, approve: async () => true },
+        shouldAbort: () => false, resultBudgetChars: 0, effectiveResultBudgetChars: 12000,
+        authorizeFileRead: () => ({ allowed: true }), serializeFinalResult: JSON.stringify };
+}
+function writerHost(host: Awaited<ReturnType<typeof draftDiagnosticFixture>>['host']) {
+    const agent = { name: 'Tester', activeSubAgents: [{ name: 'child' }] };
+    const config = { name: 'child', description: 'Test', role: 'worker', model: 'openai/model', tools: ['write'],
+        prompt: 'Prepare a proposal', scope: null, max_iterations: 5, min_iterations: 1, max_tool_result_length: 15000, enabled: true };
+    const plugin = Object.assign(host, {
+        agentManager: { agents: new Map([[agent.name, agent]]), getAgent: () => agent, getActiveAgent: () => agent, resolveSubAgentConfig: () => config,
+            getAgentMemory: () => ({ paths: { brainFolder: '.pkm-assistant/agents/tester/brain' }, vault: host.app.vault,
+                appendSessionEvent: async () => 'saved' }) },
+        permissionSystem: { checkPermission: () => ({ allowed: true }), requiresApproval: () => false },
+        approvalManager: { requestApproval: async () => ({ result: 'approve' }) },
+        env: { settings: { pkmAssistant: { limits: { subagent_stall_timeout_ms: 0, model_synthesis_timeout_ms: 0 },
+            chat: { platform: 'openai', models: { openai: 'model' }, apiKeys: { openai: 'synthetic-key' } } } },
+            config: { chat: { providers: { openai: { info: { id: 'openai' } } }, http: { send: async () => ({ status: 200 }) }, transport: { open: async () => ({ status: 200, body: '' }) } } } },
+    });
+    host.toolRegistry.registerTool(createWriteTool());
+    host.toolRegistry.registerTool(createReadTool());
+    const client = new MCPClient(host.app, plugin as never, host.toolRegistry);
+    Object.assign(plugin, { mcpClient: client });
+    return { plugin, client, config };
+}
+
+for (const mobile of [false, true]) for (const count of [0, 1, 20]) {
+    test.serial(`F2n startup cost ${mobile ? 'mobile' : 'desktop'} ${count}`, async t => {
+        const f = await draftDiagnosticFixture(t, mobile);
+        if (count) await seedReceipts(portsFor(f.host.app, mobile), count);
+        let portCalls = 0, adapterCalls = 0;
+        const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+        for (const name of ['list', 'read', 'writeBlob', 'publish', 'remove'] as const) {
+            const original = prototype[name];
+            mock.method(prototype, name, function(this: unknown, ...args: unknown[]) {
+                portCalls++; return Reflect.apply(original, this, args);
+            });
+        }
+        for (const name of ['stat', 'list', 'readBinary', 'writeBinary', 'rename', 'remove', 'mkdir', 'rmdir'] as const) {
+            const original = f.host.app.vault.adapter[name];
+            mock.method(f.host.app.vault.adapter, name, function(this: unknown, ...args: unknown[]) {
+                adapterCalls++; return Reflect.apply(original, this, args);
+            });
+        }
+        await f.prepare();
+        t.deepEqual([portCalls, adapterCalls], mobile ? [0, 1] : [0, 0]);
+        await finishDraftStartup(f.host);
+        t.deepEqual([portCalls, adapterCalls], mobile
+            ? count === 0 ? [0, 1] : count === 1 ? [5, 12] : [81, 145]
+            : count === 0 ? [1, 0] : count === 1 ? [5, 0] : [81, 0]);
+        const result = await f.host.toolRegistry.getTool('subagent_changes')!.execute({ action: 'list' }, undefined, undefined, reviewContext());
+        t.like(result, { kind: 'listed', changes: Array.from({ length: count }, () => ({ path: 'new.md', status: 'rejected' })) });
+        t.is(f.host.vaultDraftRuntime?.store.list().length, count);
+    });
+}
+
+for (const mobile of [false, true]) for (const action of ['list', 'accept', 'reject'] as const) test.serial(`F2n full plugin ready with held scan: mobile=${mobile}, ${action}`, async t => {
+    let plugin!: InstanceType<typeof Plugin>;
+    let held!: ReturnType<typeof holdScan>;
+    const tools = await bootToolRegistry(t, mobile, async current => {
+        plugin = current;
+        await seedPending(current.app, mobile);
+        held = holdScan(current.app, mobile);
+    });
+    await held.entered;
+    t.is(plugin._ready, true);
+    let completed = false;
+    const listing = tools.getTool('subagent_changes')!.execute(action === 'list' ? { action } : { action, draft_id: 'previous', change_id: 'change-1', revision: 1 }, undefined, undefined, reviewContext()).then(value => { completed = true; return value; });
+    await Promise.resolve();
+    t.is(completed, false);
+    held.release();
+    const result = await listing;
+    if (action === 'list') t.like(result, { kind: 'listed', changes: [{ draft_id: 'previous', path: 'Previous.md', status: 'pending' }] });
+    else {
+        if (action === 'accept') t.like(result, { kind: 'accepted', attemptId: 'change-1-3', applied: { kind: 'file', bytes: 17,
+            hash: '4bd42b8f2fafac218f06d9ad4ec43228c19bd91b50a536f04b56eb35df7d0ab8' } });
+        else t.deepEqual(result, { kind: 'rejected' });
+        t.is(await plugin.app.vault.adapter.exists('Previous.md'), action === 'accept');
+        if (action === 'accept') t.is(await plugin.app.vault.adapter.read('Previous.md'), 'Previous proposal');
+    }
+});
+
+for (const mobile of [false, true]) test.serial(`F2n writer, review, diagnostics wait; live vault and chat projection proceed: mobile=${mobile}`, async t => {
+    const f = await draftDiagnosticFixture(t, mobile);
+    await f.host.app.vault.create('Live.md', 'Live content');
+    await seedPending(f.host.app, mobile);
+    const held = holdScan(f.host.app, mobile);
+    await f.prepare();
+    draftTask(f.host)!.start(); await held.entered;
+    const { plugin, client, config } = writerHost(f.host);
+    plugin.subTaskRegistry.createThread({ threadId: 'existing', name: 'child', owner: draftOwner, origin: draftOwner,
+        config: { subConfig: config, providerId: 'openai', modelId: 'model', options: { autonomy: 'yolo' }, limits: {}, toolNames: ['write'] } });
+    plugin.subTaskRegistry.endRun('existing', { successful: true, answer: 'Earlier answer' });
+    let modelCalls = 0;
+    modelTest.setChatModelFactory(() => { let calls = 0; return { providerId: 'openai', modelId: 'model', stopStream() {},
+        stream(_payload: unknown, handlers: { done(value: unknown): void }) {
+            modelCalls++; calls++;
+            handlers.done({ choices: [{ message: calls % 2 === 1 ? { role: 'assistant', content: '', tool_calls: [
+                { id: 'write-test', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: 'New.md', content: 'New proposal' }) } },
+            ] } : { role: 'assistant', content: 'Prepared' } }] });
+        },
+    } as never; });
+    t.teardown(async () => { stopAllDelegations('test'); await delegationTest._settleBackground(true); modelTest.reset(); });
+    const finished: string[] = [];
+    const writing = client.executeToolCall({ name: 'delegate', arguments: { task: 'Prepare', aspect: 'child', background: false } }, 'Tester',
+        { origin: draftOwner, autonomy: 'yolo' }).then(value => { finished.push('write'); return value; });
+    const resuming = client.executeToolCall({ name: 'sub_agent', arguments: { action: 'task', sub_id: 'existing', task: 'Continue', background: false } }, 'Tester',
+        { origin: draftOwner, autonomy: 'yolo' }).then(value => { finished.push('resume'); return value; });
+    const listing = client.executeToolCall({ name: 'subagent_changes', arguments: { action: 'list' } }, 'Tester',
+        { origin: draftOwner, autonomy: 'yolo' }).then(value => { finished.push('list'); return value; });
+    const report = f.report().then(value => { finished.push('report'); return value; });
+    t.like(await client.executeToolCall({ name: 'read', arguments: { path: 'Live.md', scope: 'vault' } }, 'Tester',
+        { origin: draftOwner, autonomy: 'yolo' }), { content: 'Live content' });
+    // This synchronous projection is used on the live chat render path, not as review authority.
+    t.deepEqual(plugin.subTaskRegistry.draftSummaries(draftOwner), []);
+    t.deepEqual([finished, modelCalls], [[], 0]);
+    held.release();
+    t.like(await listing, { kind: 'listed', changes: [{ draft_id: 'previous', path: 'Previous.md', status: 'pending' }] });
+    t.like(await writing, { success: true, started: true });
+    t.like(await resuming, { success: true, result: 'Prepared' });
+    await delegationTest._settleBackground(true);
+    t.deepEqual(plugin.subTaskRegistry.list().map(task => [task.status, task.result?.text]), [['done', 'Prepared'], ['done', 'Prepared']]);
+    t.is(modelCalls, 4);
+    t.is(await f.host.app.vault.adapter.exists('New.md'), false);
+    const runtime = f.host.vaultDraftRuntime!;
+    const created = runtime.store.list().find(draft => draft.draftId !== 'previous')!;
+    t.deepEqual(created.changes.map(change => [change.path, change.review.kind]), [['New.md', 'pending']]);
+    t.regex(await report, /\| drafts.stage \| OK \| \d+ \| ready \|/);
+    t.deepEqual(plugin.subTaskRegistry.draftSummaries(draftOwner).map(summary => summary.pending), [1, 1, 1]);
+    const continued = await client.executeToolCall({ name: 'sub_agent', arguments: { action: 'task', task: 'Revise', background: false,
+        sub_id: plugin.subTaskRegistry.listThreads(draftOwner)[0].threadId } }, 'Tester', { origin: draftOwner, autonomy: 'yolo' });
+    t.like(continued, { success: true, result: 'Prepared' });
+    t.is(modelCalls, 6);
+});
+
+for (const mobile of [false, true]) test.serial(`F2n background scan failure preserves refusals and diagnostic error: mobile=${mobile}`, async t => {
+    const f = await draftDiagnosticFixture(t, mobile);
+    await seedPending(f.host.app, mobile);
+    const held = holdScan(f.host.app, mobile);
+    const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+    const list = prototype.list;
+    mock.method(prototype, 'list', async function(this: unknown, path: string) {
+        if (path === DRAFT_ROOT) {
+            // Desktop's existing hold lives in the port; mobile's lives in staging stat.
+            if (!mobile) await Reflect.apply(list, this, [path]);
+            throw Object.assign(new TypeError('Synthetic scan failure'), { code: 'EACCES' });
+        }
+        return Reflect.apply(list, this, [path]);
+    });
+    const errors: unknown[][] = [];
+    mock.method(log, 'error', (...args: unknown[]) => errors.push(args));
+    await f.prepare(); draftTask(f.host)!.start(); await held.entered;
+    writerHost(f.host);
+    modelTest.setChatModelFactory(() => ({ providerId: 'openai', modelId: 'model', stream() { throw new Error('Writer must not start'); } }) as never);
+    t.teardown(async () => { stopAllDelegations('test'); await delegationTest._settleBackground(true); modelTest.reset(); });
+    const writing = f.host.toolRegistry.getTool('delegate')!.execute({ task: 'Prepare', aspect: 'child', background: false,
+        _invocationAgentName: 'Tester', _invocationOrigin: draftOwner, _invocationDelegationDepth: 1 }, f.host.app, f.host);
+    const review = f.host.toolRegistry.getTool('subagent_changes')!.execute({ action: 'list' }, undefined, undefined, reviewContext());
+    const reporting = f.report();
+    held.release();
+    t.like(await writing, { success: false, error: mobile
+        ? 'Sub-agent child error: Sub-agent writes through drafts did not start on this device. Run "Run device diagnostics". You can continue chatting and run read-only tasks.'
+        : 'Sub-agent child error: Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.' });
+    t.like(await review, { kind: 'denied', isError: true });
+    const report = await reporting;
+    t.regex(report, /\| drafts.stage \| ERROR \| \d+ \| restore \|/);
+    t.regex(report, /\| drafts.error.name \| OK \| \d+ \| TypeError \|/);
+    t.regex(report, /\| drafts.error.code \| OK \| \d+ \| EACCES \|/);
+    t.regex(report, /\| drafts.available \| OK \| \d+ \| false \|/);
+    t.deepEqual(errors.filter(args => args[0] === 'VaultDrafts').map(args => args.slice(0, 2)), [['VaultDrafts', 'Draft runtime unavailable:']]);
+    t.deepEqual(notices, mobile ? [] : ['Draft storage is unavailable. The sub-agent cannot prepare changes; check the recovery log.']);
+    t.deepEqual(f.host.toolRegistry.getAllTools().map(tool => tool.name), ['delegate', 'sub_agent', 'write', 'read']);
+});
+
+for (const mobile of [false, true]) test.serial(`F2n recovery issues notify and block GC for runtime: mobile=${mobile}`, async t => {
+    const f = await draftDiagnosticFixture(t, mobile);
+    await seedPending(f.host.app, mobile);
+    await seedReceipts(portsFor(f.host.app, mobile), 1, Date.now() - 31 * 86400000);
+    await f.host.app.vault.adapter.writeBinary(`${DRAFT_ROOT}/previous/manifests/000003.json`, new TextEncoder().encode('invalid synthetic manifest').buffer);
+    await f.start();
+    t.is(f.host.vaultDraftRuntime!.issues.length, 1);
+    t.deepEqual(notices, ['Some drafts could not be restored (1). See the log; files were preserved.']);
+    for (let i = 0; i < 3; i++) {
+        f.host.subTaskRegistry.events.emit('draft:changed');
+        await f.host.vaultDraftRuntime!.flush();
+    }
+    t.deepEqual(await portsFor(f.host.app, mobile).storage.list(`${DRAFT_ROOT}/receipt-0/manifests`), ['000004.json']);
+    t.like(await f.host.toolRegistry.getTool('subagent_changes')!.execute({ action: 'list' }, undefined, undefined, reviewContext()),
+        { kind: 'listed', changes: [{ path: 'Previous.md', status: 'pending' }, { path: 'new.md', status: 'rejected' }] });
+    const report = await f.report();
+    t.regex(report, /\| drafts.stage \| OK \| \d+ \| ready \|/);
+    t.regex(report, /\| drafts.recoveryIssues \| OK \| \d+ \| 1 \|/);
+});
+
+for (const mobile of [false, true]) test.serial(`F2n unload during scan cancels waiters, stops writes, reload restores: mobile=${mobile}`, async t => {
+    let plugin!: InstanceType<typeof Plugin>;
+    let held!: ReturnType<typeof holdScan>;
+    const tools = await bootToolRegistry(t, mobile, async current => {
+        plugin = current;
+        // Supply the host's non-recursive empty-directory contract; the harness mock uses fs.rm for rmdir(false).
+        if (mobile) mock.method(current.app.vault.adapter, 'rmdir', async (path: string, recursive: boolean) => {
+            t.is(recursive, false);
+            const adapter = current.app.vault.adapter as Obsidian.FileSystemAdapter;
+            fs.rmdirSync(`${adapter.getBasePath()}/${path}`);
+        });
+        await seedPending(current.app, mobile, true); // Requires a repair publication if allowed to finish.
+        await seedReceipts(portsFor(current.app, mobile), 1, Date.now() - 31 * 86400000);
+        held = holdScan(current.app, mobile);
+    });
+    await held.entered;
+    const pending = tools.getTool('delegate')!.execute({ task: 'Prepare', aspect: 'child' }, plugin.app, plugin);
+    const reviewing = tools.getTool('subagent_changes')!.execute({ action: 'list' }, undefined, undefined, reviewContext());
+    const warnings: unknown[][] = [];
+    mock.method(log, 'warn', (...args: unknown[]) => { warnings.push(args); });
+    const registry = plugin.subTaskRegistry!;
+    let writes = 0, registrations = 0;
+    const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+    for (const name of ['writeBlob', 'publish', 'remove'] as const) {
+        const original = prototype[name];
+        mock.method(prototype, name, function(this: unknown, ...args: unknown[]) { writes++; return Reflect.apply(original, this, args); });
+    }
+    const register = tools.registerTool.bind(tools);
+    mock.method(tools, 'registerTool', (tool: Parameters<ToolRegistry['registerTool']>[0]) => { registrations++; return register(tool); });
+    notices.length = 0;
+    plugin.onunload();
+    t.like(await pending, { success: false, error: 'Delegation with parent conversation cancelled. The sub-agent was not started.' });
+    t.deepEqual(await reviewing, { kind: 'denied', isError: true, message: 'Permission or approval to review this change was denied.' });
+    await draftTask(plugin)!.ready; // Does not wait for the stuck host I/O.
+    held.release(); await held.returned;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    t.deepEqual({ writes, registrations, notices, warnings, summaries: registry.draftSummaries(draftOwner) },
+        { writes: 0, registrations: 0, notices: [], warnings: [], summaries: [] });
+    const reloaded = { app: plugin.app, subTaskRegistry: new SubTaskRegistry(), toolRegistry: new ToolRegistry(),
+        vaultDraftRuntime: undefined as Awaited<ReturnType<typeof import('../modules/tools/index.js').initializeVaultDrafts>> | undefined };
+    t.teardown(() => { reloaded.vaultDraftRuntime?.dispose(); reloaded.subTaskRegistry.dispose(); });
+    await Plugin.prototype.initializeVaultDraftRuntime.call(reloaded as never, reloaded.toolRegistry);
+    await finishDraftStartup(reloaded);
+    t.deepEqual(reloaded.vaultDraftRuntime!.store.list().map(draft => [draft.draftId, draft.phase]),
+        [['previous', { kind: 'sealed', reason: 'restart' }]]);
+    t.like(await reloaded.toolRegistry.getTool('subagent_changes')!.execute({ action: 'list' }, undefined, undefined, reviewContext()),
+        { kind: 'listed', changes: [{ path: 'Previous.md', status: 'pending' }] });
+});
+
+for (const mobile of [false, true]) test.serial(`F2n unload releases flush during event GC: mobile=${mobile}`, async t => {
+    let plugin!: InstanceType<typeof Plugin>;
+    await bootToolRegistry(t, mobile, async current => { plugin = current; await seedPending(current.app, mobile); });
+    await draftTask(plugin)!.ready;
+    const runtime: Awaited<ReturnType<typeof import('../modules/tools/index.js').initializeVaultDrafts>> = Reflect.get(plugin, 'vaultDraftRuntime');
+    const reached = deferred(), release = deferred();
+    const prototype = mobile ? AdapterDraftStorage.prototype : DesktopDraftStorage.prototype;
+    const list = prototype.list;
+    mock.method(prototype, 'list', async function(this: unknown, path: string) {
+        if (path === DRAFT_ROOT) { reached.resolve(); await release.promise; }
+        return Reflect.apply(list, this, [path]);
+    });
+    const result = await plugin.toolRegistry!.getTool('subagent_changes')!.execute(
+        { action: 'reject', draft_id: 'previous', change_id: 'change-1', revision: 1 }, undefined, undefined, reviewContext());
+    t.deepEqual(result, { kind: 'rejected' });
+    await reached.promise;
+    let flushed = false, removals = 0;
+    const flushing = runtime.flush().then(() => { flushed = true; });
+    await Promise.resolve();
+    t.is(flushed, false);
+    const remove = prototype.remove;
+    mock.method(prototype, 'remove', function(this: unknown, path: string) { removals++; return Reflect.apply(remove, this, [path]); });
+    notices.length = 0;
+    plugin.onunload(); await flushing;
+    t.is(flushed, true);
+    release.resolve(); await new Promise<void>(resolve => setImmediate(resolve));
+    t.deepEqual([removals, notices], [0, []]);
+    t.deepEqual(await portsFor(plugin.app, mobile).storage.list(`${DRAFT_ROOT}/previous/manifests`), ['000001.json', '000002.json', '000003.json']);
 });

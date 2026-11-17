@@ -32,8 +32,8 @@ function argumentSchema(fields: ReturnType<typeof properties>): Schema {
                 revision: fields.revision } } satisfies Schema)),
     ] };
 }
-/** P4 exports the factory; P5 registers it only after store restore. Arguments are NEVER authority. */
-export function createSubagentChangesTool(review: DraftReview): ToolDefinition {
+/** P4 exports the factory; F2n supplies a facade awaiting restore before review. Arguments are NEVER authority. */
+export function createSubagentChangesTool(review: Pick<DraftReview, 'list' | 'decide'>): ToolDefinition {
     const fields = properties();
     // Providers receive a flat object; action-specific requirements stay private.
     const inputSchema = { type: 'object', additionalProperties: false, required: ['action'], properties: fields } satisfies Schema;
