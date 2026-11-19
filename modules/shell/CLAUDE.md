@@ -44,7 +44,7 @@ Każdy `extends Modal` z Obsidiana (onOpen/onClose lifecycle). Promise-based res
 
 | Plik | Co robi |
 |------|---------|
-| `ApprovalModal.ts` | Approval/deny modal dla AccessGuard. Action type badge, content preview, deny reason. Eksportuje `requestApproval(app, action)` używane przez `core/security/ApprovalManager`. Dla `external.call` renderuje `action.externalArgs` jako JSON (indent 2, cięcie ~1500 znaków, „(bez argumentów)" gdy pusto) - user widzi, co dokładnie leci do cudzego serwera. Dla `vault.write` z `action.rememberAvailable:true` (wołacz: `MCPClient`, krok 6) renderuje checkbox „Nie pytaj więcej w tej sesji" - `rememberForSession` w wyniku jest `true` WYŁĄCZNIE po literalnym Zatwierdź z zaznaczonym checkboxem, nigdy po Odrzuć/Przekieruj/„Zawsze zezwalaj" (ta ma już własną, trwałą pamięć). |
+| `ApprovalModal.ts` | Approval/deny modal dla AccessGuard. Action type badge, content preview, deny reason. Eksportuje `requestApproval(app, action)` używane przez `core/security/ApprovalManager`. Dla `external.call` renderuje `action.externalArgs` jako JSON (indent 2, pełne argumenty bez cięcia, „(bez argumentów)" gdy pusto) - user widzi, co dokładnie leci do cudzego serwera. Dla `vault.write` z `action.rememberAvailable:true` (wołacz: `MCPClient`, krok 6) renderuje checkbox „Nie pytaj więcej w tej sesji" - `rememberForSession` w wyniku jest `true` WYŁĄCZNIE po literalnym Zatwierdź z zaznaczonym checkboxem, nigdy po Odrzuć/Przekieruj/„Zawsze zezwalaj" (ta ma już własną, trwałą pamięć). |
 | Delegacja | `MCPClient` usuwa znane wartości kluczy API z kopii tekstu dla zgody; `ApprovalModal` maskuje wzorce w pełnym tekście przed skróceniem opisu i podglądu, także dla `sub_agent`. Argumenty wykonania pozostają bez zmian. |
 | `MCPServerEditorModal.ts` | Dodaj/edytuj ZEWNĘTRZNY serwer MCP (nazwa, id, transport stdio/http + pola, autostart, ostrzeżenie zaufania per transport). Zapis do ustawień pluginu (`data.json`), nie do vaulta - komenda/env/nagłówki niosą sekrety. Guzik „Sprawdź połączenie i pokaż narzędzia" (`ExternalMcpManager.previewTools` na configu z pól, bez zapisu; efemeryczne, nic nie rejestruje) + `enabled` zachowywane przy edycji (kill-switch usera nie odwraca się po edycji). Dostęp per agent żyje wyłącznie w `mcp_servers[]`. |
 | `ClaudeImportModal.ts` | Potwierdzenie importu serwerów MCP z Claude Desktop. Modal jest GŁUPI: dostaje gotowe wiersze (`buildImportRows` z `modules/tools/claudeConfigImport.ts`) i callback `onConfirm` - nie parsuje pliku, nie zna ustawień, nie zapisuje; cała logika siedzi u wołającego (`modules/tools/SettingsContent.ts`). Serwer, którego `id` już mamy w ustawieniach, ma checkbox odznaczony i zablokowany - import NIGDY nie nadpisuje istniejącej konfiguracji. |
@@ -398,3 +398,9 @@ próby przewijania dotykiem na Androidzie/iOS i przy większej czcionce systemow
 Telefon zawija wszystkie zakładki ustawień w wiersze z celami 44 px; aktywna zachowuje `mod-cta`. `openSection` przełącza sekcję przez ten sam hash co nawigacja.
 
 Edytor sekcji promptu udostępnia `mobile_environment` na mobile; przycisk fabryczny odtwarza kategorię urządzenia i domyślne możliwości. Na desktopie sekcja jest ukryta.
+
+P2: `MCPServerEditorModal` odrzuca id żywego `toolProviders` przed zapisem.
+`ApprovalModal` używa tej samej ścieżki external.call dla dostawców i MCP;
+pełny JSON pozostaje przewijalny. Test integracyjny długich argumentów:
+`modules/tools/ToolProviderRegistry.test.ts`; zapis kolidującego id i UI:
+`modules/tools/ToolProviderUi.test.ts`.

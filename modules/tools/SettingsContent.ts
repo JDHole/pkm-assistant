@@ -2,6 +2,7 @@ import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { persistOrRollback, applyServerKillSwitch } from './settingsPersist.js';
 import { ExternalMcpManager } from './ExternalMcpManager.js';
+import type { ToolProviderRegistry } from './ToolProviderRegistry.js';
 import type { ExternalMcpServerConfig, ExternalServerStatus } from './ExternalMcpManager.js';
 import { parseClaudeDesktopConfig, buildImportRows } from './claudeConfigImport.js';
 import type { ClaudeImportRow } from './claudeConfigImport.js';
@@ -56,6 +57,7 @@ export type ToolsSettingsCtx = Pick<SettingsSectionCtx, 'save' | 'icons' | 'Sett
     };
     owner: { app: App; render: () => unknown; openSection: (id: string) => void };
     plugin?: {
+        toolProviders?: Pick<ToolProviderRegistry, 'list'>;
         secretsStorage?: { passwordKey: unknown };
         serverManager?: { serverLoader?: { getServerCatalog?: () => ServerCatalogEntry[] } | null } | null;
         externalMcpManager?: {
@@ -224,7 +226,13 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
 
     const renderListing = () => {
         wrapper.empty();
-        if (servers.length === 0) {
+        const providers = plugin?.toolProviders?.list() ?? [];
+        for (const provider of providers) {
+            const row = wrapper.createDiv({ cls: 'mcp-provider-row' });
+            row.createEl('strong', { text: provider.name });
+            row.createDiv({ text: t('settings.mcp_provider_details', { id: provider.id, count: provider.toolCount }), cls: 'setting-item-description' });
+        }
+        if (servers.length === 0 && providers.length === 0) {
             wrapper.createEl('em', { text: t('settings.mcp_external_empty'), cls: 'setting-item-description' });
             return;
         }
@@ -249,7 +257,7 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
     const builtinNames = (): string[] => {
         try {
             const map = plugin?.toolRegistry?.getBuiltinServerMap?.();
-            return map ? Object.keys(map) : [];
+            return [...(map ? Object.keys(map) : []), ...(plugin?.toolProviders?.list().map(provider => provider.id) ?? [])];
         } catch { return []; }
     };
 

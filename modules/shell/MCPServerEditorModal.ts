@@ -20,6 +20,7 @@ type ErrLike = { message?: string };
 interface McpServerEditorPlugin extends PluginApi {
     toolRegistry?: ExternalToolRegistryLike;
     externalMcpManager?: ExternalMcpManager;
+    toolProviders?: { has(id: string): boolean };
 }
 
 /** Callback po udanym zapisie serwera. */
@@ -450,6 +451,11 @@ export class MCPServerEditorModal extends Modal {
 
         if (!f.name.trim()) {
             new Notice(t('modal.mcp_server_editor.error_name_required'));
+            return;
+        }
+
+        if (this.plugin.toolProviders?.has(f.id)) {
+            new Notice(t('mcp.provider.id_collision', { id: f.id }));
             return;
         }
 

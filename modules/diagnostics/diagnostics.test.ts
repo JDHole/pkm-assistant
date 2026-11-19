@@ -766,3 +766,20 @@ for (const locale of ['en', 'pl']) {
         });
     }
 }
+
+test('provider diagnostics include count and validated IDs, never labels or tool definitions', async t => {
+    const f = fixture();
+    f.input.facts = { 'mcp.providers.count': 2, 'mcp.providers.ids': ['local', 'plugin_two'],
+        'mcp.providers.names': ['Private label'], 'mcp.providers.tools': ['local__secret_tool'] };
+    const result = await runDeviceDiagnostics(f.input);
+    const saved = await f.adapter.read(result.path);
+    t.deepEqual(saved.split('\n').filter(line => line.startsWith('| mcp.')), [
+        '| mcp.providers.count | OK | 0 | 2 |', '| mcp.providers.ids | OK | 0 | local, plugin_two |',
+    ]);
+    f.input.facts = { 'mcp.providers.count': -1, 'mcp.providers.ids': ['local\nprivate'] };
+    const rejected = await runDeviceDiagnostics(f.input);
+    const invalid = await f.adapter.read(rejected.path);
+    t.deepEqual(invalid.split('\n').filter(line => line.startsWith('| mcp.')), [
+        '| mcp.providers.count | SKIPPED | 0 | Unavailable |', '| mcp.providers.ids | SKIPPED | 0 | Unavailable |',
+    ]);
+});

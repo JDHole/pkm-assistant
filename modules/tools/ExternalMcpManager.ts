@@ -213,6 +213,7 @@ export interface ExternalToolRegistryLike {
 
 /** Plugin widziany przez managera: rejestr, wersja i ustawienia z configami serwerów. */
 export interface ExternalMcpPluginLike {
+    toolProviders?: { has(id: string): boolean };
     manifest?: { version?: string };
     toolRegistry?: ExternalToolRegistryLike | null;
     env?: { settings?: { pkmAssistant?: { externalMcpServers?: unknown } } | null } | null;
@@ -478,6 +479,11 @@ export class ExternalMcpManager {
             log.info('ExternalMcpManager', `Pomijam połączenie z "${serverId}" — menedżer jest już zdemontowany`);
             return { success: false, error: 'Menedżer serwerów MCP jest zdemontowany' };
         }
+        if (this.plugin.toolProviders?.has(serverId)) {
+            const error = t('mcp.provider.id_collision', { id: serverId });
+            this._setStatus(serverId, { status: 'error', lastError: error, toolCount: 0 });
+            return { success: false, error };
+        }
         if (this._connections.has(serverId)) {
             const existing = this._connections.get(serverId);
             return { success: true, alreadyConnected: true, tools: existing!.toolNames };
@@ -551,6 +557,12 @@ export class ExternalMcpManager {
                 return { success: false, error: 'Menedżer serwerów MCP jest zdemontowany' };
             }
 
+            // A provider may register while the handshake awaits the remote server.
+            // Check every name before publishing anything (IDs/tools may contain "__").
+            if (this.plugin.toolProviders?.has(serverId)
+                || tools.some(tool => registry.getTool?.(`${serverId}__${tool.name}`)?.executeProvider)) {
+                throw new Error(t('mcp.provider.id_collision', { id: serverId }));
+            }
             const toolNames: string[] = [];
             for (const toolDef of tools) {
                 const wrapped = this._wrapTool(serverConfig, toolDef);

@@ -1792,6 +1792,11 @@ export const pl: Record<string, string> = {
   'modal.mcp_server_editor.new_title': 'Dodaj nowy serwer MCP',
   'modal.mcp_server_editor.error_write_failed': 'Nie udało się zapisać plików: {{error}}',
   // Serwery zewnętrzne (prawdziwy klient MCP: stdio = lokalny proces, http = zdalny serwer)
+    'mcp.provider.unavailable': 'To narzędzie wtyczki nie jest już dostępne.',
+    'mcp.provider.timeout': 'Narzędzie przekroczyło limit {{timeout}} ms',
+    'mcp.provider.invalid_result': 'Wyniku narzędzia nie da się zapisać jako JSON',
+    'mcp.provider.id_collision': 'Identyfikator „{{id}}” jest już używany przez dostawcę narzędzi z wtyczki.',
+    'settings.mcp_provider_details': 'Z innej wtyczki · ID: {{id}} · Narzędzia: {{count}}',
   'settings.mcp_external_header': 'Serwery zewnętrzne (MCP)',
   'settings.mcp_external_desc': 'Podłącz zewnętrzne serwery MCP: lokalny program (stdio, tylko desktop) albo zdalną usługę (HTTP, też mobile). Ich narzędzia trafiają do agentów, którym przypniesz serwer w profilu → Umiejętności → Konektory.',
   'settings.mcp_external_empty': 'Nie dodano żadnych serwerów zewnętrznych.',
@@ -1899,7 +1904,6 @@ export const pl: Record<string, string> = {
   // Pełne argumenty wywołania w modalu approvalu
   'approval.preview.external_args': 'Co dokładnie poleci do serwera',
   'approval.preview.external_args_empty': '(bez argumentów)',
-  'approval.preview.external_args_truncated': '... (przycięte - argumenty są dłuższe)',
   'approval.always_this_tool': 'Zawsze zezwalaj (to narzędzie)',
   'approval.always_this_tool_desc': 'Zapamięta zgodę dla TEGO narzędzia tego serwera. Inne narzędzia i serwery nadal będą pytać.',
   // Konektory w profilu agenta

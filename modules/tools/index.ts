@@ -163,3 +163,6 @@ export { initializeVaultDrafts, desktopDraftPorts, mobileDraftPorts } from './va
 export type { DraftStartupProgress } from './vaultDraftRuntime.js';
 
 export { DraftStartupTask } from './draftStartupTask.js';
+
+export { ToolProviderRegistry } from './ToolProviderRegistry.js';
+export type { PkmAssistantPublicApi, ToolProviderRegistration, ProviderTool, ProviderToolContext, ToolProviderHandle } from './ToolProviderRegistry.js';

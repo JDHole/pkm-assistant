@@ -338,6 +338,7 @@ for (const mobile of [false, true]) for (const failure of ['none', 'skin', 'agen
         now = 1100;
         await Promise.all(layouts.map(callback => callback()));
         t.true(plugin._ready);
+        if (failure === 'mcp') t.is(plugin.api, undefined, 'a partial registry must not publish the provider API');
         await draftTask(plugin)?.ready;
         if (failure !== 'mcp') {
             t.deepEqual(draftOperations, failure === 'restore' ? [
@@ -1507,4 +1508,55 @@ for (const mobile of [false, true]) test.serial(`F2o replacement waits for old r
     t.deepEqual(f.host.vaultDraftRuntime!.store.list().map(draft => [draft.draftId, draft.payloadCollected]), [['previous', true]]);
     t.deepEqual(await portsFor(f.host.app, mobile).storage.list(`${DRAFT_ROOT}/previous/blobs`), []);
     t.regex(await f.report(), /\| drafts.stage \| OK \| \d+ \| ready \|/);
+});
+
+for (const mobile of [false, true]) test.serial(`P2 public provider API: ready, execution, diagnostics and unload (${mobile ? 'mobile' : 'desktop'})`, async t => {
+    let plugin!: InstanceType<typeof Plugin>;
+    let api!: NonNullable<typeof plugin.api>;
+    let handle!: ReturnType<typeof api.registerToolProvider>;
+    let events = 0;
+    const registry = await bootToolRegistry(t, mobile, async host => {
+        plugin = host;
+        t.is(host.api, undefined);
+        const trigger = host.app.workspace.trigger.bind(host.app.workspace);
+        mock.method(host.app.workspace, 'trigger', (name: string, ...args: unknown[]) => {
+            if (name === 'pkm-assistant:api-ready') {
+                events++;
+                api = args[0] as typeof api;
+                t.is(host.api, api);
+                t.is(host._ready, true);
+                handle = api.registerToolProvider({ id: 'local', name: 'Local plugin', tools: [{
+                    name: 'read', description: 'Local read', inputSchema: { type: 'object' },
+                    execute: async (_args, context) => ({ profile: context.agentName, mobile: context.isMobile, keys: Object.keys(context).sort() }),
+                }] });
+            }
+            trigger(name, ...args);
+        });
+    });
+    t.is(events, 1); t.is(api.apiVersion, 1);
+    t.deepEqual(Object.keys(api).sort(), ['apiVersion', 'registerToolProvider']);
+    const agent = plugin.agentManager!.getActiveAgent()!;
+    t.true(!!agent?.name);
+    agent.mcp_servers = ['local'];
+    // Effective list mirrors the profile in production; this test changes the live profile directly.
+    agent.effective_mcp_servers = ['local'];
+    plugin.approvalManager!.approvalHandler = () => 'approve';
+    t.deepEqual(await plugin.mcpClient!.executeToolCall({ name: 'local__read', arguments: {} }, agent.name), {
+        profile: agent.name, mobile, keys: ['agentName', 'isMobile', 'signal'],
+    });
+    const { DiagnosticsConsentModal } = await import('../modules/diagnostics/index.js');
+    mock.method(DiagnosticsConsentModal.prototype, 'open', function(this: InstanceType<typeof DiagnosticsConsentModal>) {
+        this.onOpen(); diagnosticButtons(this)[0].onclick!();
+    });
+    await plugin.runDeviceDiagnostics();
+    const reports = (await plugin.app.vault.adapter.list('.pkm-assistant/diagnostics')).files.filter(path => path.endsWith('.md'));
+    const report = await plugin.app.vault.adapter.read(reports[0]);
+    t.true(report.includes('| mcp.providers.count | OK | 0 | 1 |'));
+    t.true(report.includes('| mcp.providers.ids | OK | 0 | local |'));
+    t.false(report.includes('local__read'));
+    plugin.onunload();
+    t.is(plugin.api, undefined);
+    handle.setTools([{ name: 'bad-name' } as never]); handle.unregister();
+    t.is(registry.getTool('local__read'), null);
+    t.throws(() => api.registerToolProvider({ id: 'other', name: 'Other', tools: [] }), { message: 'Provider registry is unloaded' });
 });

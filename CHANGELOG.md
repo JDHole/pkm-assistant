@@ -5,6 +5,15 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+- Public tool provider API v1 for installed Obsidian plugins, including local Android execution, per-agent opt-in, MCP approval gates, cancellation and timeouts.
+- Read-only plugin providers in MCP settings, agent connector selection, and provider count/IDs in diagnostics.
+
+### Fixed
+- External tool approval previews show the complete arguments instead of truncating at 1500 characters.
+
 ## 2.4.0 - 2026-10-27
 
 Sub-agents you can follow and continue: see their progress, stop individual runs, and return to

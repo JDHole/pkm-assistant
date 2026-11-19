@@ -52,6 +52,8 @@ bez ID pozostaje zwykłą wiadomością sterującą.
 1. **Built-in tools** - wbudowane narzędzia agenta (read, list, write, memory_save, delegate, web_search, ...), skompilowane w bundlu.
 2. **External MCP servers** - zewnętrzne serwery przez prawdziwy klient MCP (`ExternalMcpManager`, stdio/HTTP przez `@modelcontextprotocol/sdk`), konfigurowane w ustawieniach pluginu (`data.json`), NIE w vaulcie.
 
+3. **Plugin tool providers** — funkcje z innych zainstalowanych wtyczek, publiczne API v1, ta sama granica source:user co MCP (desktop/Android).
+
 Built-in narzędzia żyją w **9 manifestach** (`built-in-servers/`): `core`, `vault`, `memory`, `web`, `multimodal`, `delegation`, `artifacts`, `komunikator`, `app`. Skille NIE są osobnym serwerem MCP - są przepisami czytanymi przez prymityw `read` (indeks skilli idzie w system promptcie).
 
 ---
@@ -69,6 +71,7 @@ modules/tools/
 ├── ServerManager.ts        # lifecycle built-in serwerów + ToolRegistry rejestr
 ├── ServerLoader.ts         # ładowanie built-in manifestów
 ├── ExternalMcpManager.ts   # prawdziwy klient MCP (stdio/HTTP przez SDK); external tools → source:'user' RED
+├── ToolProviderRegistry.ts # public API v1: providers in RAM, validation, timeout/abort
 ├── ToolRegistry.ts         # registry + filterByAgent() + checkToolAxis() + BUILTIN_TOOL_MAP
 ├── MCPClient.ts            # egzekucja wywołań narzędzi: kanonizacja, bramki, approval, normalizeArgsAliases
 ├── toolEffects.ts          # czysty opis skutków narzędzi i weryfikator celów przez wstrzyknięte I/O
@@ -1421,3 +1424,46 @@ Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu tre�
 `obsidian_app render_check` jest domyślnie wyłączony i ukryty w schemacie; eksperymentalny przełącznik użytkownika działa tylko przy włączonej nawigacji Obsidiana po przeładowaniu pluginu; MCP odmawia przed zgodą i dostępem do portów. Po jawnym włączeniu wymaga `app.open`, jawnej tożsamości i ponownych kontroli uprawnień; sub-agenci są odrzucani. `ObsidianAppTool.ts` maskuje komentarze i używa skanera z `markdownFences.ts`, reeksportowanego przez `syntaxValidator.ts`, wyłącznie do liczenia bloków źródłowych. `counts_match` porównuje tylko liczby, a maska może nie rozpoznać danych w błędach innych wtyczek. Ograniczenia obserwacji i warunki włączenia opisuje `modules/obsidian-app/CLAUDE.md`.
 
 `syntaxValidator.ts` odmawia także nieobsługiwanych rodzajów przekazanych bezpośrednio do `checkSyntax` (problem `limit`); wyczerpujący switch chroni przed cichym sukcesem bez parsowania.
+
+
+## P2 — publiczne API dostawców narzędzi
+
+`ToolProviderRegistry` oraz typy `PkmAssistantPublicApi`, `ToolProviderRegistration`,
+`ProviderTool`, `ProviderToolContext`, `ToolProviderHandle` są eksportowane przez barrel.
+Composition root publikuje zamrożoną fasadę `plugin.api` z apiVersion:1 po `_ready`
+i emituje `pkm-assistant:api-ready`. Przed gotowością i po unload API jest undefined.
+Unload usuwa narzędzia i przerywa wykonania; stare uchwyty są no-op, stare API nie
+rejestruje do następcy. Rejestr żyje tylko w RAM, zero ładowania kodu z vaulta.
+Kontrakt i przykład JS: `docs/tool-providers.md`.
+
+Definicje mają `source:'user'`, serverName=id i nazwę `<id>__<tool>` jak MCP.
+MCPClient rozpoznaje `external.call` oraz pełne argumenty/approvalTarget po source,
+a nie tylko po ExternalMcpManager; RED, PermissionSystem, ApprovalManager, opt-in,
+sub-whitelista i budżet AgentLoop są wspólne. Istniejące yolo nadal pomija pytania,
+nie opt-in. ApprovalModal pokazuje pełny JSON bez dawnego cięcia 1500 znaków.
+Dostawca nie dostaje BuiltinToolExecutionContext ani hosta: typowany executeProvider
+otrzymuje z MCP nazwę profilu i abortSignal; wrapper tworzy dokładnie trzy pola
+agentName/isMobile/signal. Argumenty czyści wspólny stripInternalArgs.
+
+Walidacja całej listy poprzedza mutację. setTools atomowo zastępuje definicje;
+wykonanie pobranej wcześniej, już zastąpionej definicji odmawia. Schematy są kopiami
+JSON; wynik jest migawką JSON (niedopuszczalne także stratne wartości nested).
+Tablice JSON wracają jako tekst, bo tablice w AgentLoop oznaczają zaufane bloki
+multimodalne i omijają zwykły limit tekstu. Błędy bez stosu przechodzą maskSensitiveData.
+Timeout 30000 ms, integer 1000–120000: race zwraca błąd i abortuje sygnał.
+Stop/unregister/unload też zwalniają czekającego. Nie da się zatrzymać synchronicznego
+kodu blokującego event loop ani cofnąć skutków niekooperatywnego dostawcy.
+
+Nazwy built-in i id skonfigurowanych MCP są zarezerwowane przy rejestracji.
+Dostawca już żywy wygrywa z później dodanym MCP: editor/import odmawiają zapisu,
+manager odmawia connect przed handshake oraz po await przed publikacją. Po restarcie
+zapisana konfiguracja MCP rezerwuje ID jako pierwsza. Sprawdzane są również pełne
+nazwy narzędzi, bo `__` może wystąpić w id/nazwie. Zgody nadal wiążą id/nazwę,
+nie kryptograficzną tożsamość zainstalowanej wtyczki.
+
+SettingsContent pokazuje pozycje tylko do odczytu, profil przypina ten sam id w
+mcp_servers; napisy PL/EN, zawijanie na telefonie. Diagnostyka ma osobne
+mcp.providers.count/ids, bez nazw/opisów narzędzi. Testy: ToolProviderRegistry.test.ts
+(przez rzeczywiste MCP, PermissionSystem, ApprovalManager, modal, sub-executor i
+AgentLoop), ToolProviderUi.test.ts (render i klik), src/main.mobile.test.ts (pełny
+start, event, wykonanie, raport, unload na obu platformach).

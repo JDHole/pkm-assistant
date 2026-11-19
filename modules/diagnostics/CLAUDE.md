@@ -372,3 +372,13 @@ kształtów dla każdego nowego faktu. main.mobile.test.ts rozszerza literalny r
 produkcyjnego startu i komendy o nowe wiersze, zachowując wszystkie stare wiersze,
 czasy i asercje I/O. Zegar w testach nie mierzy wydajności Androida ani iOS;
 wybór optymalizacji startu wymaga raportu z fizycznego telefonu.
+
+## P2 — lokalni dostawcy narzędzi
+
+Composition root podaje osobne fakty `mcp.providers.count` i `mcp.providers.ids`
+z migawki rejestru RAM. Dotychczasowe mcp.total/stdio/http nadal liczą wyłącznie
+serwery MCP. Count jest nieujemną liczbą całkowitą; ids jest tablicą identyfikatorów
+pasujących w całości do `[a-z][a-z0-9_]{1,31}`, łączonych przecinkiem.
+To jawne rozszerzenie słownika o id lokalnych dostawców; nazwy, opisy i definicje
+narzędzi nie trafiają do raportu. Nie dodaje operacji I/O do startu.
+Test zapisanego raportu: diagnostics.test.ts i pełny start w src/main.mobile.test.ts.
