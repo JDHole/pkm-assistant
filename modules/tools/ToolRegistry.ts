@@ -41,6 +41,8 @@ export interface ToolDefinition {
      * deklarować je jako wymagane i konkretne (biwariancja metod), wołacz 1-argumentowy przejdzie.
      */
     execute(args: Record<string, unknown>, app?: unknown, plugin?: unknown, context?: BuiltinToolExecutionContext): Promise<unknown>;
+    /** Narrow invocation bridge for in-process providers; never receives host/built-in context. */
+    executeProvider?: (args: Record<string, unknown>, agentName: string | null, signal?: AbortSignal) => Promise<unknown>;
     /** Logical server this tool belongs to (for filterByAgent). */
     serverName?: string;
     /** 'built-in' | 'user' — narzędzia external MCP dostają 'user' (→ RED w classifyToolRisk). */

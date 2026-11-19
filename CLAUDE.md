@@ -295,3 +295,12 @@ Unload zwalnia oczekujących i odcina dalsze I/O; następca czeka na faktyczny k
 I/O poprzednika. Subskrypcje przed pierwszym GC zachowują jego zdarzenia.
 Mapa konsumentów, pomiary i ograniczenia prób
 na urządzeniu są w `modules/tools/CLAUDE.md` i `modules/vault-drafts/CLAUDE.md`.
+
+## P2 — lokalne narzędzia innych wtyczek
+
+`src/main.ts` publikuje API v1 po gotowości rejestru i emituje
+`pkm-assistant:api-ready`; unload usuwa API i dostawców. Jest to rejestracja gotowych
+funkcji zainstalowanej wtyczki, bez sandboxa i bez ładowania kodu z vaulta.
+Kontrakt, kolizje, wspólne bramki MCP i testy: `modules/tools/CLAUDE.md`;
+przykład dla autorów: `docs/tool-providers.md`. UI pokazuje dostawców tylko do
+odczytu i pozwala przypiąć id do profilu; diagnostyka podaje count/ids osobno od MCP.

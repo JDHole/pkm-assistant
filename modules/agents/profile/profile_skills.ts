@@ -23,7 +23,7 @@ import type { SidebarNav } from '../../shell/index.js';
 import type { ExternalServerUiRow } from '../../tools/index.js';
 
 type SkillTemplate = { name: string; slug: string; version?: number; description?: string };
-type Connector = { key: string; label: string; description: string; toolCount: number; icon: null };
+type Connector = { key: string; label: string; description: string; toolCount: number; icon: null; pluginProvider?: boolean };
 
 /**
  * @param {Object} ctx - shared context
@@ -319,7 +319,7 @@ function _renderKonektorySection(ctx: ProfileCtx, el: HTMLElement) {
     const grid = el.createDiv({ cls: 'cs-shards cs-shards--compact' });
     for (const server of connectors) {
         const pinned = formData.mcp_servers.includes('*') || formData.mcp_servers.includes(server.key);
-        const shard = grid.createDiv({ cls: `cs-shard cs-shard--mcp-server ${pinned ? 'cs-shard--filled' : 'cs-shard--empty'}` });
+        const shard = grid.createDiv({ cls: `cs-shard cs-shard--mcp-server ${server.pluginProvider ? 'cs-shard--plugin-provider cs-shard--big' : ''} ${pinned ? 'cs-shard--filled' : 'cs-shard--empty'}` });
 
         const iconEl = shard.createDiv({ cls: 'cs-shard__icon' });
         try {
@@ -356,20 +356,26 @@ function _renderKonektorySection(ctx: ProfileCtx, el: HTMLElement) {
  * @returns {Array<{key:string,label:string,description:string,toolCount:number,icon:null}>}
  */
 function _externalConnectors(plugin: AgentsPlugin): Connector[] {
+    const local = (plugin.toolProviders?.list() ?? []).map(provider => ({
+        key: provider.id, label: provider.name,
+        description: t('settings.mcp_provider_details', { id: provider.id, count: provider.toolCount }),
+        toolCount: provider.toolCount, icon: null, pluginProvider: true,
+    }));
+    const localIds = new Set(local.map(provider => provider.key));
     const transportDesc = (tr: string) => (tr === 'http'
         ? t('profile.skills.connector_transport_http')
         : t('profile.skills.connector_transport_stdio'));
     const mgr = plugin?.externalMcpManager as { listServersForUi?: () => ExternalServerUiRow[] } | undefined;
     if (mgr?.listServersForUi) {
         try {
-            return mgr.listServersForUi().map((s) => ({
+            return [...local, ...mgr.listServersForUi().filter(server => !localIds.has(server.id)).map((s) => ({
                 key: s.id, label: s.name, description: transportDesc(s.transport), toolCount: s.toolCount || 0, icon: null,
-            }));
+            }))];
         } catch { /* fall through to raw config */ }
     }
     const cfgs = plugin?.env?.settings?.pkmAssistant?.externalMcpServers as Array<{ id: string; name?: string; transport?: string }> | undefined;
-    if (!Array.isArray(cfgs)) return [];
-    return cfgs.map((c: { id: string; name?: string; transport?: string }) => ({
+    if (!Array.isArray(cfgs)) return local;
+    return [...local, ...cfgs.filter(server => !localIds.has(server.id)).map((c: { id: string; name?: string; transport?: string }) => ({
         key: c.id, label: c.name || c.id, description: transportDesc(c.transport || 'stdio'), toolCount: 0, icon: null,
-    }));
+    }))];
 }

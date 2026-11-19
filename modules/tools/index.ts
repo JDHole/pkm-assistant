@@ -166,3 +166,5 @@ export type { DraftStartupProgress } from './vaultDraftRuntime.js';
 export { DraftStartupTask } from './draftStartupTask.js';
 
 export { createViewImageTool } from './ViewImageTool.js';
+export { ToolProviderRegistry } from './ToolProviderRegistry.js';
+export type { PkmAssistantPublicApi, ToolProviderRegistration, ProviderTool, ProviderToolContext, ToolProviderHandle } from './ToolProviderRegistry.js';

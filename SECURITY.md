@@ -127,12 +127,11 @@ a co zostaje na głowie usera.
 
 - **Każde narzędzie zewnętrznego serwera jest RED - zawsze.** Rejestrujemy je z
   `source:'user'`, a `classifyToolRisk` daje wtedy czerwone światło niezależnie od tego, co
-  serwer o sobie deklaruje. Czerwone = **pierwsze użycie zawsze pyta**.
+  serwer o sobie deklaruje. Czerwone = **pierwsze użycie pyta w edge/all**; istniejące yolo pomija pytania, nie uprawnienia.
 - **"Zawsze zezwalaj" działa per KONKRETNE narzędzie**, nie hurtem na serwer. Reguła zapisuje
   się jako `external.call::<serwer>__<narzędzie>` - zgoda na "pokaż scenę" nie jest zgodą na
   "uruchom kod".
-- **Modal approvalu pokazuje PEŁNE argumenty wywołania** (sformatowany JSON, przycinany przy
-  ~1500 znakach). User zatwierdza konkretne dane, nie samą nazwę narzędzia.
+- **Modal approvalu pokazuje PEŁNE argumenty wywołania** (sformatowany JSON bez obcinania). User zatwierdza konkretne dane, nie samą nazwę narzędzia.
 - **Tożsamość i wewnętrzne znaczniki nie wychodzą na zewnątrz.** Wszystko z prefiksem
   `_invocation` (nazwa agenta, głębokość delegacji, przyszłe znaczniki) jest odcinane przed
   wysyłką - cudzy serwer nie dowiaduje się, kto i z którego poziomu go woła.
@@ -166,6 +165,34 @@ a co zostaje na głowie usera.
   sekretów.
 - **Instaluj tylko z zaufanych źródeł.** Serwer MCP to nie wtyczka w piaskownicy - to
   pełnoprawny program. Nie dodawaj serwera, którego autora i kodu nie umiesz wskazać.
+
+## Narzędzia dostarczane przez inne wtyczki Obsidiana
+
+Publiczne [API v1](docs/tool-providers.md) przyjmuje gotowe funkcje od wtyczek,
+które użytkownik sam zainstalował. Działa lokalnie także na Androidzie. PKM Assistant
+nie ładuje ani nie wykonuje skryptów z plików vaulta; decyzja „zero sandboxa custom-JS”
+pozostaje w mocy.
+
+Wywołania agenta przechodzą te same bramki co zewnętrzny MCP: source:user, RED,
+opt-in id dostawcy w mcp_servers, uprawnienia, pełny podgląd argumentów i zgoda
+per konkretne narzędzie. Zwykłe reguły autonomii (w tym yolo) pozostają wspólne.
+Sub-agenci mają tę samą whitelistę i odmowę narzędzi zewnętrznych w kopii roboczej.
+Wynik przechodzi zwykłą serializację/budżet, wyjątki wspólną maskę sekretów bez
+stosu. Maskowanie po wzorcach nie wykrywa wszystkich możliwych danych poufnych.
+
+Dostawca dostaje wyłącznie agentName/isMobile/signal, bez wewnętrznego kontekstu
+narzędzi wbudowanych. Timeout (domyślnie 30 s, zakres 1–120 s) oddaje błąd modelowi
+i abortuje sygnał. Stop/unregister/unload również przerywają oczekiwanie.
+Nie jest to izolacja kodu: wtyczka ma pełne uprawnienia Obsidiana i może działać
+poza API. Kod ignorujący anulowanie może dalej mieć skutki; synchroniczne
+blokowanie tego samego wątku blokuje także Obsidiana i zegary timeoutu.
+
+Walidacja jest atomowa. Id nie może kolidować z built-in, konfiguracją MCP ani
+innym dostawcą. Żywy dostawca blokuje późniejsze połączenie MCP pod tym id,
+także podczas handshake; po restarcie zapisana konfiguracja MCP rezerwuje id
+pierwsza. Reguły zgody identyfikują id/nazwę narzędzia, nie autora wtyczki.
+Wyładowanie usuwa dostawców; stare uchwyty są bezczynne. Wtyczka dostawcy powinna
+wywołać unregister przy własnym wyładowaniu i obsłużyć ponowne api-ready.
 
 ## Strażnicy delegacji i poczty agentów
 

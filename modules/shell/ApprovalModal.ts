@@ -10,9 +10,6 @@ import { t } from '../../core/i18n/index.js';
 import type { ApprovalAction, ApprovalModalResult } from '../../core/index.js';
 import { maskSensitiveData } from '../../core/index.js';
 
-/** Sufit długości JSON-a argumentów w modalu (dłuższe tniemy z dopiskiem). */
-const EXTERNAL_ARGS_LIMIT = 1500;
-
 /**
  * Ostatnia deska ratunku, gdy `JSON.stringify(externalArgs)` rzuca (cykl w strukturze) -
  * woła własny `toString` wartości. Osobna funkcja graniczna: dopiero jej wywołanie resetuje
@@ -437,9 +434,6 @@ export class ApprovalModal extends Modal {
                 // Cykl w strukturze - JSON.stringify rzucił. Ostatnia deska ratunku: własny
                 // toString wartości.
                 text = _rawToString(args);
-            }
-            if (text.length > EXTERNAL_ARGS_LIMIT) {
-                text = text.slice(0, EXTERNAL_ARGS_LIMIT) + '\n' + t('approval.preview.external_args_truncated');
             }
         }
         previewSection.createEl('pre', { cls: 'approval-content-preview' }).createEl('code', { text });

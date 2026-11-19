@@ -339,3 +339,12 @@ Dotychczasowe asercje S1a pozostają bez zmian.
 `AgentManager.getMobileEnvironment()` pobiera migawkę z composition root dla inspektora i edytora promptu; żywe okno czatu zamraża własną migawkę. Sekcja urządzenia jest edytowalna na mobile, a na desktopie nie występuje. `check_syntax` należy do grupy vault i przełącznika `read_notes`; istniejący agent z listą `disabled_tools` dostaje je, o ile nie jest na niej wyłączone. Nowy fabryczny researcher ma je na liście, a istniejące jawne listy subów nie są przepisywane.
 
 `move` należy do grupy vault i przełącznika zapisu; egzekucja sprawdza dodatkowo źródło jako odczyt lub usunięcie.
+
+P2: `profile/profile_skills.ts` dokłada `toolProviders.list()` do konektorów MCP,
+również gdy manager MCP jest niedostępny. Pozycja podaje nazwę, id, liczbę narzędzi
+i pochodzenie z innej wtyczki; klik zapisuje ten sam id do mcp_servers oraz
+preferred_servers. Żaden provider nie jest automatycznie przypinany. Dostawca
+zajmuje pełny wiersz istniejącej siatki, z widocznym opisem i celem dotyku 44 px.
+Przy konfiguracji MCP dodanej poza UI pod tym samym id profil pokazuje żywego
+dostawcę raz; kolidujący serwer nie zastępuje jego etykiety.
+Test renderowania i kliknięć PL/EN: `modules/tools/ToolProviderUi.test.ts`.

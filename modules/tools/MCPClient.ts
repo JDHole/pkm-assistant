@@ -19,7 +19,7 @@ import { isRuntimeSequence } from '../sub-agents/index.js';
 import type { RuntimeSequence, SubRunContext, SubTaskRegistry } from '../sub-agents/index.js';
 import { isOwnChildQuestionReply } from './subAgentQuestionReply.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
-import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
+import type { ToolDefinition, BuiltinToolExecutionContext } from './ToolRegistry.js';
 import { prepareSubToolExecution, isVaultContentWriter } from './subToolExecution.js';
 import type { VaultExecution, HostPlugin } from './subToolExecution.js';
 import { DraftError } from '../vault-drafts/index.js';
@@ -108,6 +108,7 @@ export interface ClientTool {
     execute(args: Record<string, unknown>, app?: unknown, plugin?: unknown, context?: BuiltinToolExecutionContext): Promise<unknown>;
     serverName?: string;
     source?: string;
+    executeProvider?: ToolDefinition['executeProvider'];
     contextExtractor?: (
         args: ToolCallArgs,
         ctx: { agentName: string | null; plugin: HostPlugin },
@@ -663,7 +664,7 @@ export class MCPClient {
         // Prefer tool-defined contextExtractor (moves switch logic into each tool factory).
         // Backward compat: switch below is fallback for tools that haven't migrated yet.
         const tool = this.toolRegistry?.getTool?.(toolName);
-        if (tool && typeof tool.contextExtractor === 'function') {
+        if (tool?.source !== 'user' && tool && typeof tool.contextExtractor === 'function') {
             try {
                 const extracted = tool.contextExtractor(args, { agentName, plugin: hostPlugin }) || {};
                 // Kanonizacja obejmuje TAKŻE tę ścieżkę - to nią chodzą dzisiejsze prymitywy
@@ -681,9 +682,8 @@ export class MCPClient {
 
         // Narzędzia zewnętrznych serwerów MCP (ExternalMcpManager) NIE są operacjami
         // vaultowymi → pusty targetPath = brak path-checków AccessGuard (wzór web/delegate).
-        // Rozpoznanie jawnie przez rejestr external managera - user-JS serwery serverManagera
-        // (też source:'user') nadal mają własne vault paths i NIE wpadają tutaj.
-        if (this.plugin?.externalMcpManager?.isExternalTool?.(toolName)) {
+        // The registry source is authoritative for both MCP and in-process providers.
+        if (tool?.source === 'user' || this.plugin?.externalMcpManager?.isExternalTool?.(toolName)) {
             // Szew: targetPath EMPTY -> checkPermission/AccessGuard bez pseudo-sciezki (agent z
             // focusFolders nie dostaje falszywego deny). approvalTarget = prefiksowana nazwa idzie
             // WYLACZNIE do approvala -> regula "zawsze zezwalaj" per KONKRETNE narzedzie
@@ -1026,7 +1026,7 @@ export class MCPClient {
 
             // 5. Check permissions (agent jest już zagwarantowany krokiem 2 - jedyny wyjątek to
             //    narzędzia pamięci, które mają WŁASNĄ bramkę, patrz `isMemoryTool` niżej).
-            let actionType = ACTION_TYPE_MAP[toolCall.name] || 'unknown';
+            let actionType = tool.source === 'user' ? 'external.call' : ACTION_TYPE_MAP[toolCall.name] || 'unknown';
             if (toolCall.name === 'obsidian_app' && argsWithContext.action === 'state') actionType = 'app.state';
             if (toolCall.name === 'obsidian_app' && argsWithContext.action === 'screenshot') actionType = 'app.screenshot';
             // Narzędzia zewnętrznych serwerów MCP (ExternalMcpManager) → akcja `external.call`.
@@ -1416,12 +1416,14 @@ export class MCPClient {
                 }
             }
             if (shouldAbort()) return { success: false, error: t('chat.substrip.status_aborted') };
-            let result = await tool.execute(
+            let result = await (tool.source === 'user' && tool.executeProvider
+                ? tool.executeProvider(argsWithContext, invocationAgentName, opts.abortSignal)
+                : tool.execute(
                 argsWithContext,
                 host.app,
                 host.plugin,
                 tool.source === 'built-in' ? builtInContext : undefined,
-            ) as ToolExecutionResult;
+            )) as ToolExecutionResult;
 
             if (opts.abortSignal?.aborted) return { success: false, error: t('chat.substrip.status_aborted') };
             if (draftWrite && result && typeof result === 'object' && toolResultStatus(result) !== 'error'

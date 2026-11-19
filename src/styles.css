@@ -1788,3 +1788,24 @@ body.is-phone .pkm-render-check-setting .checkbox-container::before {
 .pkm-render-check-setting.is-hidden {
   display: none;
 }
+
+/* Read-only in-process providers share the MCP settings list on desktop/mobile. */
+.mcp-provider-row {
+    min-width: 0;
+    padding: var(--size-4-3) 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    overflow-wrap: anywhere;
+}
+.cs-shards--compact .cs-shard--plugin-provider {
+    min-width: 0;
+    padding: 12px 48px 12px 12px;
+}
+.cs-shards--compact .cs-shard--plugin-provider .cs-shard__sub-label {
+    display: block;
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+.cs-shard--plugin-provider .cs-shard__corner-toggle {
+    min-width: 44px;
+    min-height: 44px;
+}

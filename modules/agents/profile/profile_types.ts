@@ -14,6 +14,7 @@ import type { SidebarNav } from '../../shell/index.js';
  * already returns early when `plugin.agentManager` is missing.
  */
 export interface AgentsPlugin extends AgentsPluginBase {
+    toolProviders?: Pick<import('../../tools/index.js').ToolProviderRegistry, 'list'>;
     agentManager: AgentManager;
 }
 

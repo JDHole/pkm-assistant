@@ -1,3 +1,5 @@
+import { ToolProviderRegistry } from '../modules/tools/index.js';
+import type { PkmAssistantPublicApi, ExternalMcpServerConfig } from '../modules/tools/index.js';
 import { parseDeviceId, scanMemoryConflicts } from '../modules/memory/index.js';
 import type { DeviceId } from '../modules/memory/index.js';
 import Obsidian from "obsidian";
@@ -203,9 +205,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   // `useDefineForClassFields` wyemitowałby `pole;` w ciele klasy i nadpisał wartości z bazy PO
   // `super()`. Realne typy z barreli modułów-właścicieli (import type wyżej); żadna instancja
   // klasy pluginu nie żyje poza tym plikiem, więc to jedyne miejsce, które je zestawia.
-  /** TS-boundary: nic w repo nie przypisuje `_api` (getter `api` jest martwy, zawsze `undefined`
-   * w runtime) - `unknown` jest jedynym prawdziwym typem, który tego nie kłamie. */
-  declare _api: unknown;
+
   readonly diagnosticBuildMarker = BUILD_MARKER;
   private diagnosticStartedAt = 0;
   private diagnosticStartupPhases: StartupTimer | null = null;
@@ -220,6 +220,9 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare toolRegistry: ToolRegistry | undefined;
   declare mcpClient: MCPClient | undefined;
   declare serverManager: ServerManager | undefined;
+  declare api: PkmAssistantPublicApi | undefined;
+  private providerApiUnloaded = false;
+  declare toolProviders: ToolProviderRegistry | undefined;
   declare externalMcpManager: ExternalMcpManager | undefined;
   declare permissionSystem: PermissionSystem | undefined;
   declare approvalManager: ApprovalManager | undefined;
@@ -291,7 +294,6 @@ export default class PkmAssistantPlugin extends PluginBase {
 
   // GETTERS
   get obsidian() { return Obsidian; }
-  get api() { return this._api; }
   async onload() {
     this.diagnosticStartedAt = performance.now();
     this.diagnosticStartupPhases = new StartupTimer(() => performance.now(), this.diagnosticStartedAt);
@@ -488,6 +490,9 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   onunload() {
+    this.providerApiUnloaded = true;
+    this.api = undefined;
+    this.toolProviders?.dispose();
     this.draftStartupTask?.dispose();
     this.diagnosticController?.abort();
     log.debug('Main', "Unloading PKM Assistant plugin");
@@ -821,6 +826,9 @@ export default class PkmAssistantPlugin extends PluginBase {
       // built-in. OFF = agent w ogóle ich nie widzi.
       const komunikatorEnabled = isKomunikatorEnabled(this.settings);
 
+      this.api = undefined;
+      this.toolProviders?.dispose();
+      this.toolProviders = undefined;
       this.toolRegistry = new ToolRegistry();
       // TS-boundary: `MCPClientPlugin.agentManager.getAgent()` (modules/tools) zwraca
       // `PermissionedAgent` (core/security/PermissionSystem.ts:21, `approvalToggles?:
@@ -921,6 +929,12 @@ export default class PkmAssistantPlugin extends PluginBase {
         // do `.message`, bez zmiany runtime (asercja, nie guard; `?.` zostaje jak było).
         log.warn('Plugin', 'External MCP autostart problem (ignorowane):', (e as { message?: string } | null)?.message);
       }
+      if (!this.providerApiUnloaded) {
+        this.toolProviders = new ToolProviderRegistry(this.toolRegistry, () => {
+          const pkm = this.env?.settings?.pkmAssistant as { externalMcpServers?: ExternalMcpServerConfig[] } | undefined;
+          return Array.isArray(pkm?.externalMcpServers) ? pkm.externalMcpServers.map(server => server.id) : [];
+        }, Platform.isMobile);
+      }
     } catch (e: unknown) {
       log.error('Plugin', 'MCP system FAIL:', e);
     }
@@ -964,6 +978,15 @@ export default class PkmAssistantPlugin extends PluginBase {
     this.diagnosticStartupMs = Math.round(diagnosticFinishedAt - this.diagnosticStartedAt);
     this.diagnosticStartupPhases?.mark('finishMs', diagnosticFinishedAt);
     this._ready = true;
+    if (this.toolProviders && !this.providerApiUnloaded) {
+      const providers = this.toolProviders;
+      // Expose only the stable contract, not registry internals or disposal methods.
+      this.api = Object.freeze({ apiVersion: 1 as const,
+        registerToolProvider: (provider: Parameters<PkmAssistantPublicApi['registerToolProvider']>[0]) =>
+          providers.registerToolProvider(provider),
+      });
+      this.app.workspace.trigger('pkm-assistant:api-ready', this.api);
+    }
     this.draftStartupTask?.start();
     for (const cb of this._readyCallbacks) {
       try { cb(); } catch (e) { log.error('Plugin', 'onReady callback error:', e); }
@@ -1054,6 +1077,8 @@ export default class PkmAssistantPlugin extends PluginBase {
           'startup.toolsMs': startup?.toolsMs,
           'startup.finishMs': startup?.finishMs,
           'agents.count': this.agentManager?.agents.size ?? null, 'tools.count': this.toolRegistry?.getAllTools().length ?? null,
+          'mcp.providers.count': this.toolProviders?.list().length ?? 0,
+          'mcp.providers.ids': this.toolProviders?.list().map(provider => provider.id) ?? [],
           'mcp.total': servers?.length ?? null, 'mcp.stdio': servers?.filter(server => server.transport === 'stdio').length ?? null,
           'mcp.http': servers?.filter(server => server.transport === 'http').length ?? null,
           'embedding.status': this.vaultIndexer?.getStatus().status ?? null,

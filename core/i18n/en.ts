@@ -1787,6 +1787,11 @@ export const en: Record<string, string> = {
   'modal.mcp_server_editor.new_title': 'Add new MCP server',
   'modal.mcp_server_editor.error_write_failed': 'Failed to write files: {{error}}',
   // External servers (real MCP client: stdio = local process, http = remote server)
+    'mcp.provider.unavailable': 'This plugin tool is no longer available.',
+    'mcp.provider.timeout': 'Tool timed out after {{timeout}} ms',
+    'mcp.provider.invalid_result': 'Tool result is not JSON serializable',
+    'mcp.provider.id_collision': 'The ID "{{id}}" is already used by a plugin tool provider.',
+    'settings.mcp_provider_details': 'From another plugin · ID: {{id}} · Tools: {{count}}',
   'settings.mcp_external_header': 'External servers (MCP)',
   'settings.mcp_external_desc': 'Connect external MCP servers: a local program (stdio, desktop only) or a remote service (HTTP, also mobile). Their tools reach the agents you pin the server to in profile → Skills → Connectors.',
   'settings.mcp_external_empty': 'No external servers added yet.',
@@ -1894,7 +1899,6 @@ export const en: Record<string, string> = {
   // Full call arguments in the approval modal
   'approval.preview.external_args': 'Exactly what will be sent to the server',
   'approval.preview.external_args_empty': '(no arguments)',
-  'approval.preview.external_args_truncated': '... (truncated - the arguments are longer)',
   'approval.always_this_tool': 'Always allow (this tool)',
   'approval.always_this_tool_desc': 'Remembers approval for THIS tool of this server. Other tools and servers will still ask.',
   // Connectors in the agent profile

@@ -100,6 +100,9 @@ const factFormats: Record<string, (value: unknown) => string | null> = {
     'memory.conflict.state': numberFact, 'memory.conflict.brain': numberFact,
     'memory.conflict.sessions': numberFact, 'memory.conflict.costLog': numberFact,
     'memory.conflict.unreadable': numberFact, 'memory.conflict.skipped': numberFact,
+    'mcp.providers.count': integerFact,
+    'mcp.providers.ids': value => Array.isArray(value) && value.every(id => shaped(id, /^[a-z][a-z0-9_]{1,31}$/, 32) !== null)
+        ? value.join(', ') : null,
     'mcp.total': numberFact, 'mcp.stdio': numberFact, 'mcp.http': numberFact,
     'embedding.status': value => typeof value === 'string' && ['idle', 'disabled_mobile', 'no_provider', 'building', 'ready', 'error'].includes(value) ? value : null,
     'drafts.stage': value => typeof value === 'string' && ['not-started', 'registry', 'ports', 'presence', 'restore', 'cleanup', 'register', 'ready'].includes(value) ? value : null,
