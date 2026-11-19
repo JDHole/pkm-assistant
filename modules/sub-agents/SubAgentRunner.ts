@@ -651,9 +651,6 @@ export class SubAgentRunner {
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
             let tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
-            if (this.drafts && tools.some(tool => tool.function.name === 'move')) {
-                throw new Error(t('mcp.move.draft_denied'));
-            }
             if (this.drafts && 'kind' in this.drafts) {
                 if (tools.some(tool => isVaultContentWriter(tool.function.name)) || options.draftDependencies?.length)
                     throw new Error(this.isMobile ? t('subagent.draft.unavailable_mobile') : t('subagent.draft.unavailable'));
@@ -1241,6 +1238,9 @@ export class SubAgentRunner {
         // trzyma resztę łańcucha bez zmian w emitowanym JS.
         const tools = (toolNames
             .filter(name => name !== 'ask_user' && name !== 'ask_parent' && name !== 'subagent_changes')
+            // Unsupported in drafts, including unavailable storage. Hide before writer
+            // detection so merely inheriting the default move tool never rejects a run.
+            .filter(name => name !== 'move' || !this.drafts)
             .map(name => this.toolRegistry.getTool(name))
             .filter(Boolean) as RunnerToolDefinition[])
             .filter((tool) => !parentVisible || parentVisible.has(tool.name))
@@ -1287,6 +1287,13 @@ export class SubAgentRunner {
         effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
     ) {
         log.debug('SubAgent', `_executeTool: ${toolCall.name} (agent: ${agentName || 'brak'})`);
+
+        // A stale transcript or guessed name must fail only this call, even when a
+        // read-only run has no overlay or uses the direct-execution fallback.
+        if (toolCall.name === 'move' && (this.drafts || (execOptions.vaultExecution && execOptions.vaultExecution.kind !== 'live'))) {
+            onFailure?.();
+            return t('subagent.tool_error', { name: toolCall.name, error: t('mcp.move.draft_denied') });
+        }
 
         // Fail-closed: never execute a tool outside the sub-agent's intersection whitelist,
         // regardless of which execution path (MCPClient or fallback) handles it.

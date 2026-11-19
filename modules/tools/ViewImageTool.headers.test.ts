@@ -1,6 +1,8 @@
 import test from 'ava';
 import { createViewImageTool } from './ViewImageTool.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
+import { readImageHeader } from './imageHeader.js';
+import { getLocale, setLocale } from '../../core/i18n/index.js';
 
 function header(format: string, width: number, height: number): ArrayBuffer {
     const b = new Uint8Array(40), v = new DataView(b.buffer);
@@ -80,6 +82,65 @@ test.serial('dimensions resize even a tiny file; release bitmap and canvas', asy
     t.teardown(() => { globalThis.createImageBitmap = original; globalThis.createEl = originalCreate; });
     t.like(await execute(header('png', 2000, 1000)), { kind: 'media', images: [{ mime: 'image/jpeg', base64: 'AQID' }] });
     t.deepEqual(drawn, [[1568, 784]]);
+    t.is(closed, 1);
+    t.deepEqual([canvas.width, canvas.height], [0, 0]);
+});
+
+// Valid 3x2 JPEG, generated locally with Pillow; APP1 below adds one TIFF orientation tag.
+const jpeg3x2 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAMDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCpRRRX1R45/9k=';
+function exifJpeg(orientation: number): ArrayBuffer {
+    const jpeg = Buffer.from(jpeg3x2, 'base64');
+    const app1 = [255, 225, 0, 34, 69, 120, 105, 102, 0, 0, // marker, size, Exif
+        73, 73, 42, 0, 8, 0, 0, 0, 1, 0, // little-endian TIFF and IFD count
+        18, 1, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0, 0, 0, 0, 0];
+    return Uint8Array.from([...jpeg.subarray(0, 2), ...app1, ...jpeg.subarray(2)]).buffer;
+}
+
+for (const locale of ['en', 'pl'] as const) for (let orientation = 1; orientation <= 8; orientation++) {
+    test.serial(`R2: JPEG EXIF ${orientation}, ${locale}: accept display dimensions and retain original bytes`, async t => {
+        const original = globalThis.createImageBitmap, previousLocale = getLocale();
+        setLocale(locale);
+        const width = orientation >= 5 ? 2 : 3, height = orientation >= 5 ? 3 : 2;
+        let closed = 0;
+        globalThis.createImageBitmap = async () => ({ width, height, close() { closed++; } }) as ImageBitmap;
+        t.teardown(() => { globalThis.createImageBitmap = original; setLocale(previousLocale); });
+        const bytes = exifJpeg(orientation);
+        t.deepEqual(readImageHeader(bytes), { mime: 'image/jpeg', width: 3, height: 2 });
+        t.deepEqual(await execute(bytes, 'phone.jpg'), {
+            kind: 'media', summary: `phone.jpg | image/jpeg | ${width}x${height} | ${bytes.byteLength} ${locale === 'pl' ? 'bajtów' : 'bytes'}`,
+            images: [{ mime: 'image/jpeg', base64: Buffer.from(bytes).toString('base64') }],
+        });
+        t.is(closed, 1);
+    });
+}
+
+for (const format of ['png', 'gif', 'VP8X', 'VP8L', 'VP8 ', 'jpeg']) {
+    test.serial(`R2: ${format} rejects incompatible decoded dimensions and closes bitmap`, async t => {
+        const original = globalThis.createImageBitmap;
+        let closed = 0;
+        globalThis.createImageBitmap = async () => ({ width: format === 'jpeg' ? 4 : 2, height: 3, close() { closed++; } }) as ImageBitmap;
+        t.teardown(() => { globalThis.createImageBitmap = original; });
+        t.deepEqual(await execute(header(format, 3, 2), 'misleading.jpg'), { success: false, error: 'Could not read or decode the image.' });
+        t.is(closed, 1);
+    });
+}
+
+test.serial('R2: rotated JPEG scales using display axes and releases resources', async t => {
+    const original = globalThis.createImageBitmap, originalCreate = globalThis.createEl;
+    let closed = 0;
+    const drawn: number[][] = [];
+    const canvas = { width: 0, height: 0,
+        getContext: () => ({ drawImage: (_b: unknown, _x: number, _y: number, w: number, h: number) => drawn.push([w, h]) }),
+        toBlob: (cb: (blob: Blob) => void) => cb(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' })),
+    };
+    globalThis.createEl = (() => canvas) as typeof createEl;
+    globalThis.createImageBitmap = async () => ({ width: 3000, height: 4000, close() { closed++; } }) as ImageBitmap;
+    t.teardown(() => { globalThis.createImageBitmap = original; globalThis.createEl = originalCreate; });
+    t.deepEqual(await execute(header('jpeg', 4000, 3000), 'phone.jpg'), {
+        kind: 'media', summary: 'phone.jpg | image/jpeg | 3000x4000 | 40 bytes',
+        images: [{ mime: 'image/jpeg', base64: 'AQID' }],
+    });
+    t.deepEqual(drawn, [[1176, 1568]]);
     t.is(closed, 1);
     t.deepEqual([canvas.width, canvas.height], [0, 0]);
 });

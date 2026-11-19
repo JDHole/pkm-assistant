@@ -1130,4 +1130,19 @@ Runner zamraża całą zlokalizowaną linię czasu na początku `runTask` i doda
 
 ### Poprawki odbioru narzędzi vaulta i dostawców
 
-Sub-agent ma tekstowy tor narzędzi: każdy wynik kind:media (dowolna nazwa), a także generate_image, jest redagowany i otrzymuje informację, że sub nie widzi obrazu. Base64 nie trafia do modelu/transkryptu/handoff. move jest writerem, lecz przy runtime szkiców bieg mający move odmawia przed alokacją i wykonaniem, także dla magazynu niedostępnego. Efekt move/copy wymienia oba cele; view_image ma brak skutków.
+Sub-agent ma tekstowy tor narzędzi: każdy wynik kind:media (dowolna nazwa), a także generate_image, jest redagowany i otrzymuje informację, że sub nie widzi obrazu. Base64 nie trafia do modelu/transkryptu/handoff. Efekt move/copy wymienia oba cele; view_image ma brak skutków.
+
+Przy runtime szkiców (gotowym lub unavailable) `_getTools` usuwa `move` przed
+wyborem writera, alokacją szkicu i zapisaniem whitelisty wątku. Sama obecność nazwy
+w konfiguracji nie odrzuca biegu, także dla workera dziedziczącego narzędzia rodzica.
+Zgadnięte wywołanie/stary transkrypt dostaje z `_executeTool` lokalizowaną odmowę
+pojedynczego wywołania; model może kontynuować. Odmowa obejmuje także fallback bez
+MCP i odczytowy bieg bez własnej kopii. Bez DI szkiców kontrakt live pozostaje.
+Pozostałe writery nadal odmawiają przy unavailable jak przed zmianą; nie mają fallbacku live.
+
+Kontynuacja i węzły planu przechodzą przez ten sam filtr runnera. `agent_delegate`
+przekazuje propozycję/pocztę i nie sprawdza listy narzędzi odbiorcy. Import historii
+po restarcie nadal nie wznawia modeli: odtwarza zamknięte, niekontynuowalne wątki.
+Testy R2/F6 w `../../tool_acceptance.test.ts` sprawdzają zwykłego workera, odmowę
+move/copy PL/EN, odczyt przy unavailable, kontynuację starej whitelisty oraz zapis
+i odczyt między zależnymi węzłami bez mutacji żywego vaulta.

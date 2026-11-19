@@ -1,4 +1,4 @@
-`view_image` należy do vault i wymaga osi read_notes oraz vault.read przed odczytem. Przyjmuje PNG/JPEG/GIF/WebP (SVG odsyła do read), rozpoznaje MIME i wymiary z nagłówka przed createImageBitmap, odmawia nieczytelnemu nagłówkowi, plikom >10 MiB i obrazom >40 mln pikseli. Limit pikseli ogranicza koszt rozpakowania (sam RGBA to do 160 MB, dekoder może potrzebować więcej). Dłuższy bok >1568 px zmniejsza także dla plików <1 MiB; wynik zmniejszenia ma MIME JPEG. Błąd skalowania odmawia, nie odsyła dużego oryginału. Aktywna notatka zachowuje własne dotychczasowe zachowanie.
+`view_image` należy do vault i wymaga osi read_notes oraz vault.read przed odczytem. Przyjmuje PNG/JPEG/GIF/WebP (SVG odsyła do read), rozpoznaje MIME i wymiary z nagłówka przed createImageBitmap, odmawia nieczytelnemu nagłówkowi, plikom >10 MiB i obrazom >40 mln pikseli. Po dekodowaniu wymiary muszą zgadzać się z nagłówkiem; wyłącznie JPEG dopuszcza też zamianę osi (orientacje EXIF 5–8), bez własnego parsera EXIF. Pozostałe rozbieżności są odrzucane. Skalowanie i summary używają wymiarów zorientowanej bitmapy (summary zachowuje rozdzielczość źródłową przed zmniejszeniem). Iloczyn pikseli pozostaje identyczny po obrocie, więc kontrola >40 MP nadal działa przed dekoderem. Testy R2 w ViewImageTool.headers.test.ts: wszystkie orientacje 1–8, PL/EN, osie skalowania i odmowy dla innych formatów. Limit pikseli ogranicza koszt rozpakowania (sam RGBA to do 160 MB, dekoder może potrzebować więcej). Dłuższy bok >1568 px zmniejsza także dla plików <1 MiB; wynik zmniejszenia ma MIME JPEG. Błąd skalowania odmawia, nie odsyła dużego oryginału. Aktywna notatka zachowuje własne dotychczasowe zachowanie.
 
 # modules/tools/
 
@@ -1442,7 +1442,13 @@ Brakujący folder wymaga dodatkowo osi create_folder i vault.create_folder dla
 jego ścieżki, również tuż przed mkdir po oczekiwaniu na zgodę. Obie ścieżki podlegają osobnym bramkom:
 źródło delete/read, cel write. Zgoda trwała ma klucz z trybem i obiema ścieżkami,
 a sesyjna zgoda write nie obejmuje move. Narzędzie odmawia w hostach szkiców,
-ponieważ nie obsługują one przenoszenia ani kopiowania binariów. Jest writerem w subToolExecution; bieg suba z move przy skonfigurowanym runtime szkiców (gotowym lub niedostępnym) odmawia czytelnie przed alokacją szkicu i przed narzędziami. Raport skutków move/copy wskazuje oba cele, bez fałszywego wspólnego sprawdzenia exists/absent. `.pkm-assistant`
+ponieważ nie obsługują one przenoszenia ani kopiowania binariów. Jest writerem w
+subToolExecution, lecz runner usuwa move z definicji przed wykrywaniem writerów,
+gdy runtime szkiców jest skonfigurowany (gotowy lub niedostępny). Sama obecność
+move w konfiguracji nie blokuje biegu. Zgadnięta nazwa albo stary transkrypt
+otrzymuje odmowę pojedynczego wywołania PL/EN; reszta biegu działa dalej, bez
+mutacji live przez move/copy. Dotyczy także kontynuacji i planów. Testy F6/R2:
+`../../tool_acceptance.test.ts`. Raport skutków move/copy wskazuje oba cele, bez fałszywego wspólnego sprawdzenia exists/absent. `.pkm-assistant`
 jest zabronione także administratorowi.
 
 ## P2 — publiczne API dostawców narzędzi

@@ -1,4 +1,9 @@
 import test from 'ava';
+import { createHash } from 'node:crypto';
+import { DraftStore, DraftPersistence, parseDraftId } from './modules/vault-drafts/index.js';
+import type { DraftStorageIO, DraftViewIO } from './modules/vault-drafts/index.js';
+import { __test__ as delegate, createDelegateTool, createSubAgentTool, stopAllDelegations } from './modules/tools/DelegateTool.js';
+import { __test__ as modelsTest } from './modules/models/index.js';
 import { createMoveTool } from './modules/tools/MoveTool.js';
 import { createViewImageTool } from './modules/tools/ViewImageTool.js';
 import { createReadTool } from './modules/tools/ReadTool.js';
@@ -17,7 +22,7 @@ import { _chatExecuteToolCall } from './modules/chat/chat/chat_streaming.js';
 import { mediaTextPart } from './modules/tools/toolMedia.js';
 import { getToolCallLabel, describeToolCall, TOOL_INFO } from './modules/ui-components/ToolCallDisplay.js';
 import { getPermissionToolLabel, applyPermissionSwitch } from './modules/agents/toolAxis.js';
-import { setLocale } from './core/i18n/index.js';
+import { getLocale, setLocale } from './core/i18n/index.js';
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=';
 const bytes = Uint8Array.from(Buffer.from(png, 'base64')).buffer;
@@ -208,21 +213,185 @@ for (const mode of ['move', 'copy']) test.serial(`F5: ${mode} checks destination
   t.deepEqual(f.calls, []);
 });
 
-for (const state of ['ready', 'unavailable']) for (const mode of ['move', 'copy'])
-test.serial(`F6: production runner with ${state} drafts must refuse ${mode}, never mutate live vault`, async t => {
+for (const locale of ['en', 'pl'] as const) for (const state of ['ready', 'unavailable']) for (const mode of ['move', 'copy'])
+for (const writer of state === 'ready' ? [false, true] : [false])
+test.serial(`F6: ${locale}/${state}/writer=${writer} drafts refuse only the ${mode} call and continue without live mutation`, async t => {
+  const previousLocale = getLocale();
+  setLocale(locale);
+  t.teardown(() => setLocale(previousLocale));
   const f = fixture();
-  const drafts = state === 'unavailable' ? { kind: 'unavailable' } : new SubRunDrafts({} as any, {} as any, {} as any, () => { throw new Error('Unexpected draft allocation'); });
+  const before = structuredClone([...f.files]);
+  const drafts = state === 'unavailable' ? { kind: 'unavailable' } : readyDrafts(f);
   const runner = new SubAgentRunner({ app: f.app, plugin: f.plugin, toolRegistry: f.registry, drafts } as any);
   let iteration = 0;
-  const model = { stream(_payload: any, handlers: any) {
+  const payloads: any[] = [];
+  const model = { stream(payload: any, handlers: any) {
+    payloads.push(structuredClone(payload));
     handlers.done({ choices: [{ message: iteration++ === 0 ? { role: 'assistant', content: null,
       tool_calls: [{ id: 'm1', type: 'function', function: { name: 'move', arguments: JSON.stringify({ from: 'in/a.png', to: 'out/b.png', mode }) } }] }
       : { role: 'assistant', content: 'done' } }] });
   } };
-  const result = await runner.runTask('relocate', f.agent, { name: 'mover', role: 'worker', tools: ['move'] } as any, model as any,
-    { autonomy: 'yolo', origin: { agentName: 'A', sessionPath: 's', sessionEpoch: 'e' } });
+  const result = await runner.runTask('relocate', f.agent, { name: 'mover', role: 'worker', tools: writer ? ['move', 'write'] : ['move'] } as any, model as any,
+    { autonomy: 'yolo', origin: { agentName: 'A', sessionPath: 's', sessionEpoch: 'a'.repeat(32) } });
   t.deepEqual({ liveMutation: f.files.has('out/b.png'), sourceExists: f.files.has('in/a.png'), draft: result.draft },
     { liveMutation: false, sourceExists: true, draft: undefined });
+  t.is(result.stoppedBy, 'natural');
+  t.is(result.result, 'done');
+  t.deepEqual(result.toolsUsed, ['move']);
+  t.is(iteration, 2);
+  for (const payload of payloads) t.deepEqual(payload.tools.map((tool: any) => tool.function.name), writer ? ['write', 'ask_parent'] : ['ask_parent']);
+  const refusal = payloads[1].messages.find((message: any) => message.role === 'tool');
+  t.true(refusal.content.includes(locale === 'pl'
+    ? 'Przenoszenie i kopiowanie plików jest niedostępne w szkicu.'
+    : 'Moving or copying files is unavailable in a draft.'));
+  t.deepEqual([...f.files], before);
+  t.deepEqual(f.calls, []);
+});
+
+function readyDrafts(f: ReturnType<typeof fixture>) {
+  const disk = new Map<string, Uint8Array>();
+  const storage: DraftStorageIO = {
+    list: async path => [...new Set([...disk.keys()].filter(key => key.startsWith(`${path}/`)).map(key => key.slice(path.length + 1).split('/')[0]))],
+    read: async path => { const value = disk.get(path); if (!value) throw new Error('missing'); return value.slice(); },
+    writeBlob: async (path, value) => { disk.set(path, value.slice()); },
+    publish: async (path, value, allowed) => { if (!allowed()) return 'cancelled'; disk.set(path, value.slice()); return 'published'; },
+  };
+  const io: DraftViewIO = {
+    stat: async path => { const file = f.files.get(path); return file ? file.children ? { kind: 'folder' } : { kind: 'file', bytes: file.bytes.byteLength, mtime: 1 } : { kind: 'missing' }; },
+    read: async path => { const file = f.files.get(path); if (!file) throw new Error('missing'); return new Uint8Array(file.bytes).slice(); },
+    list: async path => ({ files: [...f.files.keys()].filter(key => !f.files.get(key).children && key.startsWith(path ? `${path}/` : '') && !key.slice(path ? path.length + 1 : 0).includes('/')), folders: [] }),
+  };
+  const persistence = new DraftPersistence(storage, { sha256: async value => createHash('sha256').update(value).digest('hex') });
+  const store = new DraftStore(persistence, io, { now: () => 1 });
+  let sequence = 0;
+  return new SubRunDrafts(store, persistence, io, () => parseDraftId(`acceptance-${++sequence}`));
+}
+
+test.serial('R2: default broad worker calls the model and completes an ordinary task with real drafts', async t => {
+  const f = fixture();
+  f.plugin.toolRegistry = f.registry;
+  f.plugin.subTaskRegistry = new SubTaskRegistry();
+  const config = delegate.buildBuiltinWorkerConfig(f.plugin, f.agent);
+  t.true(config.tools.includes('move'));
+  t.true(config.tools.includes('write'));
+  const payloads: any[] = [];
+  const model = { providerId: 'test', modelId: 'test', stream(payload: any, handlers: any) {
+    payloads.push(structuredClone(payload));
+    handlers.done({ choices: [{ message: { role: 'assistant', content: 'One sentence.' } }] });
+  } };
+  const runner = new SubAgentRunner({ app: f.app, plugin: f.plugin, toolRegistry: f.registry, drafts: readyDrafts(f) });
+  const result = await runner.runTask('Give a one sentence answer', f.agent, config, model as any,
+    { autonomy: 'yolo', origin: { agentName: 'A', sessionPath: 's', sessionEpoch: 'a'.repeat(32) } });
+  t.is(result.stoppedBy, 'natural');
+  t.is(result.result, 'One sentence.');
+  t.deepEqual(result.toolsUsed, []);
+  t.is(payloads.length, 1);
+  t.deepEqual(payloads[0].tools.map((tool: any) => tool.function.name), ['view_image', 'read', 'delete', 'write', 'create_folder', 'ask_parent']);
+  t.deepEqual(f.calls, []);
+  t.is(Buffer.from(f.files.get('in/a.png').bytes).toString('base64'), png);
+});
+
+test.serial('R2: public worker, stale continuation and dependent plan retain normal draft execution', async t => {
+  const f = fixture();
+  const before = structuredClone([...f.files]);
+  const drafts = readyDrafts(f);
+  const registry = new SubTaskRegistry();
+  Object.assign(f.plugin, { toolRegistry: f.registry, subTaskRegistry: registry,
+    env: { settings: { pkmAssistant: { chat: { platform: 'openai', models: { openai: 'model' }, apiKeys: { openai: 'test' } } } },
+      config: { chat: { providers: { openai: { info: { id: 'openai' } } },
+        http: { send: async () => { throw new Error('Unexpected HTTP'); } },
+        transport: { open: async () => { throw new Error('Unexpected transport'); } },
+      } } },
+  });
+  f.registry.registerTool(createDelegateTool(f.app, { drafts }));
+  f.registry.registerTool(createSubAgentTool(f.app, { drafts }));
+  type Reply = string | { name: string; arguments: object };
+  const scripts: Reply[][] = [
+    ['Ordinary answer.'], ['Continued answer.'],
+    [{ name: 'write', arguments: { path: 'note.md', mode: 'create', content: 'Draft material' } }, 'Predecessor answer.'],
+    [{ name: 'read', arguments: { path: 'note.md', scope: 'vault' } }, 'Dependent answer.'],
+  ];
+  const payloads: any[] = [];
+  modelsTest.setChatModelFactory(() => {
+    const script = scripts.shift()!;
+    let iteration = 0;
+    return { providerId: 'openai', modelId: 'model', stream(payload: any, handlers: any) {
+      payloads.push(structuredClone(payload));
+      const reply = script[iteration++];
+      handlers.done({ choices: [{ message: typeof reply === 'string' ? { role: 'assistant', content: reply }
+        : { role: 'assistant', content: '', tool_calls: [{ id: `call-${iteration}`, type: 'function', function: { name: reply.name, arguments: JSON.stringify(reply.arguments) } }] } }] });
+    } } as never;
+  });
+  t.teardown(async () => { stopAllDelegations('test'); await delegate._settleBackground(true); modelsTest.reset(); registry.dispose(); });
+  const origin = { agentName: 'A', sessionPath: 's', sessionEpoch: 'a'.repeat(32) };
+  const opts = { autonomy: 'yolo', origin, delegationDepth: 1 };
+  const first: any = await f.call('delegate', { aspect: 'worker', task: 'Answer one sentence' }, opts);
+  t.like(first, { success: true, result: 'Ordinary answer.' }, JSON.stringify(first));
+  const thread = registry.getThread(first.sub_id)!;
+  t.is(thread.phase, 'idle');
+  // Simulate a frozen configuration created before move was hidden.
+  (thread.config.toolNames as string[]).push('move');
+  const continued: any = await f.call('sub_agent', { action: 'task', sub_id: first.sub_id, task: 'Answer again', background: false }, opts);
+  t.like(continued, { success: true, result: 'Continued answer.', sub_id: first.sub_id });
+  const plan: any = await f.call('delegate', { tasks: [
+    { id: 'A', aspect: 'worker', task: 'Write draft material' },
+    { id: 'B', depends_on: ['A'], aspect: 'worker', task: 'Read predecessor draft' },
+  ] }, opts);
+  t.like(plan, { success: true, counts: { finished: 2, partial: 0, failed: 0, blocked: 0 } });
+  t.deepEqual(plan.results.map((result: any) => result.result), ['Predecessor answer.', 'Dependent answer.']);
+  t.is(payloads.length, 6);
+  for (const payload of payloads) {
+    t.false(payload.tools.some((tool: any) => tool.function.name === 'move'));
+    t.true(payload.tools.some((tool: any) => tool.function.name === 'write'));
+  }
+  const written = JSON.parse(payloads[3].messages.find((message: any) => message.role === 'tool').content);
+  t.like(written, { success: true, path: 'note.md', vault_effect: { kind: 'draft' } });
+  const read = JSON.parse(payloads[5].messages.find((message: any) => message.role === 'tool').content);
+  t.like(read, { content: 'Draft material' });
+  t.true(JSON.stringify(payloads[4].messages).includes('Predecessor answer.'));
+  t.deepEqual([...f.files], before);
+  t.deepEqual(f.calls, []);
+});
+
+for (const state of ['ready', 'unavailable'] as const) test.serial(`R2: ${state} runtime still permits read with move listed`, async t => {
+  const f = fixture();
+  f.files.set('note.md', { path: 'note.md', name: 'note.md', extension: 'md', bytes: new TextEncoder().encode('Live read').buffer });
+  const runner = new SubAgentRunner({ app: f.app, plugin: f.plugin, toolRegistry: f.registry,
+    drafts: state === 'ready' ? readyDrafts(f) : { kind: 'unavailable' } });
+  let calls = 0;
+  const payloads: any[] = [];
+  const model = { stream(payload: any, handlers: any) {
+    payloads.push(structuredClone(payload));
+    handlers.done({ choices: [{ message: calls++ === 0
+      ? { role: 'assistant', content: '', tool_calls: [{ id: 'read', type: 'function', function: { name: 'read', arguments: '{"path":"note.md","scope":"vault"}' } }] }
+      : { role: 'assistant', content: 'Read completed.' } }] });
+  } };
+  const result = await runner.runTask('Read', f.agent, { name: 'reader', tools: ['read', 'move'] }, model as never);
+  t.is(result.stoppedBy, 'natural');
+  t.is(result.result, 'Read completed.');
+  t.is(calls, 2);
+  t.like(JSON.parse(payloads[1].messages.find((message: any) => message.role === 'tool').content), { content: 'Live read' });
+  t.deepEqual(payloads[0].tools.map((tool: any) => tool.function.name), ['read', 'ask_parent']);
+});
+
+for (const mode of ['move', 'copy']) test.serial(`R2: runner without draft DI preserves live ${mode}`, async t => {
+  const f = fixture();
+  const runner = new SubAgentRunner({ app: f.app, plugin: f.plugin, toolRegistry: f.registry });
+  const payloads: any[] = [];
+  const model = { stream(payload: any, handlers: any) {
+    payloads.push(structuredClone(payload));
+    handlers.done({ choices: [{ message: payloads.length === 1
+      ? { role: 'assistant', content: '', tool_calls: [{ id: 'move', type: 'function', function: { name: 'move', arguments: JSON.stringify({ from: 'in/a.png', to: 'out/b.png', mode }) } }] }
+      : { role: 'assistant', content: 'Live operation completed.' } }] });
+  } };
+  const result = await runner.runTask('Relocate', f.agent, { name: 'mover', tools: ['move'] }, model as never, { autonomy: 'yolo' });
+  t.is(result.stoppedBy, 'natural');
+  t.is(result.result, 'Live operation completed.');
+  t.deepEqual(payloads[0].tools.map((tool: any) => tool.function.name), ['move', 'ask_parent']);
+  t.like(JSON.parse(payloads[1].messages.find((message: any) => message.role === 'tool').content), { success: true });
+  t.is(Buffer.from(f.files.get('out/b.png').bytes).toString('base64'), png);
+  t.is(f.files.has('in/a.png'), mode === 'copy');
+  t.deepEqual(f.calls, ['mkdir:out', `${mode}:in/a.png:out/b.png`]);
 });
 
 test.serial('F7: SVG is rejected as text before decoding', async t => {

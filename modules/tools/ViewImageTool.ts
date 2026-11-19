@@ -32,12 +32,17 @@ export function createViewImageTool() {
                 if (bytes.byteLength > ACTIVE_NOTE_MAX_IMAGE_BYTES) return fail('large');
                 const header = readImageHeader(bytes);
                 if (!header) return fail('header');
-                const { mime, width, height } = header;
-                if (width * height > MAX_IMAGE_PIXELS) return fail('pixels');
+                const { mime } = header;
+                if (header.width * header.height > MAX_IMAGE_PIXELS) return fail('pixels');
                 const bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
+                const { width, height } = bitmap;
                 let image = { mime, base64: '' };
                 try {
-                    if (bitmap.width !== width || bitmap.height !== height) return fail('invalid');
+                    // JPEG SOF stores raw axes; the decoder applies EXIF orientation.
+                    // Swapping axes preserves the pixel cap. All other mismatches fail.
+                    const sameAxes = width === header.width && height === header.height;
+                    const rotatedJpeg = mime === 'image/jpeg' && width === header.height && height === header.width;
+                    if (!sameAxes && !rotatedJpeg) return fail('invalid');
                     if (Math.max(width, height) > ACTIVE_NOTE_MAX_DIM) {
                         const scale = ACTIVE_NOTE_MAX_DIM / Math.max(width, height);
                         const canvas = createEl('canvas');
