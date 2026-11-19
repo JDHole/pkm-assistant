@@ -56,8 +56,9 @@ test('multimodal manifest has 180s timeout (long-running image gen)', t => {
 
 test('vault manifest exposes check_syntax with the file tools', t => {
     const vault = getBuiltinManifest('vault')!;
-    t.is(vault.tools.length, 8);
+    t.is(vault.tools.length, 9);
     t.true(vault.tools.includes('view_image'));
+    t.true(vault.tools.includes('move'));
     t.true(vault.tools.includes('check_syntax'));
     t.true(vault.tools.includes('read'));
     t.true(vault.tools.includes('list'));

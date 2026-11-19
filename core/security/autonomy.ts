@@ -162,7 +162,7 @@ export function classifyToolRisk({
     }
 
     const redTools = new Set([
-        'delete', 'vault_delete', 'memory_delete',
+        'delete', 'vault_delete', 'memory_delete', 'move',
         // `agent_message`/`connect_to_server` już nie istnieją — wpisy zostają fail-closed
         // na wypadek wywołania po starej nazwie.
         'agent_message', 'connect_to_server',

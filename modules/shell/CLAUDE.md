@@ -398,3 +398,5 @@ próby przewijania dotykiem na Androidzie/iOS i przy większej czcionce systemow
 Telefon zawija wszystkie zakładki ustawień w wiersze z celami 44 px; aktywna zachowuje `mod-cta`. `openSection` przełącza sekcję przez ten sam hash co nawigacja.
 
 Edytor sekcji promptu udostępnia `mobile_environment` na mobile; przycisk fabryczny odtwarza kategorię urządzenia i domyślne możliwości. Na desktopie sekcja jest ukryta.
+
+Modal zgody `vault.move` pokazuje źródło, cel i tryb; trwała zgoda obejmuje konkretną parę ścieżek i tryb.

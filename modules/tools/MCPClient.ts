@@ -336,6 +336,7 @@ const ACTION_TYPE_MAP: Record<string, string> = {
     'list': 'vault.read',
     'write': 'vault.write',
     'delete': 'vault.delete',
+    'move': 'vault.write',
     'create_folder': 'vault.create_folder',
     // Legacy vault_* names (aliases → read/list/write/delete/create_folder). Zachowane w mapie
     // akcji na wypadek wywołania po starej nazwie (alias remapuje name zanim tu trafimy).
@@ -1016,6 +1017,8 @@ export class MCPClient {
                 });
             }
             const execution = opts.vaultExecution ?? { kind: 'live' as const };
+            if (toolCall.name === 'move' && tool.source === 'built-in' && execution.kind !== 'live')
+                throw new Error(t('mcp.move.draft_denied'));
             const host = execution.kind === 'live' ? { kind: 'live' as const, app: this.app, plugin: this.plugin }
                 : await prepareSubToolExecution({ execution, tool: { name: tool.name, source: tool.source === 'built-in' ? 'built-in' : 'user' },
                     args: argsWithContext, callId: toolCall.id ?? toolCall.name, app: this.app, plugin: this.plugin });
@@ -1038,9 +1041,31 @@ export class MCPClient {
             // `_invocation*` w kształcie, w jakim podał je MODEL - a rodzina `artifact_*`
             // wyprowadza z tożsamości CAŁY cel akcji - bramka oceniałaby inną ścieżkę niż
             // ta, do której pisze `execute` (ono zawsze dostaje worek zaufany).
-            const { targetPath, approvalContext, invalidPath, canonicalPathField } =
+            let { targetPath, approvalContext, invalidPath, canonicalPathField } =
                 this._extractToolContext(toolCall.name, argsWithContext, invocationAgentName,
                     host.plugin);
+
+            if (toolCall.name === 'move' && tool.source === 'built-in') {
+                if (typeof this.toolRegistry.checkToolAxis === 'function') {
+                    for (const required of ['write', args.mode === 'copy' ? 'read' : 'delete']) {
+                        const axis = this.toolRegistry.checkToolAxis(agent, required);
+                        if (!axis.allowed) throw new Error(`Permission denied: ${t('perm.tool_disabled', { tool: required })}`);
+                    }
+                }
+                const from = typeof args.from === 'string' ? sanitizePath(args.from) : null;
+                const to = typeof args.to === 'string' ? sanitizePath(args.to) : null;
+                if (!from || !to || (args.mode != null && args.mode !== 'move' && args.mode !== 'copy')
+                    || from.toLowerCase() === '.pkm-assistant' || from.toLowerCase().startsWith('.pkm-assistant/')
+                    || to.toLowerCase() === '.pkm-assistant' || to.toLowerCase().startsWith('.pkm-assistant/'))
+                    throw new Error(`Permission denied: ${t('mcp.move.invalid_path')}`);
+                args.from = argsWithContext.from = from;
+                args.to = argsWithContext.to = to;
+                targetPath = to;
+                canonicalPathField = undefined;
+                const sourcePermission = this.plugin.permissionSystem.checkPermission(agent,
+                    args.mode === 'copy' ? 'vault.read' : 'vault.delete', from, { autonomy, scopeFolders });
+                if (!sourcePermission.allowed) throw new Error(`Permission denied: ${sourcePermission.reason}`);
+            }
 
             // Ścieżki nie do uratowania (traversal, absolutna, null byte,
             // zero-width unicode) odbijają się TUTAJ - bez pytania usera i bez wołania narzędzia.
@@ -1186,13 +1211,19 @@ export class MCPClient {
 
                     log.info('MCPClient', `${toolCall.name} wymaga zatwierdzenia usera...`);
                     const approved = await this.plugin.approvalManager.requestApproval({
-                        type: actionType,
+                        type: toolCall.name === 'move' && tool.source === 'built-in' ? 'vault.move' : actionType,
+                        ...(toolCall.name === 'move' && tool.source === 'built-in' ? {
+                            approvalTarget: JSON.stringify([args.mode ?? 'move', args.from, args.to]),
+                            sourcePath: args.from,
+                        } : {}),
                         toolName: toolCall.name,
                         description: tool.description,
                         targetPath: targetPath,
                         agentName: approvalAgentName,
                         operationMode: args.mode || null,
-                        preview: args.content ? `Długość treści: ${args.content.length} znaków` : null,
+                        preview: toolCall.name === 'move' && tool.source === 'built-in'
+                            ? t('mcp.move.approval', { mode: String(args.mode ?? 'move'), from: String(args.from), to: String(args.to) })
+                            : args.content ? `Długość treści: ${args.content.length} znaków` : null,
                         contentPreview: args.content || null,
                         // Checkbox „nie pytaj więcej w tej sesji" w ApprovalModal - TYLKO gdy sesja
                         // ma klucz (bez niego SessionWriteConsent nie ma czego zapamiętać).

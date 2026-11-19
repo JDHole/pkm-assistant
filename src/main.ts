@@ -65,6 +65,7 @@ import {
   createListTool,
   createWriteTool,
   createDeleteTool,
+  createMoveTool,
   createCreateFolderTool,
   // JEDNO narzędzie search (retrieval skonsolidowane)
   createSearchTool,
@@ -837,6 +838,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.toolRegistry.registerTool(createListTool());
       this.toolRegistry.registerTool(createWriteTool());
       this.toolRegistry.registerTool(createDeleteTool());
+      this.toolRegistry.registerTool(createMoveTool());
       this.toolRegistry.registerTool(createCreateFolderTool(this.app));
       // JEDNO narzędzie `search` (scope vault/memory) zastępuje osobne narzędzia retrieval.
       this.toolRegistry.registerTool(createSearchTool());

@@ -31,7 +31,7 @@ export interface LegacyToolAxisConfig {
 export const BUILTIN_TOOL_GROUPS: Record<string, string[]> = {
     app: ['obsidian_app'],
     core: ['ask_user'],
-    vault: ['read', 'check_syntax', 'write', 'list', 'delete', 'create_folder', 'search'],
+    vault: ['read', 'check_syntax', 'write', 'list', 'delete', 'move', 'create_folder', 'search'],
     memory: ['memory_save', 'memory_delete'],
     web: ['web_search', 'web_read'],
     multimodal: ['generate_image', 'add_text_to_image'],
@@ -101,6 +101,7 @@ export const LEGACY_DEFAULT_PERMISSIONS: Record<string, boolean> = {
 const PERMISSION_TOOL_GATES: Record<string, string> = {
     // vault write-side
     write: 'edit_notes',
+    move: 'edit_notes',
     create_folder: 'create_files',
     delete: 'delete_files',
     // vault read-side (default read_notes=true; jawny false rzadki, ale honorujemy)
@@ -259,7 +260,7 @@ export function normalizeDisabledTools(input: unknown) {
  */
 export const PERMISSION_SWITCH_TOOLS: Record<string, string[]> = {
     read_notes: ['read', 'check_syntax', 'list', 'search'],
-    edit_notes: ['write'],
+    edit_notes: ['write', 'move'],
     create_files: ['create_folder'],
     delete_files: ['delete'],
 };

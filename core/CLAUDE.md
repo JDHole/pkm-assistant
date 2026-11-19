@@ -566,3 +566,5 @@ kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
 `check_syntax` jest włączone i używa akcji `vault.read` z ryzykiem GREEN, kanonizacją i No-Go jak przy odczycie. Opis `obsidian_app` domyślnie obejmuje `state` i `open`; opis `render_check`, w tym znaczenie `counts_match` i ograniczenia maskowania, jest dołączany po jawnym włączeniu.
 
 `SettingsContent.ts` ukrywa przełącznik render_check klasą `is-hidden`, aktualizowaną przy zmianie nawigacji; reguła `.pkm-render-check-setting.is-hidden` w `src/styles.css` przebija bazowe `display: flex` Obsidiana.
+
+`move` klasyfikowane jest jako RED; MCP osobno sprawdza źródło jako delete/read i cel jako write.

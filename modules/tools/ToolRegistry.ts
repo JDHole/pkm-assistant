@@ -103,7 +103,7 @@ const BUILTIN_TOOL_MAP: Record<string, string[]> = {
     // (SearchTool), więc agent bez serwera `vault` nie dostaje dostępu do vaultu przez tylną furtkę.
     vault: [
         'read', 'view_image', 'check_syntax', 'write', 'list',
-        'delete', 'create_folder', 'search'
+        'delete', 'move', 'create_folder', 'search'
     ],
     memory: [
         'memory_save', 'memory_delete'
