@@ -9,7 +9,7 @@ Read `app.plugins.plugins['pkm-assistant']?.api`. It is `undefined` until ready 
 after unload. Check at your startup **and** subscribe to the workspace event
 `pkm-assistant:api-ready` (argument: API), including after PKM Assistant reloads.
 Check `apiVersion === 1`. The event fires after the tool registry and plugin are
-ready. Do not depend on internal registries. Types are maintained in
+ready. Exceptions escaping an event listener are caught and logged so remaining PKM Assistant startup work and onReady callbacks continue. Do not depend on internal registries. Types are maintained in
 [`ToolProviderRegistry.ts`](../modules/tools/ToolProviderRegistry.ts) and exported
 by the tools module's `index.ts`.
 
@@ -19,13 +19,13 @@ interface PkmAssistantPublicApi {
   registerToolProvider(provider: ToolProviderRegistration): ToolProviderHandle;
 }
 interface ToolProviderRegistration {
-  id: string;            // ^[a-z][a-z0-9_]{1,31}$; unique
+  id: string;            // ^(?!.*__)[a-z][a-z0-9_]{1,31}$; unique
   name: string;          // 1–60 characters
   description?: string; // at most 300 characters
   tools: ProviderTool[]; // 0–64
 }
 interface ProviderTool {
-  name: string;          // ^[a-z][a-z0-9_]{1,47}$; unique within provider
+  name: string;          // ^(?!.*__)[a-z][a-z0-9_]{1,47}$; unique within provider
   description: string;   // 1–2000 characters, for the model
   inputSchema: Record<string, unknown>; // JSON Schema with type: 'object'
   timeoutMs?: number;    // integer 1000–120000; default 30000
@@ -42,7 +42,7 @@ interface ToolProviderHandle {
 }
 ```
 
-IDs/names must match in full (no trailing newline). Lengths use JavaScript string
+IDs/names must match in full (no trailing newline). Consecutive underscores (`__`) are forbidden in both provider IDs and tool names. Lengths use JavaScript string
 units. Schemas must be JSON data and are snapshotted on registration. Describe and
 validate arguments in your provider, just as an MCP server does. Localize your own
 labels/descriptions; PKM Assistant does not translate third-party text.
@@ -57,7 +57,7 @@ removed/replaced implementation.
 Built-in server IDs and configured MCP IDs (including disabled servers) are
 reserved. A live provider blocks MCP connections added later under its ID,
 including a handshake in progress. Existing prefixed names cannot be overwritten,
-even when IDs/names contain `__`. The settings editor/import refuses provider IDs.
+including collisions with legacy MCP names containing `__`. The settings editor/import refuses provider IDs.
 If settings are changed outside that UI, the provider keeps ownership until
 unregister/unload. On next startup saved MCP configuration reserves the ID first.
 Choose a stable, distinct ID: opt-in and persistent approvals identify ID/tool
@@ -67,7 +67,7 @@ Users enable providers in profile → Skills → Connectors (`mcp_servers`, incl
 existing wildcard semantics). The same ToolRegistry/MCPClient permissions, RED
 risk, approval and output budgets apply as for MCP. The modal shows complete
 cleaned JSON arguments; “Always allow” is per agent and specific
-`external.call::<id>__<tool>` rule. Existing `yolo` autonomy suppresses questions;
+`external.call::provider:["<id>","<id>__<tool>"]` rule. Provider consent is separate from MCP consent; existing MCP rules keep their original `external.call::<id>__<tool>` keys. Old provider rules using the MCP key require approval again. Existing `yolo` autonomy suppresses questions;
 opt-in remains mandatory. Sub-agents additionally need the inherited tool
 whitelist. External tools are unavailable in draft execution, exactly as MCP is.
 
@@ -77,8 +77,7 @@ ID. No host, permission callback, budget, session or conversation context is
 passed. Internal argument markers are stripped with the shared MCP filter.
 
 Return JSON data. Cycles, BigInt, undefined, functions, symbols and non-finite
-numbers produce errors, including nested unsupported values. Arrays are JSON
-text, not multimodal blocks. Exceptions become model errors with the message
+numbers produce errors, including nested unsupported values. API v1 does not support returning images. Every provider result, including objects shaped as `{ kind: "media", summary, images }`, is JSON text subject to the ordinary text budget, never trusted multimodal blocks. The chat checks the registered tool source before interpreting media; the same restriction applies to external MCP. Exceptions become model errors with the message
 passed through the shared secret mask, without stacks. The normal agent loop
 serializes and budgets results. Do not return secrets: pattern-based masking
 cannot detect all sensitive content.

@@ -1513,6 +1513,7 @@ export async function _chatExecuteToolCall(
     const parentConversation = toolCall.name === 'delegate' && turn.parentConversation && !context.shouldAbort()
         ? freezeParentConversation('lead', turn.origin, turn.turnId, turn.chatModel?.providerId,
             turn.parentConversation.snapshot(context.assistantText)) : undefined;
+    const toolSource = this.plugin.toolRegistry?.getTool?.(toolCall.name ?? '')?.source ?? 'user';
     let raw: ChatToolResult | undefined;
     let error: Error | null = null;
     const pending = toolCall.name === 'ask_user'
@@ -1560,7 +1561,7 @@ export async function _chatExecuteToolCall(
     turn.rawResults.set(toolCall.id, { result: raw, error });
 
     // Media trafiają do modelu właściciela tury; surowy wynik pozostaje dla UI.
-    const media = asToolMedia(toolCall.name ?? '', raw);
+    const media = asToolMedia(toolCall.name ?? '', raw, toolSource);
     if (media) {
         return toToolMessageContent(media, {
             vision: this._isCurrentModelVision(turn.agent),

@@ -696,7 +696,7 @@ export class MCPClient {
                 targetPath: '',
                 approvalContext: {
                     externalServer: tool?.serverName || '',
-                    approvalTarget: toolName,
+                    approvalTarget: tool?.executeProvider ? `provider:${JSON.stringify([tool.serverName, toolName])}` : toolName,
                     externalArgs: ExternalMcpManager.stripInternalArgs(args),
                 },
             };
@@ -1065,6 +1065,19 @@ export class MCPClient {
                 const sourcePermission = this.plugin.permissionSystem.checkPermission(agent,
                     args.mode === 'copy' ? 'vault.read' : 'vault.delete', from, { autonomy, scopeFolders });
                 if (!sourcePermission.allowed) throw new Error(`Permission denied: ${sourcePermission.reason}`);
+                // write(create) uses the write axis and vault.write path check (not create_files).
+                const destinationPermission = this.plugin.permissionSystem.checkPermission(agent,
+                    'vault.write', to, { autonomy, scopeFolders });
+                if (!destinationPermission.allowed) throw new Error(`Permission denied: ${destinationPermission.reason}`);
+                const parent = to.substring(0, to.lastIndexOf('/'));
+                if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
+                    const axis = this.toolRegistry.checkToolAxis?.(agent, 'create_folder');
+                    if (axis && !axis.allowed) throw new Error(`Permission denied: ${t('perm.tool_disabled', { tool: 'create_folder' })}`);
+                    const permission = this.plugin.permissionSystem.checkPermission(agent,
+                        'vault.create_folder', parent, { autonomy, scopeFolders });
+                    if (!permission.allowed) throw new Error(`Permission denied: ${permission.reason}`);
+                }
+
             }
 
             // Ścieżki nie do uratowania (traversal, absolutna, null byte,
@@ -1389,6 +1402,11 @@ export class MCPClient {
                 canDiscloseDetails: () => {
                     const current = invocationAgentName ? this.plugin.agentManager?.getAgent(invocationAgentName) : null;
                     return !!current && current.name === agent.name && current.admin_access === true;
+                },
+                authorizeFolderCreate: (path) => {
+                    const axis = this.toolRegistry.checkToolAxis?.(agent, 'create_folder');
+                    if (axis && !axis.allowed) return { allowed: false, reason: t('perm.tool_disabled', { tool: 'create_folder' }) };
+                    return this.plugin.permissionSystem.checkPermission(agent, 'vault.create_folder', path, { autonomy, scopeFolders });
                 },
                 agentKnown: toolCall.name !== 'obsidian_app' || args.action !== 'render_check' || !!agentName,
                 authorizeFileRead: (canonicalPath) => {

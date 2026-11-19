@@ -26,7 +26,7 @@ import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
-import { describeToolEffect, checkEffectTargets, isOwnChildQuestionReply, isVaultContentWriter, isDraftToolAllowed } from '../tools/index.js';
+import { asToolMedia, mediaTextPart, describeToolEffect, checkEffectTargets, isOwnChildQuestionReply, isVaultContentWriter, isDraftToolAllowed } from '../tools/index.js';
 import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteToolCallOptions, VaultExecution } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
@@ -651,6 +651,9 @@ export class SubAgentRunner {
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
             let tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
+            if (this.drafts && tools.some(tool => tool.function.name === 'move')) {
+                throw new Error(t('mcp.move.draft_denied'));
+            }
             if (this.drafts && 'kind' in this.drafts) {
                 if (tools.some(tool => isVaultContentWriter(tool.function.name)) || options.draftDependencies?.length)
                     throw new Error(this.isMobile ? t('subagent.draft.unavailable_mobile') : t('subagent.draft.unavailable'));
@@ -1299,11 +1302,6 @@ export class SubAgentRunner {
         // wyniku; pełny payload zostaje w komunikacie, nic nie ginie. Równolegle zapala się
         // znacznik dla telemetrii biegu (krok `tool.post` w `runTask`).
         const asTranscript = (result: unknown): string => {
-            // `generate_image` niesie w SUKCESIE pełny base64 (obraz jest
-            // już zapisany w vaulcie i wskazany przez `path`/`note_path`) - czat go wycina przed
-            // wstawieniem do transkryptu (`chat_streaming.ts` - `delete copy.base64`), tu ta sama
-            // normalizacja jest potrzebna osobno. Sama normalizacja co w czacie, tylko bez gałęzi
-            // vision (sub nie renderuje obrazów inline - base64 nie ma tu żadnego konsumenta).
             const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
             const text = typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
             const boundedError = _isBoundedReadTextError(toolCall, sanitized);
@@ -1482,28 +1480,16 @@ function _isBoundedReadTextError(toolCall: ToolCall, result: unknown): boolean {
     return isRead ? readCodes.has(record.code) : textCodes.has(record.code);
 }
 
-/**
- * `GenerateImageTool` zwraca w sukcesie pełny base64 zapisanego obrazu
- * (obok `path`/`note_path` - obraz JEST już w vaulcie, base64 jest tu wyłącznie dla ścieżki
- * czatu z vision). Bez tej normalizacji medianowy obraz (~594 000 znaków base64, dane realne
- * z `Attachments/generated`) zjadałby 99% sufitu `max_tool_result_length` transkryptu suba
- * (domyślnie 15000 - `config/limits.ts`), wypychając poza limit `format`/`revised_prompt`/
- * `message`, i byłby budowany od nowa przy KAŻDEJ kolejnej iteracji pętli suba. Tylko
- * `generate_image` - inne narzędzia nie niosą base64 w wyniku. Wejście bez `base64`
- * (błąd, inne narzędzie) wraca bez zmian.
- */
+/** Sub-agent transcripts currently support text only, for every media-contract tool. */
 function stripImageBase64ForTranscript(toolName: string, result: unknown): unknown {
-    if (toolName !== 'generate_image' || !result || typeof result !== 'object') return result;
-    const raw = result as { base64?: unknown };
-    if (typeof raw.base64 !== 'string' || raw.base64.length === 0) return result;
-    // Rozmiar liczony z długości base64 (4 znaki = 3 bajty) - bez dekodowania. Wzór:
-    // `normalizeMcpResult` w `modules/tools/ExternalMcpManager.ts` (adnotacja obrazka z serwerów
-    // zewnętrznych MCP).
-    const kb = Math.round((raw.base64.length * 3) / 4 / 1024);
-    const copy: Record<string, unknown> = { ...(result as Record<string, unknown>) };
-    delete copy.base64;
-    copy.image = `[image ~${kb} kB - zapisany w vaultcie, patrz path/note_path]`;
-    return copy;
+    const mediaContract = result && typeof result === 'object' && 'kind' in result && result.kind === 'media';
+    if (!mediaContract && !asToolMedia(toolName, result)) return result;
+    const text = mediaTextPart(toolName, result);
+    const raw = result as { base64?: string };
+    return { ...text,
+        ...(raw.base64 ? { image: `[image ~${Math.round(raw.base64.length * 3 / 4 / 1024)} kB - zapisany w vaultcie, patrz path/note_path]` } : {}),
+        image_delivery: t('mcp.media.sub_text'),
+    };
 }
 
 /**

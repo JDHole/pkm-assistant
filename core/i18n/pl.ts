@@ -160,6 +160,16 @@ export const pl: Record<string, string> = {
 
   // ── Tool labels (ToolCallDisplay TOOL_INFO) ──
   // read/list niosą parametr scope (vault|memory):
+  'tool.move': 'Przenieś lub skopiuj plik',
+  'tool.view_image': 'Obejrzyj obraz',
+  'tools.label.move': 'Przenoszenie lub kopiowanie plików',
+  'tools.label.view_image': 'Oglądanie obrazów',
+  'mcp.view_image.svg': 'SVG to plik tekstowy; do jego odczytu służy read.',
+  'mcp.view_image.pixels': 'Obraz przekracza limit 40 megapikseli.',
+  'mcp.view_image.header': 'Nie można odczytać nagłówka obrazu (wymagany PNG, JPEG, GIF lub WebP).',
+  'mcp.media.sub_text': 'Obraz nie został przekazany: ten sub-agent otrzymuje tylko tekst i nie widzi obrazu.',
+  'mcp.provider.invalid_id': 'Nieprawidłowe id dostawcy: wymagane ^(?!.*__)[a-z][a-z0-9_]{1,31}$; __ jest niedozwolone.',
+  'mcp.provider.invalid_name': 'Nieprawidłowa lub powtórzona nazwa narzędzia: wymagane ^(?!.*__)[a-z][a-z0-9_]{1,47}$; __ jest niedozwolone.',
   'tool.check_syntax': 'Sprawdź składnię',
   'tool.read': 'Odczyt',
   'tool.list': 'Lista plików',
@@ -2750,7 +2760,7 @@ export const pl: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary skonsolidowane w jeden prymityw ze scope)
-  'mcp.view_image.desc': 'Obejrzyj obraz w vaulcie. Wymaga modelu obsługującego obrazy; limit to 10 MiB.',
+  'mcp.view_image.desc': 'Obejrzyj obraz w vaulcie. Tylko PNG, JPEG, GIF lub WebP (SVG: użyj read). Wymaga vision; odrzuca pliki ponad 10 MiB, nieczytelne nagłówki i obrazy ponad 40 MP przed dekodowaniem. Zmniejsza bok ponad 1568 px.',
   'mcp.view_image.path': 'Ścieżka obrazu w vaulcie.',
   'mcp.view_image.denied': 'Nieprawidłowa lub niedostępna ścieżka obrazu.',
   'mcp.view_image.unsupported': 'Plik nie jest obsługiwanym obrazem.',
@@ -2813,7 +2823,7 @@ export const pl: Record<string, string> = {
   'approval.type.vault_move': 'Przeniesienie lub kopia pliku',
   'approval.desc.vault_move': '{{name}} chce przenieść plik.',
   'approval.desc.vault_copy': '{{name}} chce skopiować plik.',
-  'mcp.move.desc': 'Przenieś lub skopiuj plik vaulta, także binarny. Nie nadpisuje istniejącego celu. Niedostępne w szkicach.',
+  'mcp.move.desc': 'Przenieś lub skopiuj plik vaulta, także binarny. Odmawia istniejącemu celowi, sprawdzanemu ponownie tuż przed operacją. API hosta nie gwarantuje atomowej ochrony przed nadpisaniem przy równoczesnych zmianach. Niedostępne w szkicach.',
   'mcp.move.from': 'Ścieżka pliku źródłowego',
   'mcp.move.to': 'Ścieżka pliku docelowego',
   'mcp.move.mode': 'move (domyślnie) lub copy',

@@ -27,6 +27,7 @@
  * dopisana wprost do komunikatu w `setDebug()`.
  */
 
+import { redactImageText, imageRedactionReplacer } from './imageRedaction.js';
 import { maskSensitiveData } from '../security/SensitiveDataGuard.js';
 import { t } from '../i18n/index.js';
 import { LogFileSink } from './LogFileSink.js';
@@ -53,7 +54,7 @@ const ICONS = {
 };
 
 function maskLogText(value: string): string {
-    return maskSensitiveData(value);
+    return maskSensitiveData(redactImageText(value));
 }
 
 /** Ile poziomów zagnieżdżenia przechodzimy, zanim spłaszczymy do tekstu (anty-cykl). */
@@ -83,7 +84,7 @@ function maskLogValue(value: unknown, depth = 0): unknown {
         // `cause` bywa nieprzeliczalne (konstruktor `new Error(msg, { cause })`), więc osobno.
         if (source.cause !== undefined) target.cause = maskLogValue(source.cause, depth + 1);
         for (const key of Object.keys(source)) {
-            if (key === 'cause' || key === 'name' || key === 'message' || key === 'stack') continue;
+            if (key === 'base64' || key === 'cause' || key === 'name' || key === 'message' || key === 'stack') continue;
             target[key] = maskLogValue(source[key], depth + 1);
         }
         return clone;
@@ -91,7 +92,7 @@ function maskLogValue(value: unknown, depth = 0): unknown {
     if (Array.isArray(value)) return value.map(item => maskLogValue(item, depth + 1));
     if (value && typeof value === 'object') {
         try {
-            return JSON.parse(maskLogText(JSON.stringify(value)));
+            return JSON.parse(maskLogText(JSON.stringify(value, imageRedactionReplacer)));
         } catch {
             return maskLogText(_fallbackToString(value));
         }
@@ -254,8 +255,8 @@ class Logger {
     /** Tool call log - debug only */
     tool(toolName: string, args: unknown, result: unknown): void {
         if (!this._debug) return;
-        const argStr = maskSensitiveData(typeof args === 'string' ? args : JSON.stringify(args, null, 2));
-        const resultStr = maskSensitiveData(typeof result === 'string' ? result : JSON.stringify(result));
+        const argStr = maskLogText(typeof args === 'string' ? args : JSON.stringify(args, imageRedactionReplacer, 2));
+        const resultStr = maskLogText(typeof result === 'string' ? result : JSON.stringify(result, imageRedactionReplacer));
         const truncResult = resultStr?.length > 500 ? resultStr.slice(0, 500) + '...' : resultStr;
         // Nagłówek grupy: był `console.groupCollapsed` (poza białą listą walidatora), teraz płaski
         // `console.debug` z tym samym tekstem/stylem — Args/Result i tak lądowały osobnymi liniami.

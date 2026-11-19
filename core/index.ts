@@ -324,3 +324,5 @@ export { removeFolderIfEmpty } from './utils/removeFolderIfEmpty.js';
 export type { RemoveFolderResult } from './utils/removeFolderIfEmpty.js';
 
 export { messageTime } from './messageTime.js';
+
+export { redactImageText, imageRedactionReplacer } from './utils/imageRedaction.js';

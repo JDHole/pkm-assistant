@@ -424,3 +424,7 @@ i usuwanie; mutacja usuwająca `input.remove()` powoduje jego porażkę. Macierz
 MIME/rozszerzenia sprawdza telefon, desktop i tablet bez zmiany klasyfikacji.
 
 Wywołania `check_syntax` mają etykietę PL/EN i pokazują ścieżkę.
+
+### Poprawki odbioru narzędzi vaulta i dostawców
+
+Katalog ToolCallDisplay zawiera tłumaczone PL/EN nazwy move i view_image; podpowiedź move pokazuje obie ścieżki. Etykiety osi uprawnień mają osobne tools.label.* dla obu narzędzi.

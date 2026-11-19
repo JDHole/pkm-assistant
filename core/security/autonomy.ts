@@ -119,7 +119,7 @@ export function classifyToolRisk({
 
 
     const greenTools = new Set([
-        'read', 'check_syntax', 'list', 'search',
+        'read', 'view_image', 'check_syntax', 'list', 'search',
         'artifact_read', 'artifact_list',
         'vault_read', 'vault_list', 'vault_search',
         // Czytanie WŁASNEJ skrzynki. `kom_read` odhacza `ai_read` w swoim pliku, ale to
@@ -161,6 +161,7 @@ export function classifyToolRisk({
         return TOOL_RISK_LEVELS.RED;
     }
 
+    // move/copy must be at least as strict as both write and delete: RED even for copy.
     const redTools = new Set([
         'delete', 'vault_delete', 'memory_delete', 'move',
         // `agent_message`/`connect_to_server` już nie istnieją — wpisy zostają fail-closed

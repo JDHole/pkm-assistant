@@ -39,7 +39,7 @@ function effect(tool: string, action: string, targets: EffectTarget[], check: Ef
 // Narzędzia bez bezpośredniego skutku. `delegate` sam niczego nie zapisuje: ewentualne zapisy
 // suba to jego własne, osobne wywołania narzędzi.
 const READ_ONLY_TOOLS = new Set([
-    'read', 'check_syntax', 'list', 'search', 'web_search', 'web_read', 'ask_user',
+    'read', 'view_image', 'check_syntax', 'list', 'search', 'web_search', 'web_read', 'ask_user',
     'kom_list', 'kom_read', 'artifact_read', 'artifact_list', 'delegate',
 ]);
 
@@ -58,6 +58,14 @@ export function describeToolEffect(toolName: string, args: unknown, result?: unk
         case 'write': {
             const mode = stringField(canonicalArgs.mode) ?? 'replace';
             return effect(tool, mode, path ? [{ kind: 'vault-file', path }] : [], 'exists');
+        }
+        case 'move': {
+            const mode = canonicalArgs.mode === 'copy' ? 'copy' : 'move';
+            const from = stringField(output.from) ?? stringField(canonicalArgs.from);
+            const to = stringField(output.to) ?? stringField(canonicalArgs.to);
+            // Source and destination have different postconditions; do not claim a single exists/absent check.
+            return effect(tool, mode, [from, to].filter((p): p is string => !!p)
+                .map(path => ({ kind: 'vault-file' as const, path })), 'none');
         }
         case 'delete':
             return effect(tool, 'delete', path ? [{ kind: 'vault-file', path }] : [], 'absent');

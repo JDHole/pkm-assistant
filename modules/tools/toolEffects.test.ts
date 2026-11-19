@@ -138,3 +138,11 @@ test('checkEffectTargets requires every target to match and skips unchecked effe
     t.is(calls.length, 7);
 });
 
+
+test('move/copy report both canonical targets without asserting identical postconditions', t => {
+    for (const mode of ['move', 'copy']) t.deepEqual(describeToolEffect('move', { from: 'in%2Fa.png', to: 'out%2Fb.png', mode },
+        { from: 'in/a.png', to: 'out/b.png', success: true }), {
+        tool: 'move', action: mode, targets: [{ kind: 'vault-file', path: 'in/a.png' }, { kind: 'vault-file', path: 'out/b.png' }], check: 'none',
+    });
+    t.is(describeToolEffect('view_image', { path: 'a.png' }), null);
+});

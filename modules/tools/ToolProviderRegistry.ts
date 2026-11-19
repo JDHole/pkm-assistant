@@ -29,7 +29,7 @@ export class ToolProviderRegistry implements PkmAssistantPublicApi {
     }
     registerToolProvider(provider: ToolProviderRegistration): ToolProviderHandle {
         if (this.disposed) throw new Error('Provider registry is unloaded');
-        if (!provider || typeof provider.id !== 'string' || !/^[a-z][a-z0-9_]{1,31}$/.test(provider.id) || provider.id.endsWith('\n')) throw new Error('Invalid provider id');
+        if (!provider || typeof provider.id !== 'string' || !/^(?!.*__)[a-z][a-z0-9_]{1,31}$/.test(provider.id) || provider.id.endsWith('\n')) throw new Error(t('mcp.provider.invalid_id'));
         const { id } = provider;
         if (this.has(id) || Object.hasOwn(this.registry.getBuiltinServerMap(), id) || this.configuredIds().includes(id) || this.registry.getAllTools().some(tool => tool.serverName === id)) throw new Error(`Provider id already in use: ${id}`);
         if (typeof provider.name !== 'string' || provider.name.length < 1 || provider.name.length > 60) throw new Error('Invalid provider name');
@@ -63,7 +63,7 @@ export class ToolProviderRegistry implements PkmAssistantPublicApi {
         if (!Array.isArray(tools) || tools.length > 64) throw new Error('Invalid provider tools');
         const names = new Set<string>();
         return Array.from(tools, tool => {
-            if (!tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{1,47}$/.test(tool.name) || tool.name.endsWith('\n') || names.has(tool.name)) throw new Error('Invalid or duplicate tool name');
+            if (!tool || typeof tool.name !== 'string' || !/^(?!.*__)[a-z][a-z0-9_]{1,47}$/.test(tool.name) || tool.name.endsWith('\n') || names.has(tool.name)) throw new Error(t('mcp.provider.invalid_name'));
             names.add(tool.name);
             if (typeof tool.description !== 'string' || tool.description.length < 1 || tool.description.length > 2000) throw new Error('Invalid tool description');
             if (!tool.inputSchema || typeof tool.inputSchema !== 'object' || Array.isArray(tool.inputSchema) || tool.inputSchema.type !== 'object') throw new Error('Invalid tool input schema');

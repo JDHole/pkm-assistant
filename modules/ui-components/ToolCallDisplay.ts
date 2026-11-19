@@ -101,6 +101,8 @@ export const TOOL_INFO = {
     obsidian_app: _toolEntry(() => UiIcons.file(14), 'obsidian_app'),
     // Prymitywy (read/list ze scope vault|memory):
     check_syntax:    _toolEntry(() => UiIcons.file(14), 'check_syntax'),
+    view_image:      _toolEntry(() => UiIcons.file(14), 'view_image'),
+    move:            _toolEntry(() => UiIcons.folder(14), 'move'),
     read:            _toolEntry(() => UiIcons.file(14), 'read'),
     list:            _toolEntry(() => UiIcons.folder(14), 'list'),
     write:           _toolEntry(() => UiIcons.edit(14), 'write'),
@@ -184,6 +186,7 @@ export function getToolIcon(toolName: string, color = 'currentColor', size = 14)
  * indeksowa) — kod czyta je generycznie w gałęziach `default`.
  */
 interface ToolInputPayload {
+    from?: string;
     query?: string;
     url?: string;
     path?: string;
@@ -241,7 +244,10 @@ function formatToolInputHint(toolName: string, input: unknown): string {
                 return data.query || '';
             case 'web_read':
                 return data.url ? data.url.replace(/^https?:\/\//, '').slice(0, 50) : '';
+            case 'move':
+                return `${data.from || '?'} → ${data.to || '?'}`;
             case 'check_syntax':
+            case 'view_image':
             case 'read':
             case 'vault_read':
                 return data.path ? _shortPath(data.path) : '';
@@ -306,6 +312,9 @@ function formatToolInputDetail(toolName: string, input: unknown) {
         // TS-boundary: jak w formatToolInputHint - JSON od wołającego, bez walidacji schematem.
         const data = (typeof input === 'string' ? JSON.parse(input) : (input || {})) as ToolInputPayload;
         switch (toolName) {
+            case 'move':
+                return t('mcp.move.approval', { mode: data.mode || 'move', from: data.from || '?', to: data.to || '?' });
+            case 'view_image':
             case 'read':
             case 'vault_read':
                 return data.path || '';
@@ -474,6 +483,8 @@ function formatToolOutput(toolName: string, output: unknown) {
                     detail: paths || null
                 };
             }
+            case 'view_image':
+                return { summary: data.error || (typeof data.summary === 'string' ? data.summary : getToolCallLabel(toolName)), detail: null };
             case 'read':
             case 'vault_read': {
                 const content = data.content || (typeof data === 'string' ? data : '');
@@ -822,6 +833,8 @@ export function describeToolCall(name: string, input: unknown): string {
         const folder = typeof data?.folder === 'string' ? data.folder : undefined;
         const url = typeof data?.url === 'string' ? data.url : undefined;
         switch (name) {
+            case 'view_image':
+                return t('chat.tile.tool.generic', { name: getToolCallLabel(name) }) + (path ? `: ${_shortPath(path)}` : '');
             case 'read':
             case 'vault_read':
                 return t('chat.tile.tool.read', { path: path ? _shortPath(path) : '' });

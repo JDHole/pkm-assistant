@@ -568,3 +568,7 @@ kontrakt i testy zachowania są w `modules/tools/CLAUDE.md`.
 `SettingsContent.ts` ukrywa przełącznik render_check klasą `is-hidden`, aktualizowaną przy zmianie nawigacji; reguła `.pkm-render-check-setting.is-hidden` w `src/styles.css` przebija bazowe `display: flex` Obsidiana.
 
 `move` klasyfikowane jest jako RED; MCP osobno sprawdza źródło jako delete/read i cel jako write.
+
+### Poprawki odbioru narzędzi vaulta i dostawców
+
+Logger używa wspólnej imageRedaction przed maskowaniem sekretów i skracaniem; obejmuje obiekty mediów, JSON tekstowy i data-URL na konsoli oraz w LogFileSink. view_image ma GREEN jak read, move RED jak write/delete (katalog ryzyka przypina oba).

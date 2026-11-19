@@ -118,8 +118,8 @@ test('no MCP manager: RED, full modal arguments, exact per-tool consent and only
     const args = { path: '../external-target', nested: { text: 'full argument'.repeat(500) }, _invocationAgentName: 'forged' };
     t.deepEqual(await f.invoke('local__read', args), { ok: true });
     t.deepEqual(received, { args: { path: args.path, nested: args.nested }, keys: ['agentName', 'isMobile', 'signal'], agent: 'Alice', mobile: true, aborted: false });
-    t.like(f.approvals[0], { type: 'external.call', approvalTarget: 'local__read', targetPath: '', externalServer: 'local', externalArgs: { path: args.path, nested: args.nested } });
-    t.deepEqual(f.plugin.approvalManager.getAlwaysApprovedRules('Alice'), ['external.call::local__read']);
+    t.like(f.approvals[0], { type: 'external.call', approvalTarget: 'provider:["local","local__read"]', targetPath: '', externalServer: 'local', externalArgs: { path: args.path, nested: args.nested } });
+    t.deepEqual(f.plugin.approvalManager.getAlwaysApprovedRules('Alice'), ['external.call::provider:["local","local__read"]']);
     const modal = new ApprovalModal(f.app as never, f.approvals[0]);
     modal.onOpen();
     const text = (node: HTMLElement): string => [node.textContent ?? '', ...Array.from(node.children).map(child => text(child as HTMLElement))].join('\n');
@@ -197,10 +197,11 @@ for (const duringHandshake of [false, true]) test(`later MCP collision cannot re
     t.deepEqual(f.registry.getAllToolNames(), ['local__read']);
 });
 
-test('ambiguous double-underscore names never overwrite an existing tool', t => {
-    const f = fixture(); f.providers.registerToolProvider({ id: 'local__nested', name: 'One', tools: [tool()] });
-    t.throws(() => f.providers.registerToolProvider(registration([tool('nested__read')])), { message: /already registered/ });
-    t.deepEqual(f.providers.list(), [{ id: 'local__nested', name: 'One', toolCount: 1 }]);
+test('ambiguous double-underscore names are rejected before registration', t => {
+    const f = fixture();
+    t.throws(() => f.providers.registerToolProvider({ id: 'local__nested', name: 'One', tools: [tool()] }), { message: /__ is not allowed/ });
+    t.throws(() => f.providers.registerToolProvider(registration([tool('nested__read')])), { message: /__ is not allowed/ });
+    t.deepEqual(f.providers.list(), []);
 });
 
 // Exercise the production sub executor: its whitelist, MCP permissions, context and transcript.
@@ -264,7 +265,7 @@ for (const optedIn of [false, true]) test(`full sub-agent loop enforces provider
     if (optedIn) {
         t.deepEqual(received, { name: 'Alice', keys: ['agentName', 'isMobile', 'signal'] });
         t.true(JSON.stringify(payloads[1].messages).includes('provider'));
-        t.deepEqual(f.plugin.approvalManager.getAlwaysApprovedRules('Alice'), ['external.call::local__read']);
+        t.deepEqual(f.plugin.approvalManager.getAlwaysApprovedRules('Alice'), ['external.call::provider:["local","local__read"]']);
     } else {
         t.is(f.approvals.length, 0);
         t.true(JSON.stringify(payloads[1].messages).includes('local__read'));

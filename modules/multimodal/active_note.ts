@@ -37,7 +37,7 @@ export const ACTIVE_NOTE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp'
 const ACTIVE_NOTE_MAX_IMAGES = 5;
 export const ACTIVE_NOTE_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ACTIVE_NOTE_OPTIMIZE_THRESHOLD = 1024 * 1024;
-const ACTIVE_NOTE_MAX_DIM = 1568;
+export const ACTIVE_NOTE_MAX_DIM = 1568;
 
 /**
  * Ogrodzenie Oczka.

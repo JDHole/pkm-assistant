@@ -23,7 +23,7 @@ export function deriveDelegateCategory(toolsList: string[] | null | undefined): 
     if (!toolsList || toolsList.length === 0) return 'mixed';
     const groupScores = {
         // Prymitywy (read/list/write/delete/create_folder) + legacy vault_* dla starych YAML.
-        vault: ['read', 'list', 'write', 'delete', 'create_folder', 'vault_read', 'vault_list', 'vault_write', 'vault_delete', 'vault_search'],
+        vault: ['view_image', 'move', 'read', 'list', 'write', 'delete', 'create_folder', 'vault_read', 'vault_list', 'vault_write', 'vault_delete', 'vault_search'],
         memory: ['memory_save', 'memory_delete'],
         search: ['search', 'vault_search', 'memory_sessions', 'web_search'],
         // `agent_message` skasowany, ale zostaje w liście - stare YAML-e subów mogą go

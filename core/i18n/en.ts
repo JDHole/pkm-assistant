@@ -160,6 +160,16 @@ export const en: Record<string, string> = {
 
   // ── Tool labels (ToolCallDisplay TOOL_INFO) ──
   // read/list carry a scope param (vault|memory):
+  'tool.move': 'Move or copy file',
+  'tool.view_image': 'View image',
+  'tools.label.move': 'Move or copy files',
+  'tools.label.view_image': 'View images',
+  'mcp.view_image.svg': 'SVG is a text file; use read to read it.',
+  'mcp.view_image.pixels': 'Image exceeds the 40 megapixel limit.',
+  'mcp.view_image.header': 'Cannot read the image header (PNG, JPEG, GIF or WebP required).',
+  'mcp.media.sub_text': 'Image not delivered: this sub-agent receives text only and cannot see the image.',
+  'mcp.provider.invalid_id': 'Invalid provider id: expected ^(?!.*__)[a-z][a-z0-9_]{1,31}$; __ is not allowed.',
+  'mcp.provider.invalid_name': 'Invalid or duplicate tool name: expected ^(?!.*__)[a-z][a-z0-9_]{1,47}$; __ is not allowed.',
   'tool.check_syntax': 'Check syntax',
   'tool.read': 'Read',
   'tool.list': 'List files',
@@ -2744,7 +2754,7 @@ export const en: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary consolidated into one scoped primitive)
-  'mcp.view_image.desc': 'View an image in the vault. Requires a vision-capable model; images over 10 MiB are rejected.',
+  'mcp.view_image.desc': 'View an image in the vault. PNG, JPEG, GIF or WebP only (SVG: use read). Requires vision; rejects files over 10 MiB, unreadable headers or images over 40 MP before decoding. Resizes sides over 1568 px.',
   'mcp.view_image.path': 'Path to the image in the vault.',
   'mcp.view_image.denied': 'Invalid or inaccessible image path.',
   'mcp.view_image.unsupported': 'The file is not a supported image.',
@@ -2807,7 +2817,7 @@ export const en: Record<string, string> = {
   'approval.type.vault_move': 'Move or copy a file',
   'approval.desc.vault_move': '{{name}} wants to move a file.',
   'approval.desc.vault_copy': '{{name}} wants to copy a file.',
-  'mcp.move.desc': 'Move or copy a vault file, including binary files. Never overwrites an existing destination. Unavailable in drafts.',
+  'mcp.move.desc': 'Move or copy a vault file, including binary files. Rejects an existing destination, checked again immediately before the operation. Host APIs cannot guarantee atomic no-replace against concurrent changes. Unavailable in drafts.',
   'mcp.move.from': 'Source vault file path',
   'mcp.move.to': 'Destination vault file path',
   'mcp.move.mode': 'move (default) or copy',

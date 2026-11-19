@@ -2571,3 +2571,7 @@ nakładanie oraz działanie z otwartą klawiaturą ekranową wymagają fizyczneg
 `RollingWindow.mobileEnvironment` zamraża możliwości przy pierwszej turze okna; nowe okno pobiera nową migawkę, więc zmiany w trakcie sesji nie są odzwierciedlane w prompcie.
 
 `messageTime` to cała zlokalizowana linia zamrożona przy wysyłce wiadomości użytkownika. `getMessagesForAPI` dodaje ją tylko do kopii dla modelu, także przy załącznikach; statystyki uwzględniają linię, a kolejka zachowuje ją podczas opóźnionej wysyłki. Format sesji nie zapisuje znacznika, więc wcześniejsze wiadomości po wznowieniu go nie mają.
+
+### Poprawki odbioru narzędzi vaulta i dostawców
+
+Interpretacja mediów w _chatExecuteToolCall uwzględnia źródło rejestrowe pobrane przed wykonaniem. Tylko built-in może oddać bloki obrazów; dostawcy i MCP (source:user) oraz brak tożsamości dają zwykły JSON przez budżet, nawet gdy wynik przypomina kind:media.

@@ -1,3 +1,4 @@
+import { imageRedactionReplacer } from '../../core/index.js';
 /** Obraz zwrócony przez narzędzie. */
 export interface ToolMediaImage {
     mime: string;
@@ -34,7 +35,8 @@ function isImage(value: unknown): value is ToolMediaImage {
 }
 
 /** Rozpoznaje wynik mediów i dostosowuje wynik generatora obrazu. */
-export function asToolMedia(toolName: string, raw: unknown): ToolMediaResult | null {
+export function asToolMedia(toolName: string, raw: unknown, source?: string): ToolMediaResult | null {
+    if (source !== undefined && source !== 'built-in') return null;
     if (!isRecord(raw)) return null;
     if (raw.kind === 'media') {
         return Array.isArray(raw.images) && raw.images.length > 0 && raw.images.every(isImage)
@@ -53,12 +55,7 @@ export function asToolMedia(toolName: string, raw: unknown): ToolMediaResult | n
 /** Tworzy opis wyniku bez danych binarnych. */
 export function mediaTextPart(_toolName: string, raw: unknown): Record<string, unknown> {
     if (!isRecord(raw)) return {};
-    const cleaned = JSON.parse(JSON.stringify(raw, (key, value: unknown) => {
-        if (key === 'base64') return undefined;
-        return typeof value === 'string'
-            ? value.replace(/data:image(?:\\\/|\/)([A-Za-z0-9.+-]+);base64,(?:[A-Za-z0-9+=]|\\\/|\/)+/g, '[image image/$1]')
-            : value;
-    })) as Record<string, unknown>;
+    const cleaned = JSON.parse(JSON.stringify(raw, imageRedactionReplacer)) as Record<string, unknown>;
     if (raw.kind === 'media' && Array.isArray(raw.images)) {
         cleaned.images = raw.images.filter(isImage).map(({ mime, width, height }) => ({
             mime, ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }),

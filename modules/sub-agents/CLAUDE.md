@@ -1127,3 +1127,7 @@ platformach, whitelistę wnuka, notę PL/EN, odmowy bez zmiany pliku i manifestu
 oraz zachowany przegląd prowadzącego. Nie wymagają żywego Obsidiana ani sieci.
 
 Runner zamraża całą zlokalizowaną linię czasu na początku `runTask` i dodaje ją przy serializacji zadania dla modelu; rama otrzymuje stałą instrukcję czasu. Na mobile runner pobiera migawkę urządzenia raz na bieg i dołącza wspólny `renderMobileEnvironment`; na desktopie sekcji nie ma. `check_syntax` jest w domyślnej liście; jawna lista narzędzi istniejącego suba zachowuje pierwszeństwo.
+
+### Poprawki odbioru narzędzi vaulta i dostawców
+
+Sub-agent ma tekstowy tor narzędzi: każdy wynik kind:media (dowolna nazwa), a także generate_image, jest redagowany i otrzymuje informację, że sub nie widzi obrazu. Base64 nie trafia do modelu/transkryptu/handoff. move jest writerem, lecz przy runtime szkiców bieg mający move odmawia przed alokacją i wykonaniem, także dla magazynu niedostępnego. Efekt move/copy wymienia oba cele; view_image ma brak skutków.

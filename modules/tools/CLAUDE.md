@@ -1,4 +1,4 @@
-`view_image` należy do serwera vault i wymaga `vault.read` oraz zaufanej autoryzacji kanonicznej ścieżki przed odczytem. Czyta zwykły plik vaulta przez `vault_binary_io`, sprawdza dekodowanie, limit 10 MiB i używa optymalizacji aktywnej notatki. Wynik mediów zawiera opis, oryginalne wymiary i rozmiar, a dla modeli bez vision trafia wyłącznie tekst. `.pkm-assistant` jest niedostępne.
+`view_image` należy do vault i wymaga osi read_notes oraz vault.read przed odczytem. Przyjmuje PNG/JPEG/GIF/WebP (SVG odsyła do read), rozpoznaje MIME i wymiary z nagłówka przed createImageBitmap, odmawia nieczytelnemu nagłówkowi, plikom >10 MiB i obrazom >40 mln pikseli. Limit pikseli ogranicza koszt rozpakowania (sam RGBA to do 160 MB, dekoder może potrzebować więcej). Dłuższy bok >1568 px zmniejsza także dla plików <1 MiB; wynik zmniejszenia ma MIME JPEG. Błąd skalowania odmawia, nie odsyła dużego oryginału. Aktywna notatka zachowuje własne dotychczasowe zachowanie.
 
 # modules/tools/
 
@@ -1431,11 +1431,18 @@ Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu tre�
 ## move
 
 `move` przenosi plik przez `fileManager.renameFile` (linki według ustawień Obsidiana)
-lub kopiuje przez `vault.copy`, bez dekodowania treści. Nie nadpisuje celu; jak
-`write` tworzy brakujący folder nadrzędny. Obie ścieżki podlegają osobnym bramkom:
+lub kopiuje przez `vault.copy`, bez dekodowania treści. Odmawia istniejącemu celowi,
+sprawdzając indeks, opcjonalne getAbstractFileByPathInsensitive i adapter.exists
+również bezpośrednio przed copy/rename, po utworzeniu folderu. Host nie daje
+atomowego no-replace: inny proces może utworzyć cel między ostatnią kontrolą a
+operacją; nie gwarantujemy atomowej ochrony przed takim wyścigiem.
+Nowy plik wymaga dokładnie osi write i vault.write jak write(mode:create).
+create_files:false wyłącza dziś tylko create_folder, nie write(create).
+Brakujący folder wymaga dodatkowo osi create_folder i vault.create_folder dla
+jego ścieżki, również tuż przed mkdir po oczekiwaniu na zgodę. Obie ścieżki podlegają osobnym bramkom:
 źródło delete/read, cel write. Zgoda trwała ma klucz z trybem i obiema ścieżkami,
 a sesyjna zgoda write nie obejmuje move. Narzędzie odmawia w hostach szkiców,
-ponieważ nie obsługują one przenoszenia ani kopiowania binariów. `.pkm-assistant`
+ponieważ nie obsługują one przenoszenia ani kopiowania binariów. Jest writerem w subToolExecution; bieg suba z move przy skonfigurowanym runtime szkiców (gotowym lub niedostępnym) odmawia czytelnie przed alokacją szkicu i przed narzędziami. Raport skutków move/copy wskazuje oba cele, bez fałszywego wspólnego sprawdzenia exists/absent. `.pkm-assistant`
 jest zabronione także administratorowi.
 
 ## P2 — publiczne API dostawców narzędzi
@@ -1443,7 +1450,7 @@ jest zabronione także administratorowi.
 `ToolProviderRegistry` oraz typy `PkmAssistantPublicApi`, `ToolProviderRegistration`,
 `ProviderTool`, `ProviderToolContext`, `ToolProviderHandle` są eksportowane przez barrel.
 Composition root publikuje zamrożoną fasadę `plugin.api` z apiVersion:1 po `_ready`
-i emituje `pkm-assistant:api-ready`. Przed gotowością i po unload API jest undefined.
+i emituje `pkm-assistant:api-ready`; wyjątek słuchacza jest łapany i logowany, nie przerywa startu. Przed gotowością i po unload API jest undefined.
 Unload usuwa narzędzia i przerywa wykonania; stare uchwyty są no-op, stare API nie
 rejestruje do następcy. Rejestr żyje tylko w RAM, zero ładowania kodu z vaulta.
 Kontrakt i przykład JS: `docs/tool-providers.md`.
@@ -1470,7 +1477,7 @@ Nazwy built-in i id skonfigurowanych MCP są zarezerwowane przy rejestracji.
 Dostawca już żywy wygrywa z później dodanym MCP: editor/import odmawiają zapisu,
 manager odmawia connect przed handshake oraz po await przed publikacją. Po restarcie
 zapisana konfiguracja MCP rezerwuje ID jako pierwsza. Sprawdzane są również pełne
-nazwy narzędzi, bo `__` może wystąpić w id/nazwie. Zgody nadal wiążą id/nazwę,
+nazwy narzędzi; nowe id/nazwy dostawców zabraniają `__`. Zgody dostawców mają osobną przestrzeń provider + para JSON (id, pełna nazwa); stare klucze MCP pozostają zgodne. Zgody nadal wiążą id/nazwę,
 nie kryptograficzną tożsamość zainstalowanej wtyczki.
 
 SettingsContent pokazuje pozycje tylko do odczytu, profil przypina ten sam id w
@@ -1479,3 +1486,7 @@ mcp.providers.count/ids, bez nazw/opisów narzędzi. Testy: ToolProviderRegistry
 (przez rzeczywiste MCP, PermissionSystem, ApprovalManager, modal, sub-executor i
 AgentLoop), ToolProviderUi.test.ts (render i klik), src/main.mobile.test.ts (pełny
 start, event, wykonanie, raport, unload na obu platformach).
+
+### Media i tekst (poprawki odbioru)
+
+Czat rozpoznaje media dopiero po źródle narzędzia pobranym z rejestru przed wykonaniem: source:user i brak tożsamości dają zwykły JSON przez budżet, także dla obiektu kind:media. API dostawców v1 nie wysyła obrazów. Sub-agent obsługuje obecnie tylko tekst: każdy kind:media oraz adapter generate_image są redagowane przez wspólne mediaTextPart i dostają jawne image_delivery o braku widzenia. Redakcja imageRedaction w core działa przed cięciem logów; nie zależy od nazwy narzędzia. Testy odbiorowe w korzeniu: tool_acceptance.test.ts, provider_acceptance.test.ts; nagłówki w ViewImageTool.headers.test.ts, logi w core/utils/Logger.media.test.ts.

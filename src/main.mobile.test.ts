@@ -1560,3 +1560,29 @@ for (const mobile of [false, true]) test.serial(`P2 public provider API: ready, 
     t.is(registry.getTool('local__read'), null);
     t.throws(() => api.registerToolProvider({ id: 'other', name: 'Other', tools: [] }), { message: 'Provider registry is unloaded' });
 });
+
+for (const mobile of [false, true]) test.serial(`api-ready listener failure preserves ready callbacks and startup (${mobile})`, async t => {
+    let callbacks = 0;
+    let plugin!: InstanceType<typeof Plugin>;
+    const errors: unknown[][] = [];
+    mock.method(log, 'error', (...args: unknown[]) => { errors.push(args); });
+    const registry = await bootToolRegistry(t, mobile, async host => {
+        plugin = host;
+        const releaseNotes = host.show_release_notes_if_new_version.bind(host);
+        mock.method(host, 'show_release_notes_if_new_version', async () => {
+            host.onReady(() => { callbacks++; });
+            await releaseNotes();
+        });
+        const trigger = host.app.workspace.trigger.bind(host.app.workspace);
+        mock.method(host.app.workspace, 'trigger', (name: string, ...args: unknown[]) => {
+            if (name === 'pkm-assistant:api-ready') throw new Error('third-party listener failed');
+            trigger(name, ...args);
+        });
+    });
+    t.is(callbacks, 1);
+    t.is(plugin._ready, true);
+    t.is(plugin.api?.apiVersion, 1);
+    t.is(registry.getTool('move')?.source, 'built-in');
+    t.true(errors.some(args => String(args[1]).includes('api-ready listener')));
+    plugin.onunload();
+});

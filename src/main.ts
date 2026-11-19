@@ -985,7 +985,8 @@ export default class PkmAssistantPlugin extends PluginBase {
         registerToolProvider: (provider: Parameters<PkmAssistantPublicApi['registerToolProvider']>[0]) =>
           providers.registerToolProvider(provider),
       });
-      this.app.workspace.trigger('pkm-assistant:api-ready', this.api);
+      try { this.app.workspace.trigger('pkm-assistant:api-ready', this.api); }
+      catch (error) { log.error('Plugin', 'api-ready listener error:', error); }
     }
     this.draftStartupTask?.start();
     for (const cb of this._readyCallbacks) {

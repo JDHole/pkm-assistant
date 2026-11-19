@@ -177,8 +177,7 @@ Wywołania agenta przechodzą te same bramki co zewnętrzny MCP: source:user, RE
 opt-in id dostawcy w mcp_servers, uprawnienia, pełny podgląd argumentów i zgoda
 per konkretne narzędzie. Zwykłe reguły autonomii (w tym yolo) pozostają wspólne.
 Sub-agenci mają tę samą whitelistę i odmowę narzędzi zewnętrznych w kopii roboczej.
-Wynik przechodzi zwykłą serializację/budżet, wyjątki wspólną maskę sekretów bez
-stosu. Maskowanie po wzorcach nie wykrywa wszystkich możliwych danych poufnych.
+Wynik zawsze przechodzi zwykłą serializację JSON/budżet, także obiekt kind:media; API v1 nie umożliwia zwracania obrazów. Rozpoznawanie mediów w czacie wymaga zaufanego źródła built-in; source:user (również MCP) nie uzyskuje bloków obrazu. Wyjątki przechodzą wspólną maskę sekretów bez stosu. Maskowanie po wzorcach nie wykrywa wszystkich możliwych danych poufnych.
 
 Dostawca dostaje wyłącznie agentName/isMobile/signal, bez wewnętrznego kontekstu
 narzędzi wbudowanych. Timeout (domyślnie 30 s, zakres 1–120 s) oddaje błąd modelowi
@@ -190,7 +189,7 @@ blokowanie tego samego wątku blokuje także Obsidiana i zegary timeoutu.
 Walidacja jest atomowa. Id nie może kolidować z built-in, konfiguracją MCP ani
 innym dostawcą. Żywy dostawca blokuje późniejsze połączenie MCP pod tym id,
 także podczas handshake; po restarcie zapisana konfiguracja MCP rezerwuje id
-pierwsza. Reguły zgody identyfikują id/nazwę narzędzia, nie autora wtyczki.
+pierwsza. Id i nazwa narzędzia dostawcy nie mogą zawierać `__`. Zgody dostawców mają osobny klucz provider + jednoznaczną parę JSON (id, pełna nazwa), więc nie dziedziczą zgód MCP. Zapisane klucze MCP pozostają zgodne; stare zgody dostawców wymagają ponownego pytania. Reguły identyfikują id/nazwę, nie autora wtyczki.
 Wyładowanie usuwa dostawców; stare uchwyty są bezczynne. Wtyczka dostawcy powinna
 wywołać unregister przy własnym wyładowaniu i obsłużyć ponowne api-ready.
 
@@ -307,3 +306,9 @@ ani `npm audit` tego repo, ani ten plik - patrz sekcja "Zewnętrzne serwery MCP 
   sieć tylko przez jawne API (modele, web search). ⚠️ **Wyjątek świadomy:** zewnętrzny serwer
   MCP na transporcie `stdio` to osobny proces systemowy uruchomiony przez usera - jego
   możliwości ogranicza system operacyjny, nie plugin
+
+## Obrazy vaulta i przenoszenie plików
+
+view_image wymaga odczytu, odrzuca SVG (tekst przez read), nieczytelny nagłówek, >10 MiB oraz >40 MP przed dekoderem. PNG/JPEG/GIF/WebP mają MIME według bajtów, a bok >1568 px jest zmniejszany. Limit 40 MP ogranicza pamięć surowego RGBA do około 160 MB; nie jest pomiarem całego kosztu dekodera. Sub-agent dostaje wyłącznie opis z informacją, że nie widzi obrazu. Wspólna redakcja logów usuwa base64 i data-URL przed skracaniem.
+
+move/copy sprawdza źródło, cel i prawo tworzenia brakującego folderu; plik ma bramki write(create), folder create_folder. Sub z runtime szkiców odmawia move przed działaniem (również przy awarii magazynu). Cel jest sprawdzany ponownie po mkdir, także przez dostępne API niewrażliwe na wielkość liter. API hosta nie oferuje atomowego no-replace, więc pozostaje wyścig pomiędzy ostatnią kontrolą i operacją.

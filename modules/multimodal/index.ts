@@ -27,7 +27,7 @@
 export { transcribeAudio } from './SttAdapter.js';
 export { generateImage, IMAGE_GEN_PLATFORMS } from './ImageGenAdapter.js';
 export { AudioRecorder } from './AudioRecorder.js';
-export { buildActiveNoteContext, imageBytesAsBlock, ACTIVE_NOTE_IMAGE_EXTENSIONS, ACTIVE_NOTE_MAX_IMAGE_BYTES } from './active_note.js';
+export { buildActiveNoteContext, imageBytesAsBlock, ACTIVE_NOTE_MAX_DIM, ACTIVE_NOTE_IMAGE_EXTENSIONS, ACTIVE_NOTE_MAX_IMAGE_BYTES } from './active_note.js';
 
 // Typy publiczne modułu. `export type` ZNIKA przy transpilacji, więc powierzchnia
 // runtime'u zostaje dokładnie taka, jak wyżej.

@@ -53,6 +53,8 @@ export interface ToolDefinition {
 /** Trusted runtime context supplied only to built-in tool implementations. */
 export interface BuiltinToolExecutionContext {
     draftReview?: DraftReviewContext;
+    /** Recheck before move creates a missing parent, including after approval awaits. */
+    authorizeFolderCreate?: (path: string) => { allowed: boolean; reason?: string };
     parentConversation?: ParentConversationContext;
     /** Cap chosen by AgentLoop for the original tool name; 0 means no loop cap. */
     resultBudgetChars: number;

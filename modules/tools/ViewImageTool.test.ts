@@ -5,30 +5,30 @@ import { formatSessionEvent } from '../memory/activeSessionFormat.js';
 import type { BinaryIoApp } from './vault_binary_io.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 
-function fixture(size = 24) {
+function fixture(size = 68) {
     const calls: string[] = [];
     const file = { path: 'Images/a.png', name: 'a.png', extension: 'png', stat: { size } };
-    const app = { vault: { getAbstractFileByPath: () => file, readBinary: async () => { calls.push('read'); return new Uint8Array(24).fill(65).buffer; } } } as unknown as BinaryIoApp;
+    const app = { vault: { getAbstractFileByPath: () => file, readBinary: async () => { calls.push('read'); return Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=', 'base64')).buffer; } } } as unknown as BinaryIoApp;
     const context = { authorizeFileRead: (path: string) => { calls.push(path); return { allowed: true }; } } as BuiltinToolExecutionContext;
     return { app, context, calls };
 }
 
 test.serial('view_image authorizes before reading and delivers media without base64 in text or session', async t => {
     const original = globalThis.createImageBitmap;
-    globalThis.createImageBitmap = async () => ({ width: 3, height: 2, close() {} }) as ImageBitmap;
+    globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} }) as ImageBitmap;
     t.teardown(() => { globalThis.createImageBitmap = original; });
     const f = fixture();
     const result = await createViewImageTool().execute({ path: 'Images/a.png' }, f.app, {}, f.context);
     t.deepEqual(f.calls, ['Images/a.png', 'read']);
-    t.deepEqual(result, { kind: 'media', summary: 'Images/a.png | image/png | 3x2 | 24 bytes', images: [{ mime: 'image/png', base64: 'QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB' }] });
+    t.deepEqual(result, { kind: 'media', summary: 'Images/a.png | image/png | 1x1 | 68 bytes', images: [{ mime: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=' }] });
     const media = asToolMedia('view_image', result)!;
     const text = toToolMessageContent(media, { vision: false, textPart: mediaTextPart('view_image', result) });
-    t.is(text, '{"kind":"media","summary":"Images/a.png | image/png | 3x2 | 24 bytes","images":[{"mime":"image/png"}],"image_delivery":"not delivered: model without vision"}');
+    t.is(text, '{"kind":"media","summary":"Images/a.png | image/png | 1x1 | 68 bytes","images":[{"mime":"image/png"}],"image_delivery":"not delivered: model without vision"}');
     const session = formatSessionEvent('mcp_call', { tool: 'view_image', result }, '2026-11-19T00:00:00.000Z');
-    t.false(session.includes('QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB'));
+    t.false(session.includes('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='));
     t.true(session.includes('[image image/png ~1 kB]'));
     const vision = toToolMessageContent(media, { vision: true, textPart: mediaTextPart('view_image', result) });
-    t.deepEqual(vision, [{ type: 'text', text: JSON.stringify(mediaTextPart('view_image', result)) }, { type: 'image_url', image_url: { url: 'data:image/png;base64,QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB' } }]);
+    t.deepEqual(vision, [{ type: 'text', text: JSON.stringify(mediaTextPart('view_image', result)) }, { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=' } }]);
     t.true(session.includes('view_image'));
 });
 

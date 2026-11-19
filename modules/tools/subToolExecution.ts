@@ -14,7 +14,7 @@ export type HostPlugin = SearchToolPlugin & { artifactStore?: ArtifactStore; per
 function property<P, K extends keyof P>(object: P, key: K): P[K] { return object[key]; }
 const contentTools = new Set(['read', 'view_image', 'check_syntax', 'list', 'search', 'write', 'delete', 'create_folder', 'artifact_create', 'artifact_update', 'artifact_read', 'artifact_list', 'generate_image', 'add_text_to_image']);
 const liveTools = new Set(['memory_save', 'memory_delete', 'todo', 'kom_send', 'kom_read', 'kom_list', 'ask_user', 'delegate', 'sub_agent', 'agent_delegate', 'web_search', 'web_read']);
-const writers = new Set(['write', 'delete', 'create_folder', 'artifact_create', 'artifact_update', 'generate_image', 'add_text_to_image']);
+const writers = new Set(['move', 'write', 'delete', 'create_folder', 'artifact_create', 'artifact_update', 'generate_image', 'add_text_to_image']);
 export function isVaultContentWriter(name: string): boolean { return writers.has(name); }
 /** Called AFTER canonical registry identity/whitelist, BEFORE contextExtractor and permissions.
  * Return the SAME host to extractor and execute. Used by MCP/runner when drafts are injected; production activation belongs to P5.

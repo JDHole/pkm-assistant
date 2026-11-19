@@ -31,7 +31,7 @@ export interface LegacyToolAxisConfig {
 export const BUILTIN_TOOL_GROUPS: Record<string, string[]> = {
     app: ['obsidian_app'],
     core: ['ask_user'],
-    vault: ['read', 'check_syntax', 'write', 'list', 'delete', 'move', 'create_folder', 'search'],
+    vault: ['read', 'view_image', 'check_syntax', 'write', 'list', 'delete', 'move', 'create_folder', 'search'],
     memory: ['memory_save', 'memory_delete'],
     web: ['web_search', 'web_read'],
     multimodal: ['generate_image', 'add_text_to_image'],
@@ -106,6 +106,7 @@ const PERMISSION_TOOL_GATES: Record<string, string> = {
     delete: 'delete_files',
     // vault read-side (default read_notes=true; jawny false rzadki, ale honorujemy)
     read: 'read_notes',
+    view_image: 'read_notes',
     check_syntax: 'read_notes',
     list: 'read_notes',
     search: 'read_notes',
@@ -259,7 +260,7 @@ export function normalizeDisabledTools(input: unknown) {
  * a nie jeden globalny włącznik - przełącznik boolean nie miałby czego włączyć.
  */
 export const PERMISSION_SWITCH_TOOLS: Record<string, string[]> = {
-    read_notes: ['read', 'check_syntax', 'list', 'search'],
+    read_notes: ['read', 'view_image', 'check_syntax', 'list', 'search'],
     edit_notes: ['write', 'move'],
     create_files: ['create_folder'],
     delete_files: ['delete'],

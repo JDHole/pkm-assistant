@@ -119,3 +119,10 @@ test('hasLegacyToolAxis: wykrywa stare osie', t => {
     t.false(hasLegacyToolAxis({}));
     t.false(hasLegacyToolAxis({ enabled_tools: [] }));
 });
+
+test('view_image follows the read_notes switch and legacy read permissions', async t => {
+    const { applyPermissionSwitch } = await import('./toolAxis.js');
+    t.true(applyPermissionSwitch([], 'read_notes', false).includes('view_image'));
+    t.false(applyPermissionSwitch(['view_image'], 'read_notes', true).includes('view_image'));
+    t.true(computeDisabledToolsFromLegacy({ default_permissions: { read_notes: false } }).includes('view_image'));
+});

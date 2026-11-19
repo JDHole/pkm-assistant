@@ -348,3 +348,7 @@ zajmuje pełny wiersz istniejącej siatki, z widocznym opisem i celem dotyku 44 
 Przy konfiguracji MCP dodanej poza UI pod tym samym id profil pokazuje żywego
 dostawcę raz; kolidujący serwer nie zastępuje jego etykiety.
 Test renderowania i kliknięć PL/EN: `modules/tools/ToolProviderUi.test.ts`.
+
+### Poprawki odbioru narzędzi vaulta i dostawców
+
+view_image należy do vault i read_notes (również migracja dawnych uprawnień). move/copy egzekwuje write oraz delete/read, a przy brakującym folderze także create_folder. write(create) w obecnym modelu nie zależy od create_files; przełącznik ten steruje create_folder.

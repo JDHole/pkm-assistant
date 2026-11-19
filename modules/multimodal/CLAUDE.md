@@ -1,4 +1,4 @@
-`imageBytesAsBlock`, formaty i limit aktywnej notatki są eksportowane dla `view_image`; optymalizacja obu ścieżek jest wspólna.
+`ACTIVE_NOTE_MAX_DIM` (1568) i limit bajtów są współdzielone z view_image. Narzędzie ma osobną kontrolę nagłówków i skalowanie według wymiarów; imageBytesAsBlock i aktywna notatka zachowują dotychczasową optymalizację według rozmiaru.
 
 # modules/multimodal/
 
