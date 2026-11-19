@@ -33,9 +33,9 @@ export interface ActiveNoteOptions {
     canReadImage?: ((vaultPath: string) => boolean) | null;
 }
 
-const ACTIVE_NOTE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+export const ACTIVE_NOTE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
 const ACTIVE_NOTE_MAX_IMAGES = 5;
-const ACTIVE_NOTE_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const ACTIVE_NOTE_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ACTIVE_NOTE_OPTIMIZE_THRESHOLD = 1024 * 1024;
 const ACTIVE_NOTE_MAX_DIM = 1568;
 
@@ -153,48 +153,53 @@ export async function readVaultImageAsBlock(app: App, file: TFile): Promise<Imag
             return null;
         }
         const arrayBuffer = await app.vault.readBinary(file);
-        const ext = file.extension?.toLowerCase();
-
-        if (fileSize > ACTIVE_NOTE_OPTIMIZE_THRESHOLD && ext !== 'svg') {
-            try {
-                const blob = new Blob([arrayBuffer], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` });
-                const bitmap = await createImageBitmap(blob);
-                const { width, height } = bitmap;
-                const scale = Math.min(1, ACTIVE_NOTE_MAX_DIM / Math.max(width, height));
-                const newW = Math.round(width * scale);
-                const newH = Math.round(height * scale);
-                // Element odłączony: bufor offscreen do zmiany rozmiaru obrazu, nigdy nie
-                // trafia do DOM - `createEl` globalny z obsidiana robi to samo co
-                // `document.createElement('canvas')`, bez parenta. Ta gałąź kodu nie jest
-                // wołana przez testy AVA (`active_note.test.ts`), więc plik zostaje node-safe.
-                const canvas = createEl('canvas');
-                canvas.width = newW;
-                canvas.height = newH;
-                // Świeży `<canvas>` zawsze oddaje kontekst 2D; gdyby nie - TypeError leci
-                // do `catch (optErr)` poniżej i wracamy do oryginału, tak jak dotąd.
-                const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
-                ctx.drawImage(bitmap, 0, 0, newW, newH);
-                bitmap.close();
-                const optimizedBlob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.85));
-                canvas.width = 0;
-                canvas.height = 0;
-                // `toBlob` może oddać null - wtedy leci TypeError w to samo `catch` co wyżej.
-                const optimizedBuffer = await optimizedBlob!.arrayBuffer();
-                const base64 = arrayBufferToBase64(optimizedBuffer);
-                log.info('ActiveNote', `Optimized ${file.name} ${width}x${height} -> ${newW}x${newH}`);
-                return { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } };
-            } catch (optErr) {
-                log.warn('ActiveNote', `Optimization failed, using original: ${file.name}`, optErr);
-            }
-        }
-
-        const base64 = arrayBufferToBase64(arrayBuffer);
-        const mime = ext === 'jpg' ? 'jpeg' : (ext === 'svg' ? 'svg+xml' : ext);
-        return { type: 'image_url', image_url: { url: `data:image/${mime};base64,${base64}` } };
+        return await imageBytesAsBlock(arrayBuffer, file.extension, file.name, fileSize);
     } catch (e) {
         log.warn('ActiveNote', `Image read failed: ${file.path}`, e);
         return null;
     }
+}
+
+/** Wspólna optymalizacja obrazów aktywnej notatki i narzędzi. */
+export async function imageBytesAsBlock(arrayBuffer: ArrayBuffer, extension: string, name: string, fileSize: number): Promise<ImageUrlBlock> {
+    const ext = extension?.toLowerCase();
+
+    if (fileSize > ACTIVE_NOTE_OPTIMIZE_THRESHOLD && ext !== 'svg') {
+        try {
+            const blob = new Blob([arrayBuffer], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` });
+            const bitmap = await createImageBitmap(blob);
+            const { width, height } = bitmap;
+            const scale = Math.min(1, ACTIVE_NOTE_MAX_DIM / Math.max(width, height));
+            const newW = Math.round(width * scale);
+            const newH = Math.round(height * scale);
+            // Element odłączony: bufor offscreen do zmiany rozmiaru obrazu, nigdy nie
+            // trafia do DOM - `createEl` globalny z obsidiana robi to samo co
+            // `document.createElement('canvas')`, bez parenta. Ta gałąź kodu nie jest
+            // wołana przez testy AVA (`active_note.test.ts`), więc plik zostaje node-safe.
+            const canvas = createEl('canvas');
+            canvas.width = newW;
+            canvas.height = newH;
+            // Świeży `<canvas>` zawsze oddaje kontekst 2D; gdyby nie - TypeError leci
+            // do `catch (optErr)` poniżej i wracamy do oryginału, tak jak dotąd.
+            const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+            ctx.drawImage(bitmap, 0, 0, newW, newH);
+            bitmap.close();
+            const optimizedBlob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+            canvas.width = 0;
+            canvas.height = 0;
+            // `toBlob` może oddać null - wtedy leci TypeError w to samo `catch` co wyżej.
+            const optimizedBuffer = await optimizedBlob!.arrayBuffer();
+            const base64 = arrayBufferToBase64(optimizedBuffer);
+            log.info('ActiveNote', `Optimized ${name} ${width}x${height} -> ${newW}x${newH}`);
+            return { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } };
+        } catch (optErr) {
+            log.warn('ActiveNote', `Optimization failed, using original: ${name}`, optErr);
+        }
+    }
+
+    const base64 = arrayBufferToBase64(arrayBuffer);
+    const mime = ext === 'jpg' ? 'jpeg' : (ext === 'svg' ? 'svg+xml' : ext);
+    return { type: 'image_url', image_url: { url: `data:image/${mime};base64,${base64}` } };
 }
 
 export function extractEmbeddedImagePaths(content: string): string[] {

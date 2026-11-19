@@ -1,3 +1,5 @@
+`view_image` należy do serwera vault i wymaga `vault.read` oraz zaufanej autoryzacji kanonicznej ścieżki przed odczytem. Czyta zwykły plik vaulta przez `vault_binary_io`, sprawdza dekodowanie, limit 10 MiB i używa optymalizacji aktywnej notatki. Wynik mediów zawiera opis, oryginalne wymiary i rozmiar, a dla modeli bez vision trafia wyłącznie tekst. `.pkm-assistant` jest niedostępne.
+
 # modules/tools/
 
 Narzędzie, które chce pokazać obraz modelowi, musi użyć kontraktu z `toolMedia.ts`: `kind: 'media'` z `summary` i tablicą `images` (MIME, base64 i opcjonalne wymiary). Czat rozpoznaje wynik przez `asToolMedia` i używa `mediaTextPart` oraz `toToolMessageContent`: obraz w transkrypcie występuje wyłącznie jako data-URL `data:image/<mime>;base64,<b64>` w bloku `image_url`. `generate_image` jest adaptowane przez `asToolMedia` bez zmiany surowego wyniku UI. Surowe pole `base64` w innym wyniku nie jest obrazem dla modelu i nie jest objęte gwarancją redakcji obrazów. `mediaTextPart` usuwa klucze `base64` podczas serializacji (po `toJSON`) i zastępuje same data-URL, zachowując pozostały tekst.

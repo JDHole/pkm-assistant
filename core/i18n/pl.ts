@@ -2746,6 +2746,13 @@ export const pl: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary skonsolidowane w jeden prymityw ze scope)
+  'mcp.view_image.desc': 'Obejrzyj obraz w vaulcie. Wymaga modelu obsługującego obrazy; limit to 10 MiB.',
+  'mcp.view_image.path': 'Ścieżka obrazu w vaulcie.',
+  'mcp.view_image.denied': 'Nieprawidłowa lub niedostępna ścieżka obrazu.',
+  'mcp.view_image.unsupported': 'Plik nie jest obsługiwanym obrazem.',
+  'mcp.view_image.large': 'Obraz przekracza limit 10 MiB.',
+  'mcp.view_image.summary': '{{path}} | {{mime}} | {{width}}x{{height}} | {{size}} bajtów',
+  'mcp.view_image.invalid': 'Nie można odczytać lub zdekodować obrazu.',
   'mcp.check_syntax.desc': 'Sprawdź składnię pliku JS lub JSON po edycji bez uruchamiania kodu. Zwraca ok, kind, problemy z pozycjami i tryb JS (pierwszy akceptujący tryb). Limity: 512 KiB JS, 2 MiB JSON. YAML i notatki Markdown nie są obsługiwane. ok:true oznacza poprawną składnię, nie poprawne działanie.',
   'mcp.check_syntax.path': 'Ścieżka pliku w vaulcie.',
   'mcp.check_syntax.kind': 'Opcjonalny rodzaj pliku.',

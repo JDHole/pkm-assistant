@@ -1,3 +1,5 @@
+`imageBytesAsBlock`, formaty i limit aktywnej notatki są eksportowane dla `view_image`; optymalizacja obu ścieżek jest wspólna.
+
 # modules/multimodal/
 
 **Audio + Image + Vision** (neutralne, generic). 3 obszary:

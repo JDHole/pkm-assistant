@@ -47,7 +47,7 @@ Everything the agent sends to the model - system prompt, memory, tools, skills -
 
 **Full Prompt Transparency** - The Prompt Inspector shows every section of the system prompt with token counts. Edit any part. No black boxes.
 
-**Built-in MCP Tools** - Read/write notes, memory, skills, delegation, live artifacts, web search (5 providers), image generation, audio STT, agent-to-agent mail, and opt-in `obsidian_app` for workspace tabs and opening notes. The app tool is disabled by default. Plus external MCP servers (stdio/HTTP) you connect yourself.
+**Built-in MCP Tools** - Read/write notes, memory, skills, delegation, live artifacts, web search (5 providers), viewing vault images with a vision model, image generation, audio STT, agent-to-agent mail, and opt-in `obsidian_app` for workspace tabs and opening notes. The app tool is disabled by default. Plus external MCP servers (stdio/HTTP) you connect yourself.
 
 **Sub-Agent Delegation** - Agents delegate research and strategy tasks to cheaper/smaller models, saving tokens while maintaining quality.
 
@@ -207,7 +207,7 @@ modules/
 ├── shell/           # Settings tab, sidebar, misc modals
 ├── skills/          # Skill engine (reusable agent procedures, Markdown-based)
 ├── sub-agents/      # Sub-agent delegation: loader, runner, templates
-├── tools/           # 23 built-in MCP tools + external MCP client (stdio/HTTP)
+├── tools/           # built-in MCP tools + external MCP client (stdio/HTTP)
 ├── ui-components/   # Shared chat UI primitives (tool calls, thinking blocks, attachments)
 └── web/             # Web search providers + URL provenance tracking
 src/

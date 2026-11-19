@@ -163,3 +163,5 @@ export { initializeVaultDrafts, desktopDraftPorts, mobileDraftPorts } from './va
 export type { DraftStartupProgress } from './vaultDraftRuntime.js';
 
 export { DraftStartupTask } from './draftStartupTask.js';
+
+export { createViewImageTool } from './ViewImageTool.js';

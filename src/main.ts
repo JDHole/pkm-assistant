@@ -98,6 +98,7 @@ import {
   createAskUserChannels,
   // Multimodal
   createGenerateImageTool,
+  createViewImageTool,
   createAddTextToImageTool,
 } from "../modules/tools/index.js";
 import type { AskUserChannels, ServerVisibilityAgent, DraftStartupProgress } from "../modules/tools/index.js";
@@ -865,6 +866,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.toolRegistry.registerTool(createWebSearchTool());
       this.toolRegistry.registerTool(createWebReadTool());
       this.toolRegistry.registerTool(createAskUserTool());
+      this.toolRegistry.registerTool(createViewImageTool());
       this.toolRegistry.registerTool(createGenerateImageTool());
       this.toolRegistry.registerTool(createAddTextToImageTool());
 

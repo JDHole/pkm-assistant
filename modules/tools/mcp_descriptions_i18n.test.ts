@@ -103,3 +103,14 @@ test.serial('hint filesystem po angielsku wskazuje na <PATH>, nie na <ŚCIEŻKA>
     t.regex(hintText, /<PATH>/);
     t.notRegex(hintText, /<ŚCIEŻKA>/);
 });
+
+test.serial('view_image describes the tool and path in both locales', async t => {
+    const { createViewImageTool } = await import('./ViewImageTool.js');
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    t.is(createViewImageTool().inputSchema.properties.path.description, 'Path to the image in the vault.');
+    t.true(createViewImageTool().description.startsWith('View an image in the vault.'));
+    setLocale('pl');
+    t.is(createViewImageTool().inputSchema.properties.path.description, 'Ścieżka obrazu w vaulcie.');
+    t.true(createViewImageTool().description.startsWith('Obejrzyj obraz w vaulcie.'));
+});

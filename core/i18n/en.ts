@@ -2740,6 +2740,13 @@ export const en: Record<string, string> = {
   // ── MCP Tool Schema Descriptions (sent to AI model) ──
 
   // read (vault_read + memory_read + memory_read_summary consolidated into one scoped primitive)
+  'mcp.view_image.desc': 'View an image in the vault. Requires a vision-capable model; images over 10 MiB are rejected.',
+  'mcp.view_image.path': 'Path to the image in the vault.',
+  'mcp.view_image.denied': 'Invalid or inaccessible image path.',
+  'mcp.view_image.unsupported': 'The file is not a supported image.',
+  'mcp.view_image.large': 'Image exceeds the 10 MiB limit.',
+  'mcp.view_image.summary': '{{path}} | {{mime}} | {{width}}x{{height}} | {{size}} bytes',
+  'mcp.view_image.invalid': 'Could not read or decode the image.',
   'mcp.check_syntax.desc': 'Check a JS or JSON file after editing without executing it. Returns ok, kind, problems with positions and JS mode (the first accepting mode). Limits: 512 KiB JS, 2 MiB JSON. YAML and Markdown notes are not supported. ok:true means valid syntax, not correct behavior.',
   'mcp.check_syntax.path': 'File path in the vault.',
   'mcp.check_syntax.kind': 'Optional file kind.',
