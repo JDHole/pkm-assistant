@@ -55,6 +55,7 @@ export { createCheckSyntaxTool, registerCheckSyntaxTool } from './CheckSyntaxToo
 export { createReadTool } from './ReadTool.js';
 export { createListTool } from './ListTool.js';
 export { createWriteTool } from './WriteTool.js';
+export { createMoveTool } from './MoveTool.js';
 export { createDeleteTool } from './DeleteTool.js';
 export { createCreateFolderTool } from './CreateFolderTool.js';
 // JEDNO narzędzie `search` zastąpiło 12 narzędzi retrieval

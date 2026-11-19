@@ -5,7 +5,7 @@ export default {
     icon: 'folder',
     tools: [
         'read', 'check_syntax', 'write', 'list',
-        'delete', 'create_folder', 'search'
+        'delete', 'move', 'create_folder', 'search'
     ],
     requires_permission: ['read_notes'],
     timeout_ms: 60000,

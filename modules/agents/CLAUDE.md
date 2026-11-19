@@ -337,3 +337,5 @@ Dotychczasowe asercje S1a pozostają bez zmian.
 ## Mobile T1 - możliwości urządzenia
 
 `AgentManager.getMobileEnvironment()` pobiera migawkę z composition root dla inspektora i edytora promptu; żywe okno czatu zamraża własną migawkę. Sekcja urządzenia jest edytowalna na mobile, a na desktopie nie występuje. `check_syntax` należy do grupy vault i przełącznika `read_notes`; istniejący agent z listą `disabled_tools` dostaje je, o ile nie jest na niej wyłączone. Nowy fabryczny researcher ma je na liście, a istniejące jawne listy subów nie są przepisywane.
+
+`move` należy do grupy vault i przełącznika zapisu; egzekucja sprawdza dodatkowo źródło jako odczyt lub usunięcie.

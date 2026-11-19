@@ -1421,3 +1421,14 @@ Testy delegacji używają `test-support/withoutTaskTime` przy porównywaniu tre�
 `obsidian_app render_check` jest domyślnie wyłączony i ukryty w schemacie; eksperymentalny przełącznik użytkownika działa tylko przy włączonej nawigacji Obsidiana po przeładowaniu pluginu; MCP odmawia przed zgodą i dostępem do portów. Po jawnym włączeniu wymaga `app.open`, jawnej tożsamości i ponownych kontroli uprawnień; sub-agenci są odrzucani. `ObsidianAppTool.ts` maskuje komentarze i używa skanera z `markdownFences.ts`, reeksportowanego przez `syntaxValidator.ts`, wyłącznie do liczenia bloków źródłowych. `counts_match` porównuje tylko liczby, a maska może nie rozpoznać danych w błędach innych wtyczek. Ograniczenia obserwacji i warunki włączenia opisuje `modules/obsidian-app/CLAUDE.md`.
 
 `syntaxValidator.ts` odmawia także nieobsługiwanych rodzajów przekazanych bezpośrednio do `checkSyntax` (problem `limit`); wyczerpujący switch chroni przed cichym sukcesem bez parsowania.
+
+
+## move
+
+`move` przenosi plik przez `fileManager.renameFile` (linki według ustawień Obsidiana)
+lub kopiuje przez `vault.copy`, bez dekodowania treści. Nie nadpisuje celu; jak
+`write` tworzy brakujący folder nadrzędny. Obie ścieżki podlegają osobnym bramkom:
+źródło delete/read, cel write. Zgoda trwała ma klucz z trybem i obiema ścieżkami,
+a sesyjna zgoda write nie obejmuje move. Narzędzie odmawia w hostach szkiców,
+ponieważ nie obsługują one przenoszenia ani kopiowania binariów. `.pkm-assistant`
+jest zabronione także administratorowi.

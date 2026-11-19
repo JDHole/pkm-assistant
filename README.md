@@ -323,3 +323,5 @@ PKM Assistant is free software: you can redistribute it and/or modify it under t
 Licences of the libraries bundled into `main.js`: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 
 The **Run device diagnostics** command (also in Settings > Information) saves a private device report in `.pkm-assistant/diagnostics/`, with an optional model connection test requiring explicit consent.
+
+The built-in vault server can move or copy files, including binary attachments, with the `move` tool.

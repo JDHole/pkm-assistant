@@ -298,6 +298,8 @@ export class ApprovalModal extends Modal {
                     : t('approval.verb.default_write');
                 return t('approval.desc.vault_write', { name, verb, path });
             }
+            case 'vault.move':
+                return t(a.operationMode === 'copy' ? 'approval.desc.vault_copy' : 'approval.desc.vault_move', { name });
             case 'vault.delete':
                 return t('approval.desc.vault_delete', { name, path: a.targetPath || t('approval.fallback.file') });
             case 'vault.create_folder':
@@ -379,6 +381,7 @@ export class ApprovalModal extends Modal {
     _getActionLabel() {
         const labels: Record<string, [string, string]> = {
             'vault.write': [UiIcons.edit(14), t('approval.type.vault_write')],
+            'vault.move': [UiIcons.folder(14), t('approval.type.vault_move')],
             'vault.delete': [UiIcons.trash(14), t('approval.type.vault_delete')],
             'vault.create_folder': [UiIcons.folder(14), t('approval.type.vault_create_folder')],
             'delegate.share_conversation': [UiIcons.send(14), t('approval.share.title')],
@@ -395,6 +398,7 @@ export class ApprovalModal extends Modal {
 
     _getActionSeverity() {
         const severities: Record<string, string> = {
+            'vault.move': 'danger',
             'vault.delete': 'danger',
             'vault.write': 'warning',
             'memory.write': 'warning',
