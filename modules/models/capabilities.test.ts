@@ -77,3 +77,32 @@ test('metadana katalogu o INNYM id nie podszywa się pod szukaną nazwę', t => 
     'wpis katalogu dla innego modelu nie może przesłonić dopasowania po dokładnej nazwie',
   );
 });
+
+for (const [id, expected] of [
+  ['gemini-1.5-pro', true], // Dokładna nazwa.
+  ['gemini-2.5-pro', true], // Rodzina.
+  ['custom-vl', true], // Kształt nazwy.
+  ['revisionist-7b', false],
+  ['geminiform-text', false],
+] as const) {
+  test(`models/ zachowuje decyzję po nazwie: ${id}`, t => {
+    for (const modelId of [id, `models/${id}`]) {
+      t.is(isVisionModel({ modelId }), expected);
+      t.is(isVisionModel({ modelKey: modelId, modelId: 'inny-model' }), expected);
+    }
+  });
+}
+
+for (const multimodal of [true, false]) {
+  for (const id of ['gemini-2.5-pro', 'custom-model']) {
+    test(`models/ dopasowuje metadane dla ${id}, multimodal=${multimodal}`, t => {
+      for (const modelId of [id, `models/${id}`]) {
+        for (const catalogId of [id, `models/${id}`]) {
+          const models = [{ id: 'inny-model', multimodal: !multimodal }, { id: catalogId, multimodal }];
+          t.is(isVisionModel({ modelId, models }), multimodal);
+          t.is(isVisionModel({ modelKey: modelId, models }), multimodal);
+        }
+      }
+    });
+  }
+}

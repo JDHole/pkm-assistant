@@ -6,18 +6,31 @@ import { RollingWindow } from './RollingWindow.js';
 import type { RollingMessage } from './RollingWindow.js';
 import type { ChatModel } from '../../models/index.js';
 import type { HttpRequestSpec } from '../../../core/index.js';
+import { geminiProvider } from '../../models/providers/gemini.js';
 import { lmStudioProvider } from '../../models/providers/lm_studio.js';
 import { makeCtx, makeModel } from '../../models/testing/harness.js';
 
-for (const vision of [true, false]) {
-    test.serial(`załącznik i Oczko używają katalogu instancji tury, vision=${vision}`, async t => {
-        const modelId = vision ? 'moj-lokalny-model' : 'gpt-4o';
+const cases = [
+    ...[true, false].map(vision => ({
+        provider: lmStudioProvider, modelId: vision ? 'moj-lokalny-model' : 'gpt-4o',
+        catalogId: vision ? 'moj-lokalny-model' : 'gpt-4o', multimodal: vision,
+    })),
+    // Próba recenzenta z regression-prefix-streaming.test.ts + jawne metadane katalogu.
+    ...[true, false, undefined].map(multimodal => ({
+        provider: geminiProvider, modelId: 'models/gemini-2.5-pro', catalogId: 'gemini-2.5-pro', multimodal,
+    })),
+];
+for (const { provider, modelId, catalogId, multimodal } of cases) {
+    const vision = multimodal !== false;
+    test.serial(`załącznik i Oczko: ${provider.info.id}, ${modelId}, katalog=${multimodal}`, async t => {
         const sent: HttpRequestSpec[] = [];
-        const model = makeModel(lmStudioProvider, {
-            ctx: makeCtx({ modelId, models: [{ id: modelId, multimodal: vision }] }),
+        const model = makeModel(provider, {
+            ctx: makeCtx({ modelId, models: multimodal === undefined ? undefined : [{ id: catalogId, multimodal }] }),
             transport: { open: async (spec, sink) => {
                 sent.push(spec);
-                sink.onChunk('data: {"choices":[{"delta":{"content":"Opis"},"finish_reason":"stop"}]}\n\n');
+                sink.onChunk(provider === geminiProvider
+                    ? '[{"candidates":[{"content":{"role":"model","parts":[{"text":"Opis"}]},"finishReason":"STOP"}]}]'
+                    : 'data: {"choices":[{"delta":{"content":"Opis"},"finish_reason":"stop"}]}\n\n');
                 return { status: 200, headers: {}, body: '' };
             } },
         });
@@ -66,14 +79,24 @@ for (const vision of [true, false]) {
             t.deepEqual(checks.map(check => check.decision), [vision, vision]);
             for (const check of checks) { t.is(check.agent, owner); t.is(check.model, model); }
             t.is(sent.length, 1);
-            const messages = JSON.parse(sent[0].body!).messages as RollingMessage[];
-            t.deepEqual(messages.find(message => message.role === 'user')?.content, [
-                { type: 'text', text: '[message time: 2026-11-20 06:00, Friday, UTC+00:00]\nOpisz' },
-                ...(vision ? [attachment, note] : [
-                    { type: 'text', text: 'Image skipped - the model does not support vision.' },
-                    { type: 'text', text: 'Image skipped - the model does not support vision.' },
-                ]),
-            ]);
+            if (provider === geminiProvider) {
+                const body = JSON.parse(sent[0].body!) as { contents: Array<{ parts: Array<Record<string, unknown>> }> };
+                const images = body.contents.flatMap(turn => turn.parts.filter(part => 'inline_data' in part));
+                t.deepEqual(images, vision ? [
+                    { inline_data: { mime_type: 'image/jpeg', data: 'QUJD' } },
+                    { inline_data: { mime_type: 'image/png', data: 'REVG' } },
+                ] : []);
+                t.is(sent[0].body!.includes('Image skipped - the model does not support vision.'), !vision);
+            } else {
+                const messages = JSON.parse(sent[0].body!).messages as RollingMessage[];
+                t.deepEqual(messages.find(message => message.role === 'user')?.content, [
+                    { type: 'text', text: '[message time: 2026-11-20 06:00, Friday, UTC+00:00]\nOpisz' },
+                    ...(vision ? [attachment, note] : [
+                        { type: 'text', text: 'Image skipped - the model does not support vision.' },
+                        { type: 'text', text: 'Image skipped - the model does not support vision.' },
+                    ]),
+                ]);
+            }
             if (!vision) { t.false(sent[0].body!.includes('QUJD')); t.false(sent[0].body!.includes('REVG')); }
         } finally {
             streamingManager.stopStream('other-vision-turn');

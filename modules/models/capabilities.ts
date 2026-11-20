@@ -7,6 +7,7 @@
  * więc gdy powiedział wprost `multimodal`, nie zgadujemy po literkach.
  */
 import type { ModelInfo, VisionModelLike } from './contracts.js';
+import { normalizeGeminiModelId } from './modelId.js';
 
 /**
  * Nazwy, o których wiemy WPROST. Trzymamy je jako pełne identyfikatory (nie prefiksy),
@@ -71,7 +72,8 @@ function inFamily(name: string, family: string): boolean {
 /** Metadana katalogu dla DOKŁADNIE tej nazwy modelu (pusta nazwa też się liczy). */
 function metadataFor(models: ModelInfo[] | undefined, name: string): ModelInfo | undefined {
     if (!Array.isArray(models)) return undefined;
-    return models.find(entry => typeof entry?.id === 'string' && entry.id.trim().toLowerCase() === name);
+    return models.find(entry => typeof entry?.id === 'string'
+        && normalizeGeminiModelId(entry.id.trim().toLowerCase()) === name);
 }
 
 /**
@@ -87,7 +89,8 @@ function metadataFor(models: ModelInfo[] | undefined, name: string): ModelInfo |
 export function isVisionModel(model: VisionModelLike | null | undefined): boolean {
     if (!model) return false;
 
-    const name = String(model.modelKey ?? model.modelId ?? '').trim().toLowerCase();
+    // Ta sama normalizacja co w URL i katalogu Gemini, przed wszystkimi warstwami decyzji.
+    const name = normalizeGeminiModelId(String(model.modelKey ?? model.modelId ?? '').trim().toLowerCase());
 
     // Warstwa 1 — katalog dostawcy mówi wprost.
     const meta = metadataFor(model.models, name);

@@ -540,3 +540,37 @@ test('gemini/listModels: status spoza 2xx oddaje pustą listę, awaria transport
   const smiec = new CapturingHttpClient({ status: 200, text: 'to nie jest JSON' });
   t.deepEqual(await geminiProvider.listModels(makeCtx(), smiec), []);
 });
+
+// Regresja 99f75cb: URL zdejmował models/, ale filtr obrazów badał surowe id.
+for (const multimodal of [true, false, undefined]) {
+  for (const role of ['user', 'tool'] as const) {
+    test(`gemini models/: obraz ${role}, katalog=${multimodal}`, t => {
+      const id = 'gemini-2.5-pro';
+      const models = multimodal === undefined ? undefined : [{ id, multimodal }];
+      const content = [
+        { type: 'text', text: 'opisz' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+      ];
+      const messages: ChatRequest['messages'] = role === 'user' ? [{ role, content }] : [
+        { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'view_image', arguments: '{}' } }] },
+        { role, name: 'view_image', tool_call_id: 'c1', content },
+      ];
+      for (const stream of [false, true]) {
+        const plain = geminiProvider.buildRequest({ messages }, makeCtx({ modelId: id, models }), stream);
+        for (const override of [false, true]) {
+          const prefixed = geminiProvider.buildRequest(
+            { messages, ...(override ? { model: `models/${id}` } : {}) },
+            makeCtx({ modelId: override ? 'inny-model' : `models/${id}`, models }), stream,
+          );
+          t.is(prefixed.url, `https://generativelanguage.googleapis.com/v1beta/models/${id}:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`);
+          t.deepEqual(JSON.parse(prefixed.body!), JSON.parse(plain.body!), 'prefiks nie zmienia serializacji');
+          const body = JSON.parse(prefixed.body!) as { contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> };
+          const images = body.contents.flatMap(turn => turn.parts.filter(part => 'inline_data' in part));
+          t.deepEqual(images, multimodal === false ? [] : [{ inline_data: { mime_type: 'image/jpeg', data: 'QUJD' } }]);
+          t.true(prefixed.body!.includes('opisz'));
+          t.is(prefixed.body!.includes('Image skipped - the model does not support vision.'), multimodal === false);
+        }
+      }
+    });
+  }
+}

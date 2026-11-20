@@ -1,8 +1,10 @@
 import test from 'ava';
 import { isVisionModel } from './capabilities.js';
 import { lmStudioProvider } from './providers/lm_studio.js';
-import { CapturingHttpClient, makeCtx, makeHttpResponse, makeModel } from './testing/harness.js';
-import type { HttpResponse } from './contracts.js';
+import { CapturingHttpClient, ScriptedTransport, makeCtx, makeHttpResponse, makeModel } from './testing/harness.js';
+import { clearModelCache, createModelForRole } from './modelResolver.js';
+import { CHAT_PROVIDERS } from './registry.js';
+import type { HttpResponse, ResolverPluginLike } from './contracts.js';
 
 const id = 'moj-lokalny-model';
 const catalog = (multimodal: boolean) => ({ body: { data: [{ id, multimodal }] } });
@@ -44,5 +46,29 @@ test('trwające listModels nie blokuje wysyłki ani nie uruchamia dodatkowego po
         finishCatalog(makeHttpResponse(catalog(true)));
         await pending;
     }
+    t.true(isVisionModel(model));
+});
+
+// Próba recenzenta przeniesiona z .tmp/odbior3/regression-prefix.test.ts.
+test.serial('Gemini models/: zapis w bibliotece → resolver → complete zachowuje obraz', async t => {
+    clearModelCache();
+    t.teardown(() => clearModelCache());
+    const modelId = 'models/gemini-2.5-pro';
+    const http = new CapturingHttpClient({ body: { candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] } });
+    const plugin: ResolverPluginLike = { env: {
+        settings: { pkmAssistant: {
+            modelLibrary: { main: [{ platform: 'gemini', model: modelId, isDefault: true }] },
+            chat: { apiKeys: { gemini: 'key' } },
+        } },
+        config: { chat: { providers: CHAT_PROVIDERS, http, transport: new ScriptedTransport() } },
+    } };
+    const model = createModelForRole(plugin, 'main')!;
+    t.is(model.modelId, modelId);
+    await model.complete({ messages: [{ role: 'user', content: [
+        { type: 'text', text: 'opisz' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+    ] }] });
+    t.is(http.lastSpec!.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent');
+    t.deepEqual(JSON.parse(http.lastSpec!.body!).contents[0].parts[1], { inline_data: { mime_type: 'image/jpeg', data: 'QUJD' } });
     t.true(isVisionModel(model));
 });

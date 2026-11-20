@@ -1,4 +1,5 @@
 import { filterImageBlocks, moveToolImagesToUser } from './toolImages.js';
+import { normalizeGeminiModelId } from '../modelId.js';
 import { effortBudget, supportsEffort } from '../effort.js';
 /**
  * `modules/models/providers/gemini.ts` — dostawca `gemini` (WŁASNY kształt żądania).
@@ -595,7 +596,7 @@ export class GeminiProvider implements ChatProvider {
                 const methods = asArray(entry.supportedGenerationMethods);
                 if (methods.length > 0 && !methods.includes('generateContent')) continue;
 
-                const info: ModelInfo = { id: name.replace(/^models\//, ''), multimodal: true };
+                const info: ModelInfo = { id: normalizeGeminiModelId(name), multimodal: true };
                 const displayName = asText(entry.displayName);
                 if (displayName) info.name = displayName;
                 const inputLimit = asCount(entry.inputTokenLimit);
@@ -641,7 +642,7 @@ export class GeminiProvider implements ChatProvider {
             }
         }
 
-        const model = (req.model ?? ctx.modelId ?? DEFAULT_MODEL).replace(/^models\//, '');
+        const model = normalizeGeminiModelId(req.model ?? ctx.modelId ?? DEFAULT_MODEL);
         const method = stream ? 'streamGenerateContent?alt=sse' : 'generateContent';
 
         return {

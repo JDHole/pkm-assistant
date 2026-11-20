@@ -323,6 +323,12 @@ Klucze modułu: `model.stream_aborted`, `model.image_stripped`.
 
 `isVisionModel` jest jedyną polityką czatu i wszystkich adapterów: jawne
 `multimodal: true/false` dla dokładnej nazwy → nazwa → rodzina/kształt nazwy.
+Przed każdą z tych warstw prefiks `models/` jest usuwany przez
+`normalizeGeminiModelId` (`modelId.ts`), również z id wpisów katalogu. Tej samej
+funkcji używa Gemini w `listModels()` i przy budowie URL. Dlatego
+`models/gemini-2.5-pro` i `gemini-2.5-pro` mają tę samą decyzję w czacie i adapterze;
+jawne `multimodal: false` nadal wygrywa z rozpoznaniem nazwy. Prefiksy dostawców
+OpenRouter i tagi Ollama pozostają częścią id.
 Rodzina `gpt-6` obejmuje również `gpt-6-astra-high`, `gpt-6-sol` i `gpt-6.1-terra`.
 Metryczka platformy `supportsVision` nie przesłania katalogu ani tej polityki.
 
@@ -336,6 +342,8 @@ Odczyt możliwości, `complete()` i `stream()` nie pobierają katalogu ani nie c
 na trwające `listModels()`. Nie zmieniamy biblioteki modeli ani UI.
 
 Testy: `ChatModel.vision.test.ts` (odświeżenie, awaria, wysyłka podczas pobierania),
+`capabilities.test.ts`, `providers/gemini.test.ts` i `../chat/chat/chat_streaming.vision.test.ts`
+(prefiks `models/`, katalog true/false/brak, obrazy user/tool, załącznik i Oczko),
 `providers/visionParity.test.ts` (dziewięć adapterów, tool/user, stream/complete),
 `providers/toolImages.test.ts` (GPT-6) i `../chat/chat/chat_toolMedia.test.ts`
 (rzeczywista serializacja wyniku view_image przez LM Studio).
