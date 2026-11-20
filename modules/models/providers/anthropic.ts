@@ -1,3 +1,4 @@
+import { filterImageBlocks } from './toolImages.js';
 import { effortBudget, supportsEffort } from '../effort.js';
 /**
  * `modules/models/providers/anthropic.ts` - dostawca `anthropic` (Messages API).
@@ -931,8 +932,8 @@ export class AnthropicProvider implements ChatProvider {
     /** Żądanie kanoniczne → Messages API. `body` jest STRINGIEM JSON. */
     buildRequest(req: ChatRequest, ctx: ProviderContext, stream: boolean): HttpRequestSpec {
         const maxTokens = resolveMaxTokens(req, ctx);
-        const transcript = splitTranscript(req.messages ?? []);
         const model = req.model ?? ctx.modelId;
+        const transcript = splitTranscript(filterImageBlocks(req.messages ?? [], { modelId: model, models: ctx.models }));
         const family = claudeFamily(model);
 
         const body: RequestBody = {

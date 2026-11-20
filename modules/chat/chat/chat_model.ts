@@ -29,7 +29,7 @@ interface ChatMentionChip {
     path: string;
     name?: string;
 }
-import type { DelegateConfigLike, ResolverAgentLike } from '../../models/index.js';
+import type { ChatModel, DelegateConfigLike, ResolverAgentLike } from '../../models/index.js';
 import type { SttSettings } from './chatViewShape.js';
 
 /**
@@ -184,11 +184,12 @@ export async function _buildActiveNoteContext(this: ChatViewLike) {
  * WŁAŚCICIELA tury, nie o agenta, który akurat jest na wierzchu (user mógł przełączyć zakładkę,
  * gdy tura X w tle generowała obraz). Wołania czysto UI-owe (podgląd ostrzeżenia przed wysyłką,
  * jeszcze przed zamrożeniem właściciela) zostają bez argumentu - tam „aktywny agent" jest
- * właściwym pytaniem.
+ * właściwym pytaniem. `model` wskazuje faktyczną instancję tury (może być świeża,
+ * poza cache resolvera); jej katalog jest synchronicznie dostępny także adapterowi.
  */
-export function _isCurrentModelVision(this: ChatViewLike, agent?: Agent | null) {
+export function _isCurrentModelVision(this: ChatViewLike, agent?: Agent | null, model?: ChatModel) {
     try {
-        return isVisionModel(this.get_chat_model({ agent }));
+        return isVisionModel(model ?? this.get_chat_model({ agent }));
     } catch { return false; }
 }
 

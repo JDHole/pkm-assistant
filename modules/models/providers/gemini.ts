@@ -1,3 +1,4 @@
+import { filterImageBlocks, moveToolImagesToUser } from './toolImages.js';
 import { effortBudget, supportsEffort } from '../effort.js';
 /**
  * `modules/models/providers/gemini.ts` — dostawca `gemini` (WŁASNY kształt żądania).
@@ -624,7 +625,9 @@ export class GeminiProvider implements ChatProvider {
         if (thinkingBudget !== undefined) generationConfig.thinkingConfig = { thinkingBudget };
 
         const body: Json = {
-            contents: buildTurns(req.messages),
+            contents: buildTurns(moveToolImagesToUser(filterImageBlocks(req.messages, {
+                modelId: req.model ?? ctx.modelId, models: ctx.models,
+            }))),
             generationConfig,
         };
 

@@ -451,14 +451,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     userMessageId = opts.deliveryMessageId ?? crypto.randomUUID();
     const combinedText = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
     const attachmentResult = hasAttachments ? attachmentManager!.buildMessageContent(combinedText, userAttachments) : null;
-    if (Array.isArray(attachmentResult?.content) && attachmentResult.content.some(b => b.type === 'image_url')) {
-        try {
-            if (!this._isCurrentModelVision(owner.agent)) {
-                const modelName = this.get_chat_model({ agent: owner.agent })?.modelKey || 'model';
-                new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
-            }
-        } catch (error) { void error; /* Advisory only; the adapter strips unsupported images. */ }
-    }
+    const hasImageAttachments = Array.isArray(attachmentResult?.content)
+        && attachmentResult.content.some(b => b.type === 'image_url');
+    let hasActiveNoteImages = false;
 
     // Phase A: finish every read before changing the conversation or writing its file.
     const noteResult = await noteContext;
@@ -644,11 +639,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                         for (const imgBlock of noteCtx.images) {
                             (msg.content as ContentBlock[]).push(imgBlock);
                         }
-                        // Warn if model likely can't see images
-                        if (!this._isCurrentModelVision(owner.agent)) {
-                            const modelName = this.get_chat_model({ agent: owner.agent })?.modelKey || 'model';
-                            new Notice(t('chat.streaming.oczko_no_vision', { model: modelName }), 6000);
-                        }
+                        hasActiveNoteImages = true;
                     }
                 }
                 log.debug('Chat', `Oczko: "${this.app.workspace.getActiveFile()?.name}" (${noteCtx.images?.length || 0} images)`);
@@ -724,6 +715,18 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
         const sCtx = this._streamCtxMap.get(ownerTabKey);
         if (sCtx) sCtx.chatModel = chat_model;
+
+        // Dopiero teraz znamy faktyczną instancję tury (także przy skipCache).
+        // Ostrzeżenia i adapter czytają jej ten sam katalog, bez pobierania go z sieci.
+        try {
+            const modelName = chat_model.modelKey || 'model';
+            if (hasImageAttachments && !this._isCurrentModelVision(owner.agent, chat_model)) {
+                new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
+            }
+            if (hasActiveNoteImages && !this._isCurrentModelVision(owner.agent, chat_model)) {
+                new Notice(t('chat.streaming.oczko_no_vision', { model: modelName }), 6000);
+            }
+        } catch (error) { void error; /* Advisory only; the adapter strips unsupported images. */ }
 
         log.timing('Chat', `TOTAL send→loop (model: ${chat_model.modelKey || 'unknown'}, parallel: ${needsFreshModel})`, sendStart);
 
@@ -1564,7 +1567,7 @@ export async function _chatExecuteToolCall(
     const media = asToolMedia(toolCall.name ?? '', raw, toolSource);
     if (media) {
         return toToolMessageContent(media, {
-            vision: this._isCurrentModelVision(turn.agent),
+            vision: this._isCurrentModelVision(turn.agent, turn.chatModel),
             textPart: mediaTextPart(toolCall.name ?? '', raw),
         });
     }

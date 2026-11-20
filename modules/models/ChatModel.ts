@@ -317,6 +317,11 @@ export class ChatModel {
     /** Identyfikator modelu u dostawcy. */
     readonly modelId: string;
     readonly providerId: ProviderId;
+    /** Ten sam katalog w RAM, którego adapter używa przy serializacji; bez I/O. */
+    get models(): ModelInfo[] | undefined {
+        return this._ctx.models;
+    }
+
     /** `'streaming'` między wejściem na slot bramki a rozstrzygnięciem tury. */
     state: 'idle' | 'streaming' = 'idle';
 
@@ -577,6 +582,9 @@ export class ChatModel {
     async listModels(_refresh?: boolean): Promise<ModelInfo[]> {
         try {
             const models = await this._provider.listModels(this._ctx, this._http);
+            // Dostawcy zwracają [] także przy błędzie sieci. Nie kasuj ostatniej
+            // dostępnej wiedzy; pusty wynik nadal oddaj wołaczowi jak dotychczas.
+            if (Array.isArray(models) && models.length > 0) this._ctx.models = models;
             return Array.isArray(models) ? models : [];
         } catch (e) {
             log.debug(LOG_SCOPE, 'listModels: katalog modeli niedostępny', { provider: this.providerId, reason: maskSensitiveData(String((e as Error)?.message ?? e)) });

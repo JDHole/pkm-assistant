@@ -296,8 +296,6 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
 
     /** Czy ten model przyjmie obraz. */
     protected acceptsImages(modelId: string, ctx: ProviderContext): boolean {
-        if (this.info.supportsVision === true) return true;
-        if (this.info.supportsVision === false) return false;
         return isVisionModel({ modelId, modelKey: modelId, models: ctx.models });
     }
 

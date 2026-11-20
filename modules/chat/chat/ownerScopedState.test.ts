@@ -105,7 +105,7 @@ test('żadne miejsce w chat_streaming.ts nie czyta/pisze this._lastInputTokens|C
 test('_chatExecuteToolCall pyta o wizję modelu WŁAŚCICIELA tury', t => {
     const body = bodyOf(streaming, '_chatExecuteToolCall');
     t.true(body.length > 0, 'nie znalazłem _chatExecuteToolCall');
-    t.regex(body, /this\._isCurrentModelVision\(turn\.agent\)/,
+    t.regex(body, /this\._isCurrentModelVision\(turn\.agent, turn\.chatModel\)/,
         'bez turn.agent decyzja o kształcie wyniku generate_image spada na globalnie aktywnego agenta');
     t.notRegex(body, /this\._isCurrentModelVision\(\)/,
         'wywołanie bez argumentu w tym miejscu decyduje wg globalnie aktywnego agenta zamiast właściciela tury');

@@ -355,9 +355,16 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   widoku.** Przy dwóch turach naraz w jednym `ChatView` (patrz "świeża instancja modelu"
   niżej) tura A czytałaby estymatę nadpisaną przez turę B.
 - **Decyzja "czy bieżący model jest wizyjny" pyta o WŁAŚCICIELA tury, nie o globalnie
-  aktywnego agenta.** `_isCurrentModelVision(agent?)` przyjmuje opcjonalnego agenta; wybór
-  kształtu wyniku `generate_image` (`_chatExecuteToolCall`) podaje `turn.agent`. Ostrzeżenia
-  przed wysłaniem załączników i obrazów Oczka również podają agenta właściciela.
+  aktywnego agenta.** `_isCurrentModelVision(agent?, model?)` przyjmuje opcjonalnego agenta i instancję; wybór
+  kształtu wyniku mediów (`view_image`, `generate_image`, `_chatExecuteToolCall`) podaje
+  `turn.agent` i rzeczywisty `turn.chatModel`, także dla świeżej instancji równoległej tury.
+  Synchroniczny getter `ChatModel.models` udostępnia ten sam katalog co adapterowi:
+  jawne `multimodal: true/false` wygrywa z nazwą. Nie ma pobierania ani oczekiwania
+  na katalog przy sprawdzaniu widzenia. Test integracyjny: `chat/chat_toolMedia.test.ts`. Ostrzeżenia
+  przed wysłaniem załączników i obrazów Oczka również podają agenta właściciela oraz
+  tę instancję: pojawiają się po doborze modelu, przed żądaniem, dzięki czemu `skipCache`
+  nie zmienia decyzji między ostrzeżeniem a serializacją. Test rzeczywistej wysyłki:
+  `chat/chat_streaming.vision.test.ts` (załącznik + Oczko, różne katalogi obu instancji).
 - **Mid-loop compression ustawia `rollingWindow.sessionPath` tak samo jak end-of-turn** (czyta
   ją `Summarizer` do stopki "pełna rozmowa zapisana w: ...") - obie ścieżki kompresji muszą
   używać zamrożonej ścieżki tury, nie współdzielonego wskaźnika pamięci agenta.

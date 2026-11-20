@@ -31,6 +31,7 @@ const VISION_FAMILIES: readonly string[] = [
     'gpt-4.1',
     'gpt-4-turbo',
     'gpt-5',
+    'gpt-6',
     'chatgpt-4o',
     'o1',
     'o3',

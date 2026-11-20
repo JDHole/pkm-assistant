@@ -89,7 +89,7 @@ test('Ollama przenosi obrazy, a bez vision stosuje zastępnik', t => {
 });
 
 test('separator nazwy modelu obejmuje dwukropek', t => {
-  for (const [id, expected] of [['qwen3-vl:8b', true], ['gpt-6-sol', false], ['revisionist-7b', false]] as const) {
+  for (const [id, expected] of [['qwen3-vl:8b', true], ['gpt-3.5-turbo', false], ['revisionist-7b', false]] as const) {
     t.is(isVisionModel({ modelId: id, modelKey: id }), expected);
   }
 });
@@ -100,3 +100,14 @@ test('polskie tłumaczenia w żądaniu', t => {
   t.deepEqual(messages[2], { role: 'tool', tool_call_id: 'c1', content: 'ok\n[Obraz w następnej wiadomości.]' });
   t.deepEqual(messages[3], { role: 'user', content: [{ type: 'text', text: 'Obraz(y) z wyniku narzędzia: c1' }, image('QUJD')] });
 });
+
+for (const model of ['gpt-6-astra-high', 'gpt-6.1-terra', 'gpt-6-sol']) {
+  test(`LM Studio wysyła obraz dla ${model}`, t => {
+    setLocale('en');
+    t.true(isVisionModel({ modelId: model }));
+    const messages = body(lmStudioProvider, model, transcript()).messages;
+    t.deepEqual(messages[3], { role: 'user', content: [
+      { type: 'text', text: 'Image(s) returned by tool call(s): c1' }, image('QUJD'),
+    ] });
+  });
+}

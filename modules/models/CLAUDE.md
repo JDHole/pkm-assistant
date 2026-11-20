@@ -319,11 +319,33 @@ Wiadomość user złożona z samego obrazu na modelu bez vision idzie jako
 `t('model.image_stripped')` - nie blokuje wysyłki. Wiadomość MIESZANA traci TYLKO blok obrazu.
 Klucze modułu: `model.stream_aborted`, `model.image_stripped`.
 
+### Wspólna decyzja o widzeniu
+
+`isVisionModel` jest jedyną polityką czatu i wszystkich adapterów: jawne
+`multimodal: true/false` dla dokładnej nazwy → nazwa → rodzina/kształt nazwy.
+Rodzina `gpt-6` obejmuje również `gpt-6-astra-high`, `gpt-6-sol` i `gpt-6.1-terra`.
+Metryczka platformy `supportsVision` nie przesłania katalogu ani tej polityki.
+
+`ChatModel.models` to synchroniczny getter tego samego `ProviderContext.models`,
+który czyta adapter. `listModels()` zachowuje w nim ostatni niepusty katalog;
+wcześniej wyłącznie zwracało wynik. Katalog podany w konstruktorze jest widoczny
+od razu. Pusta odpowiedź nie kasuje poprzedniej wiedzy, ponieważ dostawcy zwracają
+`[]` także przy awarii HTTP; wołacz nadal otrzymuje `[]`. Katalog jest per instancja,
+bez globalnego cache między hostami/kluczami. Brak katalogu oznacza decyzję po nazwie.
+Odczyt możliwości, `complete()` i `stream()` nie pobierają katalogu ani nie czekają
+na trwające `listModels()`. Nie zmieniamy biblioteki modeli ani UI.
+
+Testy: `ChatModel.vision.test.ts` (odświeżenie, awaria, wysyłka podczas pobierania),
+`providers/visionParity.test.ts` (dziewięć adapterów, tool/user, stream/complete),
+`providers/toolImages.test.ts` (GPT-6) i `../chat/chat/chat_toolMedia.test.ts`
+(rzeczywista serializacja wyniku view_image przez LM Studio).
+
 ### Obraz w wyniku narzędzia - per provider
 
 OpenAI-compatible wysyła wynik `tool` jako tekst i zbiera obrazy w jednej wiadomości `user` za ostatnim `tool` ciągłego bloku.
 Anthropic umieszcza bloki `image` w `tool_result`; Ollama wysyła `images` w następnej wiadomości `user` za blokiem tool.
-Gemini pozostaje bez zmian; obsługa obrazów w wynikach narzędzi ma tam znane ograniczenie.
+Gemini przenosi obrazy narzędzi do kolejnej wiadomości `user`, przed konwersją do `inline_data`;
+`functionResponse` zachowuje opis tekstowy zamiast gubić obraz nazwanego wyniku.
 
 ### 🟠 13. Step 4b (fallback ról sub) musi znać `agent.models.main`, nie tylko legacy `agent.model`
 
