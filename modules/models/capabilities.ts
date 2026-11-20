@@ -69,18 +69,24 @@ function inFamily(name: string, family: string): boolean {
     return next === '-' || next === '.' || next === '_' || next === '/' || next === ':';
 }
 
+/** Zachowuje dawną przestrzeń nazw wszystkich dostawców poza Gemini. */
+function decisionName(id: string, gemini: boolean): string {
+    const name = id.trim().toLowerCase();
+    return gemini ? normalizeGeminiModelId(name) : name;
+}
+
 /** Metadana katalogu dla DOKŁADNIE tej nazwy modelu (pusta nazwa też się liczy). */
-function metadataFor(models: ModelInfo[] | undefined, name: string): ModelInfo | undefined {
+function metadataFor(models: ModelInfo[] | undefined, name: string, gemini: boolean): ModelInfo | undefined {
     if (!Array.isArray(models)) return undefined;
     return models.find(entry => typeof entry?.id === 'string'
-        && normalizeGeminiModelId(entry.id.trim().toLowerCase()) === name);
+        && decisionName(entry.id, gemini) === name);
 }
 
 /**
  * Czy model obsługuje obraz na wejściu.
  *
  * Bierze CAŁY opis modelu (konsument podaje instancję `ChatModel`, dostawca - goły
- * `{ modelId, models }`), bo o multimodalności decyduje albo nazwa, albo katalog
+ * `{ providerId, modelId, models }`), bo o multimodalności decyduje albo nazwa, albo katalog
  * modeli pobrany z API.
  *
  * @param model Opis modelu (`modelKey`/`modelId` + opcjonalne metadane z `listModels()`).
@@ -89,11 +95,12 @@ function metadataFor(models: ModelInfo[] | undefined, name: string): ModelInfo |
 export function isVisionModel(model: VisionModelLike | null | undefined): boolean {
     if (!model) return false;
 
-    // Ta sama normalizacja co w URL i katalogu Gemini, przed wszystkimi warstwami decyzji.
-    const name = normalizeGeminiModelId(String(model.modelKey ?? model.modelId ?? '').trim().toLowerCase());
+    // Brak dostawcy zachowuje historyczne dopasowanie bez usuwania prefiksu.
+    const gemini = model.providerId === 'gemini';
+    const name = decisionName(String(model.modelKey ?? model.modelId ?? ''), gemini);
 
     // Warstwa 1 — katalog dostawcy mówi wprost.
-    const meta = metadataFor(model.models, name);
+    const meta = metadataFor(model.models, name, gemini);
     if (meta && typeof meta.multimodal === 'boolean') return meta.multimodal;
 
     if (!name) return false;

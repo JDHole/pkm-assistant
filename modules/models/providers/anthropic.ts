@@ -916,7 +916,7 @@ export class AnthropicProvider implements ChatProvider {
                 headers: headersFor(ctx),
             });
             if (response.status !== 200) {
-                ctx.log.debug('models.list_rejected', { provider: 'anthropic', status: response.status });
+                ctx.log.debug('models.list_rejected', 'Model catalog request rejected', { provider: 'anthropic', status: response.status });
                 return [];
             }
             const body = asRecord(response.json());
@@ -924,7 +924,7 @@ export class AnthropicProvider implements ChatProvider {
             return data.map(toModelInfo).filter((model): model is ModelInfo => model !== null);
         } catch (err) {
             // Do logu idzie sam komunikat po normalizacji, nigdy opis żądania z kluczem.
-            ctx.log.debug('models.list_failed', { provider: 'anthropic', message: normalizeError(err).message });
+            ctx.log.debug('models.list_failed', 'Model catalog request failed', { provider: 'anthropic', message: normalizeError(err).message });
             return [];
         }
     }

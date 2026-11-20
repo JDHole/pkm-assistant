@@ -331,7 +331,7 @@ function transkryptDlaOllamy(
         // Ostrzeżenie leci RAZ na turę, nie raz na obraz — inaczej album zdjęć zalałby log.
         if (rozbita.pominietoObraz && !ostrzezonoOObrazie) {
             ostrzezonoOObrazie = true;
-            ctx.log?.warn?.('models.image_stripped', { provider: OLLAMA_INFO.id, model: modelId });
+            ctx.log?.warn?.('models.image_stripped', 'Model does not support images', { provider: OLLAMA_INFO.id, model: modelId });
         }
 
         const przelozona: WiadomoscOllamy = { role: rola, content: rozbita.tekst };

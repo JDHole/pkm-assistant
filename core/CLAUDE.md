@@ -250,7 +250,7 @@ Obiekt błędu potrafi wpaść jako TEKST do pola `message`, a to pole przechodz
 2. **`core/utils/errorUtils.ts`.** Gałąź `JSON.stringify` budująca `message` wycina pola, które z definicji niosą kontekst żądania (`SECRET_BEARING_FIELDS`: `headers`, `source`, `request`, `request_params`, `xhr`, `config`, `options`), radzi sobie z cyklami i tnie wynik do 4000 znaków. Plik ZOSTAJE czysty (zero importów) - filtr jest po nazwie pola, bez maski. ⚠️ `details` celowo zostaje surowym obiektem: to kontrakt adapterów wielu platform, a obiekt i tak idzie do logu przez maskę.
 3. **`core/security/SensitiveDataGuard.ts`.** Trzeci przebieg `ESCAPED_FIELD_RE` łapie tę samą parę `pole: wartość` w JSON-ie zaescapowanym raz albo dwa razy. Świadomie OSOBNY regex, nie rozluźnienie dwóch poprzednich. Przed przebiegiem stoi tani pre-check (`\"` w tekście), więc gorąca ścieżka logu nic nie traci. Maska jest idempotentna (maska maski = maska) także w tej formie.
 
-Do kompletu `core/utils/Logger.ts` przepuszcza przez maskę KAŻDY poziom argumentu: klon `Error` zabiera ze sobą `cause` (ES2022) i pola doklejone przez adaptery (`response`, `data`, `details`) - zamaskowane, zamiast po cichu znikać. Rekurencja ma limit głębokości (`MASK_MAX_DEPTH`), a `.map()` woła maskę przez lambdę: goły `.map(maskLogValue)` podawałby INDEKS tablicy jako głębokość.
+Do kompletu `core/utils/Logger.ts` przepuszcza przez maskę KAŻDY poziom argumentu: klon `Error` zabiera ze sobą `cause` (ES2022) i pola doklejone przez adaptery (`response`, `data`, `details`) - zamaskowane, zamiast po cichu znikać. Kopia danych (`logSnapshot`) ma limit głębokości (`MASK_MAX_DEPTH`) i wykrywa cykle przez `WeakSet`; nie uruchamia cudzych `toJSON` ani `toString`.
 
 **Dokładasz nowe pole niosące transport (klient HTTP, socket, kolejka)?** Dopisz jego nazwę do `SECRET_BEARING_FIELDS` - inaczej pierwszy błąd bez ciała odpowiedzi powtórzy tę samą drogę.
 
@@ -279,6 +279,18 @@ Druga warstwa: `sanitizePath` odrzuca `*` w ścieżce (gotcha #4 wyżej), więc 
 ### 6. `Logger` jest blisko-bezszumny gdy `debugMode=false`
 
 Domyślnie tylko `warn`/`error` lecą do konsoli. Jak chcesz zobaczyć `log.debug()` / `log.tool()` / `log.model()` - włącz `pkmAssistant.debugMode` w settings. To nie bug, to by default silent.
+
+`Logger` toleruje także nie-napis przekazany w runtime jako komunikat lub etykieta:
+`maskLogText` tworzy tekst z bezpiecznej kopii danych, redaguje obrazy, potem sekrety,
+zawsze przed skracaniem. Obiekt zachowuje czytelne pola; cykle, limit głębokości
+oraz nieczytelne wartości/gettery/proxy dostają stały znacznik. Konsola i sink nie
+otrzymują oryginalnego obiektu. `tool`, `model`, `timing` i `group` używają tej samej
+konwersji, a nieprawidłowy czas nie uruchamia konwersji arytmetycznej obiektu.
+Wyjątek konsoli lub sinka jest ignorowany. Sygnatury komunikatów pozostają tekstowe:
+wołający podaje moduł/zdarzenie, napis i dopiero potem dane.
+Testy: `Logger.media.test.ts` (macierz typów, cykle, Error, base64/data-URL, sekrety,
+gettery/hooki/proxy i rzeczywisty flush sinka) oraz
+`modules/models/providerCollision.test.ts` (produkcyjny logger przy wycięciu obrazu).
 
 ### 6a. Sink plikowy Loggera zamyka się przez `log.disposeFileSink()`
 

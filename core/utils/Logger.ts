@@ -27,7 +27,7 @@
  * dopisana wprost do komunikatu w `setDebug()`.
  */
 
-import { redactImageText, imageRedactionReplacer } from './imageRedaction.js';
+import { redactImageText } from './imageRedaction.js';
 import { maskSensitiveData } from '../security/SensitiveDataGuard.js';
 import { t } from '../i18n/index.js';
 import { LogFileSink } from './LogFileSink.js';
@@ -53,62 +53,70 @@ const ICONS = {
     timing:'⏱️',
 };
 
-function maskLogText(value: string): string {
-    return maskSensitiveData(redactImageText(value));
-}
-
-/** Ile poziomów zagnieżdżenia przechodzimy, zanim spłaszczymy do tekstu (anty-cykl). */
+/** Ograniczenie rekurencji bez wywoływania cudzych toString/toJSON. */
 const MASK_MAX_DEPTH = 6;
+const UNREADABLE = '[unreadable log value]';
 
 /**
- * Przez maskę idzie KAŻDY poziom argumentu, także kontekst dopięty do błędu. Bez tego klon
- * `Error` niósłby wyłącznie `name`/`message`/`stack`, więc `cause` (ES2022) i pola doklejane
- * przez adaptery (`response`, `data`, `details`) po prostu ZNIKAŁYBY — sekret nie wyciekałby,
- * ale diagnostyka traciłaby całą treść. Te pola zostają, przepuszczone przez tę samą maskę.
- *
- * `depth` pilnuje, żeby cykliczna struktura nie zapętliła rekurencji — dlatego wszystkie
- * wywołania `.map()` opakowane są w lambdę (goły `.map(maskLogValue)` podawał INDEKS jako
- * głębokość).
- * @param value
- * @param depth
+ * Kopia danych bez wykonywalnych hooków. Cykl i limit zastępujemy stałym tekstem;
+ * błędy getterów/proxy nie przerywają logowania ani nie ujawniają ich treści.
+ * Error zachowuje także nieenumerowalne message/stack/cause.
  */
-function maskLogValue(value: unknown, depth = 0): unknown {
-    if (typeof value === 'string') return maskLogText(value);
-    if (depth >= MASK_MAX_DEPTH) return maskLogText(String(value));
-    if (value instanceof Error) {
-        const clone = new Error(maskLogText(value.message));
-        clone.name = value.name;
-        if (value.stack) clone.stack = maskLogText(value.stack);
-        const source = value as unknown as Record<string, unknown>;
-        const target = clone as unknown as Record<string, unknown>;
-        // `cause` bywa nieprzeliczalne (konstruktor `new Error(msg, { cause })`), więc osobno.
-        if (source.cause !== undefined) target.cause = maskLogValue(source.cause, depth + 1);
-        for (const key of Object.keys(source)) {
-            if (key === 'base64' || key === 'cause' || key === 'name' || key === 'message' || key === 'stack') continue;
-            target[key] = maskLogValue(source[key], depth + 1);
-        }
-        return clone;
-    }
-    if (Array.isArray(value)) return value.map(item => maskLogValue(item, depth + 1));
-    if (value && typeof value === 'object') {
+function logSnapshot(value: unknown, depth = 0, ancestors = new WeakSet<object>()): unknown {
+    try {
+        if (value === null || value === undefined || typeof value === 'string'
+            || typeof value === 'number' || typeof value === 'boolean') return value;
+        if (typeof value === 'bigint' || typeof value === 'symbol') return String(value);
+        if (typeof value === 'function') return '[function]';
+        if (typeof value !== 'object') return UNREADABLE;
+        if (ancestors.has(value)) return '[cycle]';
+        if (depth >= MASK_MAX_DEPTH) return '[depth limit]';
+        ancestors.add(value);
         try {
-            return JSON.parse(maskLogText(JSON.stringify(value, imageRedactionReplacer)));
-        } catch {
-            return maskLogText(_fallbackToString(value));
-        }
-    }
-    return value;
+            if (Array.isArray(value)) {
+                const copy: unknown[] = [];
+                for (let index = 0; index < value.length; index++) {
+                    try { copy.push(logSnapshot(value[index], depth + 1, ancestors)); }
+                    catch { copy.push(UNREADABLE); }
+                }
+                return copy;
+            }
+            const keys = new Set(Object.keys(value));
+            if (value instanceof Error) {
+                for (const key of ['name', 'message', 'stack', 'cause']) keys.add(key);
+            }
+            const copy: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+            for (const key of keys) {
+                if (key === 'base64') continue;
+                try {
+                    copy[key] = logSnapshot((value as Record<string, unknown>)[key], depth + 1, ancestors);
+                } catch { copy[key] = UNREADABLE; }
+            }
+            return copy;
+        } finally { ancestors.delete(value); }
+    } catch { return UNREADABLE; }
 }
 
-/**
- * Woła `String()` na wartości, o której poza tym, że jest obiektem, nic więcej nie wiadomo
- * (JSON.stringify rzucił - cykl). Osobna funkcja: dopiero granica wywołania resetuje
- * zawężenie TS z powrotem do gołego `unknown`, więc to jedyne miejsce, gdzie `String(x)`
- * na niezawężonej wartości jest zamierzone (ten sam wzorzec co `_safeStringify`
- * w `core/utils/errorUtils.ts`).
- */
-function _fallbackToString(value: unknown): string {
-    return String(value);
+/** Jedna droga do tekstu dla komunikatu, etykiet i argumentów tool/model/timing. */
+function maskLogText(value: unknown): string {
+    try {
+        const snapshot = logSnapshot(value);
+        const text = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot) ?? String(snapshot);
+        return maskSensitiveData(redactImageText(text));
+    } catch { return UNREADABLE; }
+}
+
+/** Konsola zachowuje strukturę danych i Error, ale nigdy surowe obiekty wołającego. */
+function maskLogValue(value: unknown): unknown {
+    try {
+        if (value === undefined || value === null) return value;
+        if (typeof value !== 'object') return typeof value === 'number' || typeof value === 'boolean' ? value : maskLogText(value);
+        const masked: unknown = JSON.parse(maskLogText(value));
+        if (value instanceof Error && masked && typeof masked === 'object') {
+            return Object.assign(new Error(), masked);
+        }
+        return masked;
+    } catch { return UNREADABLE; }
 }
 
 class Logger {
@@ -136,7 +144,7 @@ class Logger {
         if (this._fileSink) this._fileSink.setLevel(enabled ? 'debug' : 'info');
         if (enabled) {
             // console.debug (nie .log) — patrz komentarz klasy na górze pliku.
-            console.debug(
+            this._console('debug',
                 `%c[PKM] 🐛 ${t('logger.debug_enabled')}`,
                 'color: #4caf50; font-weight: bold; font-size: 14px'
             );
@@ -206,9 +214,19 @@ class Logger {
      */
     private _toSink(level: LogLevel, module: string, message: string, data?: unknown[]): void {
         const sink = this._fileSink;
-        if (!sink || !sink.accepts(level)) return;
+        if (!sink) return;
         try {
-            sink.write(level, module, maskLogText(String(message ?? '')), (data || []).map(item => maskLogValue(item)));
+            if (!sink.accepts(level)) return;
+            sink.write(level, maskLogText(module), maskLogText(message), (data || []).map(item => maskLogValue(item)));
+        } catch { /* logging must never throw */ }
+    }
+
+    /** Odbiornik logu jest best-effort, podobnie jak sink plikowy. */
+    private _console(level: 'debug' | 'warn' | 'error', ...args: unknown[]): void {
+        try {
+            if (level === 'warn') console.warn(...args);
+            else if (level === 'error') console.error(...args);
+            else console.debug(...args);
         } catch { /* logging must never throw */ }
     }
 
@@ -216,8 +234,8 @@ class Logger {
     debug(module: string, message: string, ...data: unknown[]): void {
         this._toSink('debug', module, message, data);
         if (!this._debug) return;
-        console.debug(
-            `%c${ICONS.debug} [PKM:${module}] ${maskLogText(message)}`,
+        this._console('debug',
+            `%c${ICONS.debug} [PKM:${maskLogText(module)}] ${maskLogText(message)}`,
             COLORS.debug,
             ...data.map(item => maskLogValue(item))
         );
@@ -227,8 +245,8 @@ class Logger {
     info(module: string, message: string, ...data: unknown[]): void {
         this._toSink('info', module, message, data);
         if (!this._debug) return;
-        console.debug(
-            `%c${ICONS.info} [PKM:${module}] ${maskLogText(message)}`,
+        this._console('debug',
+            `%c${ICONS.info} [PKM:${maskLogText(module)}] ${maskLogText(message)}`,
             COLORS.info,
             ...data.map(item => maskLogValue(item))
         );
@@ -237,8 +255,8 @@ class Logger {
     /** Warn - ALWAYS visible */
     warn(module: string, message: string, ...data: unknown[]): void {
         this._toSink('warn', module, message, data);
-        console.warn(
-            `${ICONS.warn} [PKM:${module}] ${maskLogText(message)}`,
+        this._console('warn',
+            `${ICONS.warn} [PKM:${maskLogText(module)}] ${maskLogText(message)}`,
             ...data.map(item => maskLogValue(item))
         );
     }
@@ -246,8 +264,8 @@ class Logger {
     /** Error - ALWAYS visible */
     error(module: string, message: string, ...data: unknown[]): void {
         this._toSink('error', module, message, data);
-        console.error(
-            `${ICONS.error} [PKM:${module}] ${maskLogText(message)}`,
+        this._console('error',
+            `${ICONS.error} [PKM:${maskLogText(module)}] ${maskLogText(message)}`,
             ...data.map(item => maskLogValue(item))
         );
     }
@@ -255,24 +273,24 @@ class Logger {
     /** Tool call log - debug only */
     tool(toolName: string, args: unknown, result: unknown): void {
         if (!this._debug) return;
-        const argStr = maskLogText(typeof args === 'string' ? args : JSON.stringify(args, imageRedactionReplacer, 2));
-        const resultStr = maskLogText(typeof result === 'string' ? result : JSON.stringify(result, imageRedactionReplacer));
+        const argStr = maskLogText(args);
+        const resultStr = maskLogText(result);
         const truncResult = resultStr?.length > 500 ? resultStr.slice(0, 500) + '...' : resultStr;
         // Nagłówek grupy: był `console.groupCollapsed` (poza białą listą walidatora), teraz płaski
         // `console.debug` z tym samym tekstem/stylem — Args/Result i tak lądowały osobnymi liniami.
-        console.debug(
-            `%c${ICONS.tool} [PKM:Tool] ${toolName}`,
+        this._console('debug',
+            `%c${ICONS.tool} [PKM:Tool] ${maskLogText(toolName)}`,
             COLORS.tool
         );
-        console.debug('Args:', argStr);
-        console.debug('Result:', truncResult);
+        this._console('debug', 'Args:', argStr);
+        this._console('debug', 'Result:', truncResult);
     }
 
     /** Model selection log - debug only */
     model(role: string, platform: string, modelId: string): void {
         if (!this._debug) return;
-        console.debug(
-            `%c${ICONS.model} [PKM:Model] ${role} → ${maskSensitiveData(platform)}/${maskSensitiveData(modelId)}`,
+        this._console('debug',
+            `%c${ICONS.model} [PKM:Model] ${maskLogText(role)} → ${maskLogText(platform)}/${maskLogText(modelId)}`,
             COLORS.model
         );
     }
@@ -280,9 +298,9 @@ class Logger {
     /** Timing log - debug only */
     timing(module: string, operation: string, startTime: number): void {
         if (!this._debug) return;
-        const elapsed = Date.now() - startTime;
-        console.debug(
-            `%c${ICONS.timing} [PKM:${module}] ${operation}: ${elapsed}ms`,
+        const elapsed = typeof startTime === 'number' && Number.isFinite(startTime) ? Date.now() - startTime : '[invalid time]';
+        this._console('debug',
+            `%c${ICONS.timing} [PKM:${maskLogText(module)}] ${maskLogText(operation)}: ${elapsed}ms`,
             COLORS.timing
         );
     }
@@ -295,8 +313,8 @@ class Logger {
      */
     group(module: string, label: string): void {
         if (!this._debug) return;
-        console.debug(
-            `%c📂 [PKM:${module}] ${label}`,
+        this._console('debug',
+            `%c📂 [PKM:${maskLogText(module)}] ${maskLogText(label)}`,
             'color: #90a4ae; font-weight: bold'
         );
     }

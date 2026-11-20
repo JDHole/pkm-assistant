@@ -781,6 +781,8 @@ export interface CacheMetadata {
  * przy decyzji o stripie obrazu.
  */
 export interface VisionModelLike {
+    /** Tylko Gemini traktuje `models/` jako prefiks zasobu, nie część id. */
+    providerId?: ProviderId;
     modelKey?: string;
     modelId?: string;
     /** Metadane z `listModels()` - rozstrzygają, gdy nazwa jest nieoczywista. */

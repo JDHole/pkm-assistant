@@ -279,7 +279,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
         if (!messages.some(hasImageBlock)) return messages;
         if (this.acceptsImages(modelId, ctx)) return moveToolImagesToUser(messages);
 
-        ctx.log?.warn?.('models.image_stripped', { provider: this.info.id, model: modelId });
+        ctx.log?.warn?.('models.image_stripped', 'Model does not support images', { provider: this.info.id, model: modelId });
         const placeholder = t('model.image_stripped');
         const stripped = messages.map(message => {
             if (!hasImageBlock(message)) return message;

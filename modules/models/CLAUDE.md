@@ -323,12 +323,18 @@ Klucze modułu: `model.stream_aborted`, `model.image_stripped`.
 
 `isVisionModel` jest jedyną polityką czatu i wszystkich adapterów: jawne
 `multimodal: true/false` dla dokładnej nazwy → nazwa → rodzina/kształt nazwy.
-Przed każdą z tych warstw prefiks `models/` jest usuwany przez
-`normalizeGeminiModelId` (`modelId.ts`), również z id wpisów katalogu. Tej samej
-funkcji używa Gemini w `listModels()` i przy budowie URL. Dlatego
-`models/gemini-2.5-pro` i `gemini-2.5-pro` mają tę samą decyzję w czacie i adapterze;
-jawne `multimodal: false` nadal wygrywa z rozpoznaniem nazwy. Prefiksy dostawców
-OpenRouter i tagi Ollama pozostają częścią id.
+Normalizacja `models/` działa WYŁĄCZNIE dla `providerId: 'gemini'`.
+`VisionModelLike.providerId` jest opcjonalne: czat przekazuje istniejące pole
+`ChatModel.providerId`, a adapter Gemini podaje je do tej samej polityki przez
+`filterImageBlocks`. Brak dostawcy i wszyscy inni dostawcy zachowują dopasowanie
+z 99f75cb (trim + lowercase, bez usuwania prefiksu), więc `x` i `models/x` to różne id.
+Dla Gemini decyzja usuwa jeden prefiks po lowercase, również w katalogu:
+`Models/x` jest aliasem `x`, `models/models/x` zostaje `models/x`, a `models/`
+staje się pustą nazwą. Przy sprzecznych metadanych aliasów wygrywa pierwszy wpis
+katalogu, niezależnie od wybranej formy nazwy. `normalizeGeminiModelId` (`modelId.ts`)
+nadal służy też do budowy URL i `listModels()` Gemini (bez zmiany ich zachowania).
+`models/gemini-2.5-pro` i `gemini-2.5-pro` mają tę samą decyzję w trzech warstwach;
+jawne `multimodal: false` nadal wygrywa z rozpoznaniem nazwy.
 Rodzina `gpt-6` obejmuje również `gpt-6-astra-high`, `gpt-6-sol` i `gpt-6.1-terra`.
 Metryczka platformy `supportsVision` nie przesłania katalogu ani tej polityki.
 
@@ -344,7 +350,10 @@ na trwające `listModels()`. Nie zmieniamy biblioteki modeli ani UI.
 Testy: `ChatModel.vision.test.ts` (odświeżenie, awaria, wysyłka podczas pobierania),
 `capabilities.test.ts`, `providers/gemini.test.ts` i `../chat/chat/chat_streaming.vision.test.ts`
 (prefiks `models/`, katalog true/false/brak, obrazy user/tool, załącznik i Oczko),
-`providers/visionParity.test.ts` (dziewięć adapterów, tool/user, stream/complete),
+`providers/visionParity.test.ts` (dziewięć adapterów, tool/user, stream/complete,
+kolizje id w obu kolejnościach, wielkość liter, podwójny i pusty prefiks),
+`providerCollision.test.ts` (16 regresji recenzenta przez resolver/listModels/czat/wysyłkę
+oraz usuwanie obrazu przez OpenAI-compatible z produkcyjnym Loggerem),
 `providers/toolImages.test.ts` (GPT-6) i `../chat/chat/chat_toolMedia.test.ts`
 (rzeczywista serializacja wyniku view_image przez LM Studio).
 

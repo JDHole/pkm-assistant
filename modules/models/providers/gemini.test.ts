@@ -574,3 +574,24 @@ for (const multimodal of [true, false, undefined]) {
     });
   }
 }
+
+// Pełna specyfikacja odtworzona z buildRequest na c4dee57, nie z obecnej implementacji.
+for (const stream of [false, true]) {
+  for (const multimodal of [true, undefined]) {
+    test(`gemini models/: żądanie user identyczne z c4dee57, stream=${stream}, katalog=${multimodal}`, t => {
+      const spec = geminiProvider.buildRequest({ messages: [{ role: 'user', content: [
+        { type: 'text', text: 'opisz' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+      ] }] }, makeCtx({
+        modelId: 'models/gemini-2.5-pro',
+        models: multimodal === undefined ? undefined : [{ id: 'gemini-2.5-pro', multimodal }],
+      }), stream);
+      t.deepEqual(spec, {
+        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': 'test-key' },
+        body: '{"contents":[{"role":"user","parts":[{"text":"opisz"},{"inline_data":{"mime_type":"image/jpeg","data":"QUJD"}}]}],"generationConfig":{}}',
+      });
+    });
+  }
+}

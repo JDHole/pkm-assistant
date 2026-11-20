@@ -627,7 +627,7 @@ export class GeminiProvider implements ChatProvider {
 
         const body: Json = {
             contents: buildTurns(moveToolImagesToUser(filterImageBlocks(req.messages, {
-                modelId: req.model ?? ctx.modelId, models: ctx.models,
+                providerId: 'gemini', modelId: req.model ?? ctx.modelId, models: ctx.models,
             }))),
             generationConfig,
         };

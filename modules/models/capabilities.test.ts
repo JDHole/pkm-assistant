@@ -87,8 +87,8 @@ for (const [id, expected] of [
 ] as const) {
   test(`models/ zachowuje decyzję po nazwie: ${id}`, t => {
     for (const modelId of [id, `models/${id}`]) {
-      t.is(isVisionModel({ modelId }), expected);
-      t.is(isVisionModel({ modelKey: modelId, modelId: 'inny-model' }), expected);
+      t.is(isVisionModel({ providerId: 'gemini', modelId }), expected);
+      t.is(isVisionModel({ providerId: 'gemini', modelKey: modelId, modelId: 'inny-model' }), expected);
     }
   });
 }
@@ -99,10 +99,17 @@ for (const multimodal of [true, false]) {
       for (const modelId of [id, `models/${id}`]) {
         for (const catalogId of [id, `models/${id}`]) {
           const models = [{ id: 'inny-model', multimodal: !multimodal }, { id: catalogId, multimodal }];
-          t.is(isVisionModel({ modelId, models }), multimodal);
-          t.is(isVisionModel({ modelKey: modelId, models }), multimodal);
+          t.is(isVisionModel({ providerId: 'gemini', modelId, models }), multimodal);
+          t.is(isVisionModel({ providerId: 'gemini', modelKey: modelId, models }), multimodal);
         }
       }
     });
   }
 }
+
+// Bez informacji o dostawcy prefiks jest częścią nazwy, jak w 99f75cb.
+test('brak providerId nie scala modeli x i models/x', t => {
+  t.true(isVisionModel({ modelId: 'models/x', models: [{ id: 'x', multimodal: false }, { id: 'models/x', multimodal: true }] }));
+  t.true(isVisionModel({ modelId: 'models/', models: [{ id: '', multimodal: false }, { id: 'models/', multimodal: true }] }));
+  t.true(isVisionModel({ modelId: 'gpt-4o', models: [{ id: 'models/gpt-4o', multimodal: false }] }));
+});
